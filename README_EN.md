@@ -17,6 +17,7 @@ Current primary transport:
 - channels, messages, and direct conversations
 - contacts management backed by a local backend DB
 - notifications with unread/mention/direct counters
+- different notification sounds for different event types
 - maps, routes, and route-trace tools
 - remote repeater/room-server management through the companion session
 - systemd-friendly launcher for local installation as a service
