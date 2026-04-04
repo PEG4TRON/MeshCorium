@@ -1,10 +1,10 @@
 # Meshcorium
 
-## Project Goal
+## Project Purpose
 
-Meshcorium is a local web client for `MeshCore companion radio`.
+MeshCorium is a self-hosted MeshCore client with a hybrid contact system.
 
-It provides a single local UI for operating a MeshCore node through companion firmware and is intended to run on a Linux host located next to the radio device.
+The project provides a unified interface for working with a MeshCore node through companion firmware and is intended for local deployment on a Linux host located next to the node.
 
 Current primary transport:
 
@@ -21,14 +21,14 @@ Current primary transport:
 - remote repeater/room-server management through the companion session
 - systemd-friendly launcher for local installation as a service
 
-## Architecture At A Glance
+## Architecture In Short
 
 - `meshcorium_web.py` — backend, HTTP API, SSE, session orchestration, local SQLite DBs
 - `meshcorium_client.py` — MeshCore companion transport/protocol layer
 - `web/` — Vue frontend
 - `meshcorium-launcher.sh` — bootstrap, dependency setup, startup, and systemd installation
 
-## What Is Required To Run
+## What Is Needed To Run
 
 The launcher can install missing system dependencies on Debian-like and RHEL-like systems, but it will ask the user for approval first.
 
@@ -42,7 +42,7 @@ Typical packages it installs when needed:
 
 For service installation, a systemd-based system with `systemctl` is also required.
 
-## Quick Run Without Installing A Service
+## Quick Run Without Installing As A Service
 
 From the project root:
 
@@ -59,7 +59,7 @@ What happens:
 5. It prepares frontend dependencies and the frontend build if needed.
 6. It starts `meshcorium_web.py`.
 
-By default, the web UI starts on:
+By default, the web interface starts on:
 
 - `http://0.0.0.0:8080`
 
@@ -90,7 +90,7 @@ What happens:
 ## Useful Notes
 
 - If `web/dist` is already present, the launcher can use the existing frontend build as a fallback.
-- The current release profile is focused on `USB` companion connectivity.
+- The current release profile is focused on `USB` companion-node connectivity.
 - Local runtime data typically lives in:
   - `data/`
   - `logs/`
@@ -106,4 +106,3 @@ Main flags:
 - `--run` — run directly without installing a service
 - `--install` — full installation with a systemd unit
 - `--service-remove` — remove the systemd unit
-
