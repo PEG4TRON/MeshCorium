@@ -1,0 +1,109 @@
+# Meshcorium
+
+## Project Goal
+
+Meshcorium is a local web client for `MeshCore companion radio`.
+
+It provides a single local UI for operating a MeshCore node through companion firmware and is intended to run on a Linux host located next to the radio device.
+
+Current primary transport:
+
+- `USB serial`
+
+## Key Features
+
+- Python backend with a local web UI
+- Vue frontend for the main application surfaces
+- channels, messages, and direct conversations
+- contacts management backed by a local backend DB
+- notifications with unread/mention/direct counters
+- maps, routes, and route-trace tools
+- remote repeater/room-server management through the companion session
+- systemd-friendly launcher for local installation as a service
+
+## Architecture At A Glance
+
+- `meshcorium_web.py` — backend, HTTP API, SSE, session orchestration, local SQLite DBs
+- `meshcorium_client.py` — MeshCore companion transport/protocol layer
+- `web/` — Vue frontend
+- `meshcorium-launcher.sh` — bootstrap, dependency setup, startup, and systemd installation
+
+## What Is Required To Run
+
+The launcher can install missing system dependencies on Debian-like and RHEL-like systems, but it will ask the user for approval first.
+
+Typical packages it installs when needed:
+
+- `python3`
+- `python3-pip`
+- `python3-venv` or `python3-virtualenv`
+- `nodejs`
+- `npm`
+
+For service installation, a systemd-based system with `systemctl` is also required.
+
+## Quick Run Without Installing A Service
+
+From the project root:
+
+```bash
+./meshcorium-launcher.sh --run
+```
+
+What happens:
+
+1. The launcher checks system dependencies.
+2. If something is missing, it offers to install it with the system package manager.
+3. It creates `.venv` if needed.
+4. It installs Python dependencies from `requirements.txt`.
+5. It prepares frontend dependencies and the frontend build if needed.
+6. It starts `meshcorium_web.py`.
+
+By default, the web UI starts on:
+
+- `http://0.0.0.0:8080`
+
+## Install As A systemd Service
+
+From the project root:
+
+```bash
+./meshcorium-launcher.sh --install
+```
+
+What happens:
+
+1. The launcher checks and installs missing system dependencies if required.
+2. It prepares `.venv` plus runtime/frontend dependencies.
+3. It creates the unit:
+   - `/etc/systemd/system/meshcorium.service`
+4. It runs:
+   - `systemctl daemon-reload`
+   - `systemctl enable --now meshcorium.service`
+
+## Remove The systemd Service
+
+```bash
+./meshcorium-launcher.sh --service-remove
+```
+
+## Useful Notes
+
+- If `web/dist` is already present, the launcher can use the existing frontend build as a fallback.
+- The current release profile is focused on `USB` companion connectivity.
+- Local runtime data typically lives in:
+  - `data/`
+  - `logs/`
+
+## Main Launcher Modes
+
+```bash
+./meshcorium-launcher.sh --help
+```
+
+Main flags:
+
+- `--run` — run directly without installing a service
+- `--install` — full installation with a systemd unit
+- `--service-remove` — remove the systemd unit
+
