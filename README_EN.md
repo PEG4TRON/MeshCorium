@@ -107,3 +107,7 @@ Main flags:
 - `--run` — run directly without installing a service
 - `--install` — full installation with a systemd unit
 - `--service-remove` — remove the systemd unit
+
+## Changelog
+
+- [CHANGELOG.md](./CHANGELOG.md)
