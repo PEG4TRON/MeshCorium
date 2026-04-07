@@ -36,6 +36,50 @@ function normalizePort(value) {
   return next && next !== '-' ? next : ''
 }
 
+function normalizeConnectionDescriptor(source = {}, fallback = {}) {
+  const sourceConnection = isPlainObject(source?.connection) ? source.connection : {}
+  const fallbackConnection = isPlainObject(fallback?.connection) ? fallback.connection : {}
+  const transportType = String(
+    sourceConnection.transport_type
+    || source?.transport_type
+    || fallbackConnection.transport_type
+    || fallback?.transport_type
+    || 'serial'
+  ).trim().toLowerCase() || 'serial'
+  const transportId = normalizePort(
+    sourceConnection.transport_id
+    || sourceConnection.port
+    || source?.transport_id
+    || source?.port
+    || fallbackConnection.transport_id
+    || fallbackConnection.port
+    || fallback?.transport_id
+    || fallback?.port
+  )
+  const baudrate = Number(
+    sourceConnection.baudrate
+    || source?.baudrate
+    || fallbackConnection.baudrate
+    || fallback?.baudrate
+    || DEFAULT_BAUDRATE
+  ) || DEFAULT_BAUDRATE
+  const timeout = Number(
+    sourceConnection.timeout
+    || source?.timeout
+    || fallbackConnection.timeout
+    || fallback?.timeout
+    || DEFAULT_TIMEOUT
+  ) || DEFAULT_TIMEOUT
+  return {
+    transport_type: transportType,
+    transport_id: transportId,
+    display_label: String(sourceConnection.display_label || source?.display_label || fallbackConnection.display_label || fallback?.display_label || transportId || '').trim(),
+    port: transportType === 'serial' ? transportId : normalizePort(source?.port || fallback?.port),
+    baudrate,
+    timeout,
+  }
+}
+
 function normalizePublicKeyPrefix(value) {
   return String(value || '').trim().toLowerCase().slice(0, 12)
 }
@@ -154,6 +198,9 @@ export const useSessionStore = defineStore('session', () => {
   const sessionSnapshot = ref({ active: false })
   const connectNotice = ref(null)
 
+  // USB compatibility aliases. New transport-aware calls should use
+  // selectedConnection/configBody(), while existing Vue surfaces still bind
+  // these storage keys until a non-USB transport UI exists.
   const selectedPort = useStorage('selected_port', '')
   const selectedBaudrate = useStorage('selected_baudrate', DEFAULT_BAUDRATE)
 
@@ -392,20 +439,23 @@ export const useSessionStore = defineStore('session', () => {
     const lastSuccessful = lastSuccessfulConfig.value || {}
     const firstSaved = savedConnections.value[0] || {}
     const firstPort = ports.value[0]?.device || ''
+    const startupConnection = normalizeConnectionDescriptor(startup)
+    const lastSuccessfulConnection = normalizeConnectionDescriptor(lastSuccessful)
+    const firstSavedConnection = normalizeConnectionDescriptor(firstSaved)
 
     const nextPort = normalizePort(
       storagePort
-      || startup.port
-      || lastSuccessful.port
-      || firstSaved.port
+      || startupConnection.port
+      || lastSuccessfulConnection.port
+      || firstSavedConnection.port
       || firstPort
     )
     const nextBaudrate = Number(
       storagePort
         ? storageBaudrate
-        : startup.baudrate
-          || lastSuccessful.baudrate
-          || firstSaved.baudrate
+        : startupConnection.baudrate
+          || lastSuccessfulConnection.baudrate
+          || firstSavedConnection.baudrate
           || DEFAULT_BAUDRATE
     ) || DEFAULT_BAUDRATE
 
@@ -499,6 +549,21 @@ export const useSessionStore = defineStore('session', () => {
       }
       if (hasOwnField(patch, 'battery_info')) {
         snapshot.battery_info = preserveShallowObjectRef(snapshot.battery_info, patch?.battery_info || null)
+      }
+      if (hasOwnField(patch, 'connection')) {
+        snapshot.connection = preserveShallowObjectRef(snapshot.connection, normalizeConnectionDescriptor(patch))
+      }
+      if (hasOwnField(patch, 'port')) {
+        snapshot.port = normalizePort(patch?.port)
+      }
+      if (hasOwnField(patch, 'baudrate')) {
+        snapshot.baudrate = Number(patch?.baudrate || DEFAULT_BAUDRATE) || DEFAULT_BAUDRATE
+      }
+      if (hasOwnField(patch, 'transport_type')) {
+        snapshot.transport_type = String(patch?.transport_type || 'serial').trim().toLowerCase() || 'serial'
+      }
+      if (hasOwnField(patch, 'transport_id')) {
+        snapshot.transport_id = normalizePort(patch?.transport_id)
       }
       if (hasOwnField(patch, 'collections_ready')) {
         snapshot.collections_ready = Boolean(patch?.collections_ready)
@@ -615,6 +680,13 @@ export const useSessionStore = defineStore('session', () => {
       battery_info: hasOwnField(data, 'battery_info')
         ? preserveShallowObjectRef(previous?.battery_info, data?.battery_info || null)
         : (previous?.battery_info || null),
+      connection: hasOwnField(data, 'connection')
+        ? preserveShallowObjectRef(previous?.connection, normalizeConnectionDescriptor(data, previous))
+        : (previous?.connection || null),
+      port: hasOwnField(data, 'port') ? normalizePort(data?.port) : normalizePort(previous?.port),
+      baudrate: hasOwnField(data, 'baudrate') ? (Number(data?.baudrate || DEFAULT_BAUDRATE) || DEFAULT_BAUDRATE) : (Number(previous?.baudrate || DEFAULT_BAUDRATE) || DEFAULT_BAUDRATE),
+      transport_type: hasOwnField(data, 'transport_type') ? (String(data?.transport_type || 'serial').trim().toLowerCase() || 'serial') : (previous?.transport_type || 'serial'),
+      transport_id: hasOwnField(data, 'transport_id') ? normalizePort(data?.transport_id) : normalizePort(previous?.transport_id || previous?.port),
       collections_ready: nextCollectionsReady,
       contacts_count: nextContactsCount,
       contact_summary: nextContactSummary,
@@ -645,9 +717,9 @@ export const useSessionStore = defineStore('session', () => {
       }
       if (
         normalizePort(selectedPort.value)
-        && !ports.value.some((entry) => normalizePort(entry?.device) === normalizePort(selectedPort.value))
+        && !ports.value.some((entry) => normalizePort(entry?.transport_id || entry?.device) === normalizePort(selectedPort.value))
       ) {
-        selectedPort.value = normalizePort(ports.value[0]?.device || '')
+        selectedPort.value = normalizePort(ports.value[0]?.transport_id || ports.value[0]?.device || '')
       }
       if (!ports.value.length) {
         setStatus(t('connect.status.noVisiblePorts'), true)
@@ -659,10 +731,15 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   function configBody(extra = {}) {
-    const port = normalizePort(selectedPort.value)
+    const connection = selectedConnection.value
+    const port = normalizePort(connection.port || connection.transport_id)
+    const baudrate = Number(connection.baudrate || DEFAULT_BAUDRATE)
     return {
+      connection,
+      transport_type: connection.transport_type,
+      transport_id: connection.transport_id,
       port,
-      baudrate: Number(selectedBaudrate.value || DEFAULT_BAUDRATE),
+      baudrate,
       timeout: DEFAULT_TIMEOUT,
       ...extra,
     }
@@ -827,9 +904,16 @@ export const useSessionStore = defineStore('session', () => {
   const selfPublicKey = computed(() => String(self.value?.public_key || '').trim())
   const deviceModel = computed(() => String(device.value?.manufacturer_model || '').trim())
   const notificationSoundEnabled = computed(() => Boolean(settingsPayload.value?.settings?.notifications_sound_enabled))
+  const selectedConnection = computed(() => normalizeConnectionDescriptor({
+    transport_type: 'serial',
+    transport_id: selectedPort.value,
+    port: selectedPort.value,
+    baudrate: selectedBaudrate.value,
+    timeout: DEFAULT_TIMEOUT,
+  }))
   const selectedSavedConnection = computed(() => {
     return savedConnections.value.find((item) => (
-      normalizePort(item?.port) === normalizePort(selectedPort.value)
+      normalizeConnectionDescriptor(item).transport_id === selectedConnection.value.transport_id
       && Number(item?.baudrate || 0) === Number(selectedBaudrate.value || DEFAULT_BAUDRATE)
     )) || null
   })
@@ -848,6 +932,7 @@ export const useSessionStore = defineStore('session', () => {
     sessionSnapshot,
     connectNotice,
     transientDisconnectSuppressed,
+    selectedConnection,
     selectedPort,
     selectedBaudrate,
     statusText,

@@ -413,10 +413,10 @@ const nodeCompanionListenerLabel = computed(() => {
 
 const nodeCompanionPortOptions = computed(() => {
   return session.ports.map((entry) => ({
-    value: String(entry?.device || ''),
-    label: String(entry?.device || ''),
+    value: String(entry?.transport_id || entry?.device || ''),
+    label: String(entry?.transport_id || entry?.device || ''),
     meta: String(entry?.description || t('common.unknown')),
-    triggerLabel: `${entry?.device || ''} | ${entry?.description || t('common.unknown')}`,
+    triggerLabel: `${entry?.transport_id || entry?.device || ''} | ${entry?.description || t('common.unknown')}`,
   }))
 })
 
@@ -428,9 +428,9 @@ const nodeCompanionBaudrateOptions = computed(() => {
 })
 
 const nodeCompanionPortLabel = computed(() => {
-  const match = session.ports.find((entry) => String(entry?.device || '') === String(session.selectedPort || ''))
+  const match = session.ports.find((entry) => String(entry?.transport_id || entry?.device || '') === String(session.selectedPort || ''))
   return match
-    ? `${match.device} | ${match.description || t('common.unknown')}`
+    ? `${match.transport_id || match.device} | ${match.description || t('common.unknown')}`
     : t('connect.status.portNotSelected')
 })
 
@@ -727,10 +727,12 @@ const nodeConnectionRenderModel = computed(() => {
       const previewLabel = resolveSavedConnectionPreviewLabel(profile)
       return {
         raw: profile,
-        key: profile.key || `${profile.port}-${profile.baudrate}-${profile.public_key || profile.node_name}`,
+        key: profile.key || `${resolveSavedConnectionPort(profile)}-${resolveSavedConnectionBaudrate(profile)}-${profile.public_key || profile.node_name}`,
         previewUrl: resolveNodePreviewUrl(previewLabel),
         displayName: resolveSavedConnectionDisplayName(profile),
         modelName: resolveSavedConnectionModelName(profile),
+        port: resolveSavedConnectionPort(profile),
+        baudrate: resolveSavedConnectionBaudrate(profile),
       }
     })
   })
@@ -767,7 +769,7 @@ function resolveSavedConnectionDisplayName(profile) {
   if (manufacturerModel) {
     return manufacturerModel
   }
-  return String(profile?.port || '').trim()
+  return resolveSavedConnectionPort(profile)
 }
 
 function resolveSavedConnectionModelName(profile) {
@@ -786,9 +788,17 @@ function resolveSavedConnectionPreviewLabel(profile) {
   return String(
     profile?.manufacturer_model
     || profile?.node_name
-    || profile?.port
+    || resolveSavedConnectionPort(profile)
     || ''
   ).trim()
+}
+
+function resolveSavedConnectionPort(profile) {
+  return String(profile?.connection?.transport_id || profile?.transport_id || profile?.port || '').trim()
+}
+
+function resolveSavedConnectionBaudrate(profile) {
+  return Number(profile?.connection?.baudrate || profile?.baudrate || session.DEFAULT_BAUDRATE) || session.DEFAULT_BAUDRATE
 }
 
 async function updateNodeCompanionClientSettings(patch = {}, successMessage = '') {
@@ -973,8 +983,8 @@ async function logoutNodeCompanionAuthBrowser() {
 }
 
 function selectSavedConnectionStartupProfile(profile) {
-  session.selectedPort = String(profile?.port || '')
-  session.selectedBaudrate = Number(profile?.baudrate || session.DEFAULT_BAUDRATE) || session.DEFAULT_BAUDRATE
+  session.selectedPort = resolveSavedConnectionPort(profile)
+  session.selectedBaudrate = resolveSavedConnectionBaudrate(profile)
   void updateNodeCompanionClientSettings({
     startup_use_last_successful: false,
     startup_connection_key: String(profile?.key || ''),
@@ -3352,8 +3362,8 @@ onBeforeUnmount(() => {
                   </div>
                   <div class="mc-connect-history-bottom">
                     <span>{{ profile.modelName }}</span>
-                    <span>{{ profile.raw.port }}</span>
-                    <span>{{ profile.raw.baudrate }}</span>
+                    <span>{{ profile.port }}</span>
+                    <span>{{ profile.baudrate }}</span>
                   </div>
                 </div>
               </button>

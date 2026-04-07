@@ -51,6 +51,14 @@ if tuple(CONTACT_MODEL_FIELDS) != tuple(CONTACT_MODEL_MIRRORED_FIELDS):
     )
 
 
+def _connection_access_context(session_kwargs: dict, *, connection_access=None, serial_port_access=None):
+    if connection_access is not None:
+        return connection_access(session_kwargs)
+    if serial_port_access is None:
+        raise ValueError("connection_access or serial_port_access is required")
+    return serial_port_access(session_kwargs["port"])
+
+
 @dataclass(slots=True)
 class ContactBackend:
     db_lock: threading.Lock
@@ -844,11 +852,12 @@ class ContactBackend:
         )
         return refreshed_contacts
 
-    def reload_snapshot(self, session_kwargs: dict, *, serial_port_access, client_factory) -> list[dict]:
+    def reload_snapshot(self, session_kwargs: dict, *, client_factory, connection_access=None, serial_port_access=None) -> list[dict]:
         return contact_service.reload_contacts_snapshot(
             session_kwargs,
-            serial_port_access=serial_port_access,
             client_factory=client_factory,
+            connection_access=connection_access,
+            serial_port_access=serial_port_access,
             prepare_contacts_snapshot=self.prepare_snapshot,
             compose_contacts_snapshot=self.compose_snapshot,
         )
@@ -885,10 +894,15 @@ class ContactBackend:
         session_kwargs: dict,
         *,
         since: int | None,
-        serial_port_access,
         client_factory,
+        connection_access=None,
+        serial_port_access=None,
     ) -> dict:
-        with serial_port_access(session_kwargs["port"]):
+        with _connection_access_context(
+            session_kwargs,
+            connection_access=connection_access,
+            serial_port_access=serial_port_access,
+        ):
             with client_factory(
                 port=session_kwargs["port"],
                 baudrate=session_kwargs["baudrate"],
@@ -933,12 +947,21 @@ class ContactBackend:
             **extra_fields,
         }
 
-    def sync_favorites_group(self, session_kwargs: dict, members: list[str], *, serial_port_access, client_factory) -> dict:
+    def sync_favorites_group(
+        self,
+        session_kwargs: dict,
+        members: list[str],
+        *,
+        client_factory,
+        connection_access=None,
+        serial_port_access=None,
+    ) -> dict:
         return contact_service.sync_favorites_group(
             session_kwargs,
             members,
-            serial_port_access=serial_port_access,
             client_factory=client_factory,
+            connection_access=connection_access,
+            serial_port_access=serial_port_access,
             contact_flag_star=self.contact_flag_star,
             prepare_contacts_snapshot=self.prepare_snapshot,
             compose_contacts_snapshot=self.compose_snapshot,
@@ -950,15 +973,17 @@ class ContactBackend:
         *,
         mode: str,
         protect_favorites: bool,
-        serial_port_access,
         client_factory,
+        connection_access=None,
+        serial_port_access=None,
     ) -> dict:
         live_contacts, summary = contact_admin.remove_contacts_and_reload(
             session_kwargs,
             mode=mode,
             protect_favorites=protect_favorites,
-            serial_port_access=serial_port_access,
             client_factory=client_factory,
+            connection_access=connection_access,
+            serial_port_access=serial_port_access,
             is_favorite_contact=self.is_favorite_contact,
             get_contact_message_stats=self.get_contact_message_stats,
             contact_to_dict=self.contact_to_dict,
@@ -999,8 +1024,9 @@ class ContactBackend:
         route_path_len: int | None,
         route_path_hash_len: int | None,
         route_path_hex: str | None,
-        serial_port_access,
         client_factory,
+        connection_access=None,
+        serial_port_access=None,
     ) -> dict:
         target_public_key = str(public_key or "").strip().lower()
         if len(target_public_key) == 64 and self.is_local_self_contact(self.get_cached_contact(target_public_key)):
@@ -1014,8 +1040,9 @@ class ContactBackend:
             route_path_len=route_path_len,
             route_path_hash_len=route_path_hash_len,
             route_path_hex=route_path_hex,
-            serial_port_access=serial_port_access,
             client_factory=client_factory,
+            connection_access=connection_access,
+            serial_port_access=serial_port_access,
             ensure_contact_on_node=self.ensure_contact_on_node,
             touch_cached_contact=lambda target_public_key: self.touch_cached_contact(target_public_key, interaction=True),
             set_cached_contact_route=lambda target_public_key, **kwargs: self.set_cached_contact_route(
@@ -1031,18 +1058,27 @@ class ContactBackend:
             export_contact_uri=contact_service.export_contact_uri,
             reload_contacts_snapshot=lambda next_session_kwargs: self.reload_snapshot(
                 next_session_kwargs,
-                serial_port_access=serial_port_access,
                 client_factory=client_factory,
+                connection_access=connection_access,
+                serial_port_access=serial_port_access,
             ),
             compose_contacts_snapshot=self.compose_snapshot,
             prepare_contacts_snapshot=self.prepare_snapshot,
         )
 
-    def export_self_contact_uri(self, session_kwargs: dict, *, serial_port_access, client_factory) -> str:
+    def export_self_contact_uri(
+        self,
+        session_kwargs: dict,
+        *,
+        client_factory,
+        connection_access=None,
+        serial_port_access=None,
+    ) -> str:
         return contact_service.export_self_contact_uri(
             session_kwargs,
-            serial_port_access=serial_port_access,
             client_factory=client_factory,
+            connection_access=connection_access,
+            serial_port_access=serial_port_access,
         )
 
     def export_self_contact_uri_with_client(self, client) -> str:
@@ -1101,8 +1137,9 @@ class ContactBackend:
         public_key: str,
         text: str,
         sender_timestamp: int,
-        serial_port_access,
         client_factory,
+        connection_access=None,
+        serial_port_access=None,
     ):
         if self.is_local_self_contact(self.get_cached_contact(public_key)):
             raise MeshCoreError("self-contact is frozen and hidden from direct messaging")
@@ -1111,8 +1148,9 @@ class ContactBackend:
             public_key=public_key,
             text=text,
             sender_timestamp=sender_timestamp,
-            serial_port_access=serial_port_access,
             client_factory=client_factory,
+            connection_access=connection_access,
+            serial_port_access=serial_port_access,
             ensure_contact_on_node=lambda client, next_public_key, max_contacts: self.ensure_contact_on_node(
                 client,
                 next_public_key,

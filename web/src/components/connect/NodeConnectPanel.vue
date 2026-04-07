@@ -23,18 +23,18 @@ const baudrateOptions = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 9216
 const brandLogoUrl = '/icons/Meshcorium3.png'
 
 const selectedPortLabel = computed(() => {
-  const match = session.ports.find((entry) => String(entry?.device || '') === String(session.selectedPort || ''))
+  const match = session.ports.find((entry) => String(entry?.transport_id || entry?.device || '') === String(session.selectedPort || ''))
   return match
-    ? `${match.device} | ${match.description || t('common.unknown')}`
+    ? `${match.transport_id || match.device} | ${match.description || t('common.unknown')}`
     : t('connect.status.portNotSelected')
 })
 
 const portOptions = computed(() => {
   return session.ports.map((entry) => ({
-    value: String(entry?.device || ''),
-    label: String(entry?.device || ''),
+    value: String(entry?.transport_id || entry?.device || ''),
+    label: String(entry?.transport_id || entry?.device || ''),
     meta: String(entry?.description || t('common.unknown')),
-    triggerLabel: `${entry?.device || ''} | ${entry?.description || t('common.unknown')}`,
+    triggerLabel: `${entry?.transport_id || entry?.device || ''} | ${entry?.description || t('common.unknown')}`,
   }))
 })
 
@@ -54,7 +54,7 @@ function resolveSavedConnectionDisplayName(profile) {
   if (manufacturerModel) {
     return manufacturerModel
   }
-  return String(profile?.port || '').trim()
+  return resolveSavedConnectionPort(profile)
 }
 
 function resolveSavedConnectionModelName(profile) {
@@ -78,6 +78,10 @@ function resolveSavedConnectionPreviewLabel(profile) {
   ).trim()
 }
 
+function resolveSavedConnectionPort(profile) {
+  return String(profile?.connection?.transport_id || profile?.transport_id || profile?.port || '').trim()
+}
+
 async function connectNode() {
   try {
     const payload = await session.connectNode({ light: true })
@@ -88,8 +92,8 @@ async function connectNode() {
 }
 
 function pickSavedConnection(profile) {
-  session.selectedPort = String(profile?.port || '')
-  session.selectedBaudrate = Number(profile?.baudrate || session.DEFAULT_BAUDRATE) || session.DEFAULT_BAUDRATE
+  session.selectedPort = resolveSavedConnectionPort(profile)
+  session.selectedBaudrate = Number(profile?.connection?.baudrate || profile?.baudrate || session.DEFAULT_BAUDRATE) || session.DEFAULT_BAUDRATE
 }
 </script>
 
@@ -166,7 +170,7 @@ function pickSavedConnection(profile) {
         <div class="mc-connect-history-list">
           <button
             v-for="profile in session.savedConnections"
-            :key="profile.key || `${profile.port}-${profile.baudrate}-${profile.public_key || profile.node_name}`"
+            :key="profile.key || `${resolveSavedConnectionPort(profile)}-${profile.baudrate}-${profile.public_key || profile.node_name}`"
             class="mc-connect-history-card"
             @click="pickSavedConnection(profile)"
           >
@@ -185,8 +189,8 @@ function pickSavedConnection(profile) {
               </div>
               <div class="mc-connect-history-bottom">
                 <span>{{ resolveSavedConnectionModelName(profile) }}</span>
-                <span>{{ profile.port }}</span>
-                <span>{{ profile.baudrate }}</span>
+                <span>{{ resolveSavedConnectionPort(profile) }}</span>
+                <span>{{ profile.connection?.baudrate || profile.baudrate }}</span>
               </div>
             </div>
           </button>

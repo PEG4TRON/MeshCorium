@@ -24,7 +24,6 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlparse
 
-import serial
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
@@ -58,15 +57,6 @@ from meshcorium_client import (
     RESP_CHANNEL_MSG_RECV_V3,
     RESP_CONTACT_MSG_RECV_V3,
     derive_meshcore_channel_secret,
-    discover_ports,
-    fetch_connect_snapshot,
-    fetch_channels,
-    fetch_core_stats,
-    fetch_info,
-    fetch_probe,
-    fetch_battery_info,
-    fetch_self_telemetry,
-    fetch_time,
     format_hex,
     format_latlon,
     ack_codes_match,
@@ -76,12 +66,13 @@ from meshcorium_client import (
     parse_contact_message_v3,
     parse_send_confirmed_push,
     parse_message,
-    send_channel_text,
-    send_advert,
-    set_channel_config,
-    sync_time,
     utc_now_epoch,
 )
+from meshcorium_transport import (
+    DEFAULT_CONNECTION_ROUTER,
+    ConnectionDescriptor,
+)
+from meshcorium_serial_transport import SerialException
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 LOG_DIR = PROJECT_ROOT / "logs"
@@ -116,8 +107,8 @@ READ_DEBUG_LOCK = threading.Lock()
 CONTACT_DEBUG_LOCK = threading.Lock()
 ROUTE_TRACE_DEBUG_LOCK = threading.Lock()
 FRONTEND_DIAGNOSTIC_LOCK = threading.Lock()
-SERIAL_LOCKS: dict[str, threading.Lock] = {}
-SERIAL_LOCKS_GUARD = threading.Lock()
+CONNECTION_LOCKS: dict[str, threading.Lock] = {}
+CONNECTION_RUNTIME_GUARD = threading.Lock()
 LISTENER_STOPS: dict[str, set[threading.Event]] = {}
 EVENT_SUBSCRIBERS: dict[str, set[queue.Queue]] = {}
 EVENT_SUBSCRIBERS_GUARD = threading.Lock()
@@ -424,20 +415,25 @@ def _normalize_self_location_overrides(value: object) -> dict[str, dict[str, flo
 def _normalize_saved_connection(entry: object) -> dict | None:
     if not isinstance(entry, dict):
         return None
-    port = _normalize_port_value(entry.get("port"))
-    if not port:
+    normalized_config = _normalize_connection_config(entry)
+    if normalized_config is None:
         return None
-    baudrate = int(entry.get("baudrate", DEFAULT_BAUDRATE))
-    timeout = float(entry.get("timeout", DEFAULT_TIMEOUT))
-    protocol_version = int(entry.get("protocol_version", DEFAULT_PROTOCOL_VERSION))
-    app_version = int(entry.get("app_version", DEFAULT_APP_VERSION))
-    app_name = str(entry.get("app_name", DEFAULT_APP_NAME))
+    port = str(normalized_config.get("port") or "")
+    baudrate = int(normalized_config.get("baudrate", DEFAULT_BAUDRATE))
+    timeout = float(normalized_config.get("timeout", DEFAULT_TIMEOUT))
+    protocol_version = int(normalized_config.get("protocol_version", DEFAULT_PROTOCOL_VERSION))
+    app_version = int(normalized_config.get("app_version", DEFAULT_APP_VERSION))
+    app_name = str(normalized_config.get("app_name", DEFAULT_APP_NAME))
     node_name = str(entry.get("node_name") or "").strip()
     public_key = str(entry.get("public_key") or "").strip().lower()
     if len(public_key) != 64:
         public_key = ""
     manufacturer_model = str(entry.get("manufacturer_model") or "").strip()
-    connection_type = _normalize_saved_connection_type(entry.get("connection_type") or _infer_saved_connection_type(port))
+    connection_type = _normalize_saved_connection_type(
+        entry.get("connection_type")
+        or normalized_config.get("transport_type")
+        or _infer_saved_connection_type(port)
+    )
     key = str(entry.get("key") or _build_saved_connection_history_key({
         "port": port,
         "baudrate": baudrate,
@@ -456,22 +452,30 @@ def _normalize_saved_connection(entry: object) -> dict | None:
         "manufacturer_model": manufacturer_model,
         "connection_type": connection_type,
         "last_connected_at": last_connected_at,
+        "transport_type": str(normalized_config.get("transport_type") or "serial"),
+        "transport_id": str(normalized_config.get("transport_id") or port),
+        "display_label": str((normalized_config.get("connection") or {}).get("display_label") or entry.get("display_label") or port),
+        "connection": dict(normalized_config.get("connection") or {}),
     }
 
 
 def _normalize_connection_config(config: object) -> dict | None:
     if not isinstance(config, dict):
         return None
-    port = _normalize_port_value(config.get("port"))
-    if not port:
+    try:
+        descriptor = DEFAULT_CONNECTION_ROUTER.from_request(config)
+    except (TypeError, ValueError):
         return None
     return _normalize_session_config(
-        port=port,
-        baudrate=int(config.get("baudrate", DEFAULT_BAUDRATE)),
-        timeout=float(config.get("timeout", DEFAULT_TIMEOUT)),
+        port=descriptor.port,
+        baudrate=descriptor.baudrate,
+        timeout=descriptor.timeout,
         protocol_version=int(config.get("protocol_version", DEFAULT_PROTOCOL_VERSION)),
         app_version=int(config.get("app_version", DEFAULT_APP_VERSION)),
         app_name=str(config.get("app_name", DEFAULT_APP_NAME)),
+        transport_type=descriptor.transport_type,
+        transport_id=descriptor.transport_id,
+        display_label=descriptor.display_label,
     )
 
 
@@ -564,7 +568,12 @@ def _get_client_settings() -> dict:
 
 
 def _build_connection_key(config: dict) -> str:
-    return f'{_normalize_port_value(config.get("port"))}::{int(config.get("baudrate", DEFAULT_BAUDRATE))}'
+    transport_type = str(config.get("transport_type") or (config.get("connection") or {}).get("transport_type") or "serial").strip().lower() or "serial"
+    transport_id = str(config.get("transport_id") or (config.get("connection") or {}).get("transport_id") or config.get("port") or "").strip()
+    baudrate = int(config.get("baudrate") or (config.get("connection") or {}).get("baudrate") or DEFAULT_BAUDRATE)
+    if transport_type == "serial":
+        return f'{_normalize_port_value(transport_id)}::{baudrate}'
+    return f"{transport_type}::{transport_id}::{baudrate}"
 
 
 def _normalize_owner_id(value: object) -> str:
@@ -935,23 +944,23 @@ def _resolve_startup_connection_config(settings: dict) -> dict | None:
     if not normalized["auto_connect_on_service_start"]:
         return None
     try:
-        available_ports = {
-            str((item or {}).get("device") or "").strip()
-            for item in list(discover_ports() or [])
-            if str((item or {}).get("device") or "").strip()
+        available_connection_ids = {
+            str((item or {}).get("transport_id") or (item or {}).get("device") or "").strip()
+            for item in list(DEFAULT_CONNECTION_ROUTER.discover() or [])
+            if str((item or {}).get("transport_id") or (item or {}).get("device") or "").strip()
         }
     except Exception:
-        available_ports = set()
+        available_connection_ids = set()
 
     def _validate_available(config: dict | None) -> dict | None:
         normalized_config = _normalize_connection_config(config)
         if normalized_config is None:
             return None
-        target_port = str(normalized_config.get("port") or "").strip()
-        if available_ports and target_port not in available_ports:
+        target_id = str(normalized_config.get("transport_id") or normalized_config.get("port") or "").strip()
+        if available_connection_ids and target_id not in available_connection_ids:
             logging.info(
-                "startup auto-connect skipped unavailable port=%s baudrate=%s",
-                target_port,
+                "startup auto-connect skipped unavailable connection=%s baudrate=%s",
+                target_id,
                 normalized_config.get("baudrate"),
             )
             return None
@@ -1036,7 +1045,7 @@ def _classify_background_session_exception(exc: Exception, *, queue_drain_active
             "auto_reconnect": True,
             "error_event": False,
         }
-    if isinstance(exc, serial.SerialException):
+    if isinstance(exc, SerialException):
         return {
             "failure_kind": "serial-port-failure",
             "stop_kind": "serial-failure",
@@ -1185,8 +1194,11 @@ def _list_active_sessions() -> list[dict]:
             continue
         items.append(
             {
+                "connection": dict(snapshot.get("connection") or {}),
                 "port": snapshot["port"],
                 "baudrate": snapshot["baudrate"],
+                "transport_type": str(snapshot.get("transport_type") or "serial"),
+                "transport_id": str(snapshot.get("transport_id") or snapshot["port"]),
                 "self_name": str((snapshot.get("self") or {}).get("name") or "").strip(),
                 "queue_drain_in_progress": bool((snapshot.get("queue_state") or {}).get("drain_in_progress")),
                 "queue_drain_requested": bool((snapshot.get("queue_state") or {}).get("drain_requested")),
@@ -1214,8 +1226,11 @@ def _list_recovering_sessions() -> list[dict]:
             continue
         items.append(
             {
+                "connection": dict(snapshot.get("connection") or {}),
                 "port": snapshot["port"],
                 "baudrate": snapshot["baudrate"],
+                "transport_type": str(snapshot.get("transport_type") or "serial"),
+                "transport_id": str(snapshot.get("transport_id") or snapshot["port"]),
                 "self_name": str((snapshot.get("self") or {}).get("name") or "").strip(),
                 "last_failure_kind": str(stop_state.get("last_failure_kind") or ""),
                 "last_reconnect_reason": str(stop_state.get("last_reconnect_reason") or ""),
@@ -1276,8 +1291,11 @@ def _build_client_settings_payload() -> dict:
             {
                 "key": str(entry.get("key") or ""),
                 "label": _format_saved_connection_label(entry),
+                "connection": dict(entry.get("connection") or {}),
                 "port": entry["port"],
                 "baudrate": int(entry["baudrate"]),
+                "transport_type": str(entry.get("transport_type") or "serial"),
+                "transport_id": str(entry.get("transport_id") or entry.get("port") or ""),
                 "node_name": str(entry.get("node_name") or ""),
                 "public_key": str(entry.get("public_key") or ""),
                 "manufacturer_model": str(entry.get("manufacturer_model") or ""),
@@ -2879,18 +2897,18 @@ def get_signal_metrics_chart(
     }
 
 
-def _get_serial_lock(port: str) -> threading.Lock:
-    with SERIAL_LOCKS_GUARD:
-        lock = SERIAL_LOCKS.get(port)
+def _get_connection_lock(descriptor: ConnectionDescriptor) -> threading.Lock:
+    with CONNECTION_RUNTIME_GUARD:
+        lock = CONNECTION_LOCKS.get(descriptor.lock_key)
         if lock is None:
             lock = threading.Lock()
-            SERIAL_LOCKS[port] = lock
+            CONNECTION_LOCKS[descriptor.lock_key] = lock
         return lock
 
 
 @contextmanager
-def _serial_port_access(port: str):
-    lock = _get_serial_lock(port)
+def _connection_access(descriptor: ConnectionDescriptor):
+    lock = _get_connection_lock(descriptor)
     lock.acquire()
     try:
         yield
@@ -2898,14 +2916,32 @@ def _serial_port_access(port: str):
         lock.release()
 
 
+def _connection_descriptor_from_kwargs(kwargs: dict) -> ConnectionDescriptor:
+    return DEFAULT_CONNECTION_ROUTER.from_request(kwargs)
+
+
+@contextmanager
+def _connection_access_from_kwargs(session_kwargs: dict):
+    with _connection_access(_connection_descriptor_from_kwargs(session_kwargs)):
+        yield
+
+
+def _open_meshcore_client(session_kwargs: dict) -> MeshCoreSerialClient:
+    return DEFAULT_CONNECTION_ROUTER.open_client(_connection_descriptor_from_kwargs(session_kwargs))
+
+
+def _router_client_factory(**kwargs) -> MeshCoreSerialClient:
+    return DEFAULT_CONNECTION_ROUTER.open_client(_connection_descriptor_from_kwargs(kwargs))
+
+
 def _register_listener_stop(port: str, stop_event: threading.Event) -> None:
-    with SERIAL_LOCKS_GUARD:
+    with CONNECTION_RUNTIME_GUARD:
         listeners = LISTENER_STOPS.setdefault(port, set())
         listeners.add(stop_event)
 
 
 def _unregister_listener_stop(port: str, stop_event: threading.Event) -> None:
-    with SERIAL_LOCKS_GUARD:
+    with CONNECTION_RUNTIME_GUARD:
         listeners = LISTENER_STOPS.get(port)
         if not listeners:
             return
@@ -2915,7 +2951,7 @@ def _unregister_listener_stop(port: str, stop_event: threading.Event) -> None:
 
 
 def _request_listener_stop(port: str) -> None:
-    with SERIAL_LOCKS_GUARD:
+    with CONNECTION_RUNTIME_GUARD:
         listeners = list(LISTENER_STOPS.get(port, set()))
     for stop_event in listeners:
         stop_event.set()
@@ -3063,10 +3099,12 @@ def _build_session_snapshot(
         _prune_repeater_tracker_locked(session, now_epoch=now_epoch)
         recent_repeaters_count = len(session.repeater_tracker.full_keys) + len(session.repeater_tracker.provisional_tokens)
         snapshot = {
+            "connection": dict(session.config.get("connection") or {}),
             "active": bool(session.active),
             "error": session.error,
             "stop_state": {
                 "port": str(session.config["port"]),
+                "connection": dict(session.config.get("connection") or {}),
                 "intentional": bool(session.intentional_stop),
                 "stop_reason": str(session.stop_reason or ""),
                 "last_stop_kind": str(session.last_stop_kind or ""),
@@ -3106,6 +3144,8 @@ def _build_session_snapshot(
             "port": str(session.config["port"]),
             "baudrate": int(session.config["baudrate"]),
             "timeout": float(session.config["timeout"]),
+            "transport_type": str(session.config.get("transport_type") or "serial"),
+            "transport_id": str(session.config.get("transport_id") or session.config["port"]),
             "protocol_version": int(session.config["protocol_version"]),
             "app_version": int(session.config["app_version"]),
             "app_name": str(session.config["app_name"]),
@@ -3213,7 +3253,7 @@ def _background_should_defer_queue_drain(
 def _background_serial_has_pending_input(client: MeshCoreSerialClient) -> bool:
     try:
         return int(getattr(client.serial, "in_waiting", 0) or 0) > 0
-    except (AttributeError, OSError, ValueError, serial.SerialException):
+    except (AttributeError, OSError, ValueError, SerialException):
         return False
 
 
@@ -3318,7 +3358,7 @@ def _process_background_message_event(
                     port=port,
                     pubkey_prefix=details.pubkey_prefix,
                 )
-            except (MeshCoreError, serial.SerialException, ValueError, sqlite3.Error):
+            except (MeshCoreError, SerialException, ValueError, sqlite3.Error):
                 logging.exception(
                     "background direct-message auto-favorite failed port=%s pubkey_prefix=%s",
                     port,
@@ -3629,7 +3669,7 @@ def _handle_background_frame(
                 min_interval_secs=5.0,
                 reason="push-new-advert",
             )
-        except (MeshCoreError, serial.SerialException, ValueError, sqlite3.Error):
+        except (MeshCoreError, SerialException, ValueError, sqlite3.Error):
             logging.exception("background contacts auto-sync failed port=%s reason=push-new-advert", port)
         _broadcast_event(port, {"event": "push", "code": code, "payload_hex": frame[1:].hex()})
         return
@@ -3849,11 +3889,11 @@ def _merge_core_stats_into_radio_stats(radio_stats: dict | None, core_stats) -> 
 def _get_merged_radio_stats_with_client(client: MeshCoreSerialClient) -> dict | None:
     try:
         radio_stats = _radio_stats_to_dict(client.get_radio_stats())
-    except (MeshCoreError, serial.SerialException, ValueError):
+    except (MeshCoreError, SerialException, ValueError):
         radio_stats = None
     try:
         core_stats = client.get_core_stats()
-    except (MeshCoreError, serial.SerialException, ValueError):
+    except (MeshCoreError, SerialException, ValueError):
         core_stats = None
     return _merge_core_stats_into_radio_stats(radio_stats, core_stats)
 
@@ -3874,11 +3914,11 @@ def _collect_node_snapshot_with_client(
         _record_signal_metrics_sample(radio_stats, owner_id=owner_id)
     try:
         self_telemetry = _self_telemetry_to_dict(client.get_self_telemetry())
-    except (MeshCoreError, serial.SerialException, ValueError):
+    except (MeshCoreError, SerialException, ValueError):
         self_telemetry = None
     try:
         battery_info = _battery_info_to_dict(client.get_battery_info())
-    except (MeshCoreError, serial.SerialException, ValueError):
+    except (MeshCoreError, SerialException, ValueError):
         battery_info = None
     try:
         channels = _channels_to_dict(
@@ -3887,7 +3927,7 @@ def _collect_node_snapshot_with_client(
             owner_id=owner_id,
             access_all=False,
         )
-    except (MeshCoreError, serial.SerialException, ValueError):
+    except (MeshCoreError, SerialException, ValueError):
         channels = []
     return {
         "device": device_dict,
@@ -4937,14 +4977,26 @@ def _normalize_session_config(
     protocol_version: int,
     app_version: int,
     app_name: str,
+    transport_type: str = "serial",
+    transport_id: str = "",
+    display_label: str = "",
 ) -> dict:
+    descriptor = ConnectionDescriptor.from_legacy_serial(
+        port=transport_id or port,
+        baudrate=baudrate,
+        timeout=timeout,
+        display_label=display_label or transport_id or port,
+    )
     return {
-        "port": _normalize_port_value(port),
-        "baudrate": int(baudrate),
-        "timeout": float(timeout),
+        "port": descriptor.port,
+        "baudrate": int(descriptor.baudrate),
+        "timeout": float(descriptor.timeout),
         "protocol_version": int(protocol_version),
         "app_version": int(app_version),
         "app_name": str(app_name),
+        "transport_type": descriptor.transport_type,
+        "transport_id": descriptor.transport_id,
+        "connection": descriptor.to_dict(),
     }
 
 
@@ -4960,7 +5012,7 @@ def _load_channels_in_session(client: MeshCoreSerialClient, max_channels: int, *
     for channel_idx in range(max_channels):
         try:
             channels.append(client.get_channel(channel_idx))
-        except (MeshCoreError, serial.SerialException, ValueError):
+        except (MeshCoreError, SerialException, ValueError):
             continue
     return _channels_to_dict(
         channels,
@@ -4977,10 +5029,23 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
     protocol_version = int(session.config["protocol_version"])
     app_version = int(session.config["app_version"])
     app_name = str(session.config["app_name"])
-    logging.info("background session starting port=%s baudrate=%s", port, baudrate)
+    session_kwargs = {
+        "connection": dict(session.config.get("connection") or {}),
+        "port": port,
+        "baudrate": baudrate,
+        "timeout": timeout,
+        "transport_type": str(session.config.get("transport_type") or "serial"),
+        "transport_id": str(session.config.get("transport_id") or port),
+    }
+    logging.info(
+        "background session starting transport=%s connection=%s baudrate=%s",
+        session_kwargs["transport_type"],
+        session_kwargs["transport_id"],
+        baudrate,
+    )
     try:
-        with _serial_port_access(port):
-            with MeshCoreSerialClient(port=port, baudrate=baudrate, timeout=timeout) as client:
+        with _connection_access_from_kwargs(session_kwargs):
+            with _open_meshcore_client(session_kwargs) as client:
                 device = client.query_device(protocol_version)
                 self_info = client.app_start(app_name, app_version)
                 device_dict = _device_info_to_dict(device)
@@ -5018,11 +5083,11 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                 radio_stats = _get_merged_radio_stats_with_client(client)
                 try:
                     self_telemetry = _self_telemetry_to_dict(client.get_self_telemetry())
-                except (MeshCoreError, serial.SerialException, ValueError):
+                except (MeshCoreError, SerialException, ValueError):
                     self_telemetry = None
                 try:
                     battery_info = _battery_info_to_dict(client.get_battery_info())
-                except (MeshCoreError, serial.SerialException, ValueError):
+                except (MeshCoreError, SerialException, ValueError):
                     battery_info = None
                 try:
                     refreshed_contacts = {"next_since": 0, "live_contacts": [], "contacts": []}
@@ -5037,7 +5102,7 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                         )
                     with _contact_owner_scope(port=port, owner_id=owner_id, access_all=False):
                         refreshed_contacts = CONTACT_BACKEND.build_live_contacts_result(contacts_dict)
-                except (MeshCoreError, serial.SerialException, ValueError):
+                except (MeshCoreError, SerialException, ValueError):
                     logging.exception(
                         "background session initial contacts load failed port=%s baudrate=%s",
                         port,
@@ -5047,7 +5112,7 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                     refreshed_contacts = {"next_since": 0, "live_contacts": [], "contacts": []}
                 try:
                     channels_dict = _load_channels_in_session(client, device.max_channels, owner_id=owner_id)
-                except (MeshCoreError, serial.SerialException, ValueError):
+                except (MeshCoreError, SerialException, ValueError):
                     logging.exception(
                         "background session initial channels load failed port=%s baudrate=%s",
                         port,
@@ -5318,16 +5383,16 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                                 radio_stats = _get_merged_radio_stats_with_client(client)
                                 try:
                                     self_telemetry = _self_telemetry_to_dict(client.get_self_telemetry())
-                                except (MeshCoreError, serial.SerialException, ValueError):
+                                except (MeshCoreError, SerialException, ValueError):
                                     self_telemetry = None
                                 try:
                                     battery_info = _battery_info_to_dict(client.get_battery_info())
-                                except (MeshCoreError, serial.SerialException, ValueError):
+                                except (MeshCoreError, SerialException, ValueError):
                                     battery_info = None
                                 try:
                                     max_channels = int((session.device or {}).get("max_channels") or 0)
                                     channels_dict = _load_channels_in_session(client, max_channels, owner_id=owner_id) if max_channels > 0 else list(session.channels)
-                                except (MeshCoreError, serial.SerialException, ValueError, AttributeError):
+                                except (MeshCoreError, SerialException, ValueError, AttributeError):
                                     channels_dict = list(session.channels)
                                 self_dict = _self_info_to_dict(self_info)
                                 owner_id = _normalize_owner_id(self_dict.get("public_key"))
@@ -5465,7 +5530,7 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                                 current_contacts,
                                 reason="policy-sweep" if over_policy_limit else "expired-sweep",
                             )
-                        except (MeshCoreError, serial.SerialException, sqlite3.Error, ValueError) as exc:
+                        except (MeshCoreError, SerialException, sqlite3.Error, ValueError) as exc:
                             logging.warning(
                                 "background contact sweep failed port=%s baudrate=%s error=%s",
                                 port,
@@ -5511,7 +5576,7 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                             continue
                         raise
                     _handle_background_frame(client, session, port, frame, source="live")
-    except (MeshCoreError, serial.SerialException, sqlite3.Error, ValueError) as exc:
+    except (MeshCoreError, SerialException, sqlite3.Error, ValueError) as exc:
         stop_kind = "intentional-stop"
         stop_reason = str(session.stop_reason or exc)
         classification = {
@@ -5702,6 +5767,9 @@ def _paused_background_session(port: str):
                 protocol_version=int(snapshot.get("protocol_version", DEFAULT_PROTOCOL_VERSION)),
                 app_version=int(snapshot.get("app_version", DEFAULT_APP_VERSION)),
                 app_name=str(snapshot.get("app_name", DEFAULT_APP_NAME)),
+                transport_type=str(snapshot.get("transport_type") or "serial"),
+                transport_id=str(snapshot.get("transport_id") or snapshot["port"]),
+                display_label=str((snapshot.get("connection") or {}).get("display_label") or snapshot["port"]),
             )
             _start_background_session(config)
 
@@ -7673,7 +7741,7 @@ def _run_route_trace_job(job: RouteTraceJob) -> None:
             )
         else:
             with _paused_background_session(job.port):
-                with MeshCoreSerialClient(**job.conn_kwargs) as client:
+                with _open_meshcore_client(job.conn_kwargs) as client:
                     client.query_device(DEFAULT_PROTOCOL_VERSION)
                     client.app_start(DEFAULT_APP_NAME, DEFAULT_APP_VERSION)
                     live_contacts = client.get_contacts()[1]
@@ -28921,12 +28989,8 @@ def _save_channel_and_reload_with_standalone_client(
 
 
 def _save_channel_and_reload(session_kwargs: dict, channel_idx: int | None, channel_name: str, channel_secret_hex: object) -> tuple[dict, list[dict]]:
-    with _serial_port_access(session_kwargs["port"]):
-        with MeshCoreSerialClient(
-            port=session_kwargs["port"],
-            baudrate=session_kwargs["baudrate"],
-            timeout=session_kwargs["timeout"],
-        ) as client:
+    with _connection_access_from_kwargs(session_kwargs):
+        with _open_meshcore_client(session_kwargs) as client:
             return _save_channel_and_reload_with_standalone_client(
                 client,
                 protocol_version=session_kwargs["protocol_version"],
@@ -29068,7 +29132,7 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
             self._send_vendor_file(parsed.path.removeprefix("/vendor/"))
             return
         if parsed.path == "/api/ports":
-            self._send_json({"ports": discover_ports()})
+            self._send_json({"ports": DEFAULT_CONNECTION_ROUTER.discover()})
             return
         if parsed.path == "/api/contact-groups":
             params = parse_qs(parsed.query)
@@ -29203,9 +29267,11 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                     if snapshot["active"] and snapshot["device"]:
                         self._send_json({"device": snapshot["device"], "source": "live-session"})
                         return
-                with _paused_background_session(conn["port"]):
-                    with _serial_port_access(conn["port"]):
-                        device = fetch_probe(**self._conn_kwargs(body))
+                session_kwargs = self._session_kwargs(body)
+                with _paused_background_session(session_kwargs["port"]):
+                    with _connection_access_from_kwargs(session_kwargs):
+                        with _open_meshcore_client(session_kwargs) as client:
+                            device = client.query_device(session_kwargs["protocol_version"])
                 self._send_json({"device": _device_info_to_dict(device)})
                 return
             if parsed.path == "/api/info":
@@ -29225,18 +29291,15 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                             }
                         )
                         return
-                with _paused_background_session(conn["port"]):
-                    with _serial_port_access(conn["port"]):
-                        with MeshCoreSerialClient(
-                            port=conn["port"],
-                            baudrate=int(body.get("baudrate", DEFAULT_BAUDRATE)),
-                            timeout=float(body.get("timeout", DEFAULT_TIMEOUT)),
-                        ) as client:
+                session_kwargs = self._session_kwargs(body)
+                with _paused_background_session(session_kwargs["port"]):
+                    with _connection_access_from_kwargs(session_kwargs):
+                        with _open_meshcore_client(session_kwargs) as client:
                             snapshot = _collect_node_snapshot_with_client(
                                 client,
-                                protocol_version=int(body.get("protocol_version", DEFAULT_PROTOCOL_VERSION)),
-                                app_version=int(body.get("app_version", DEFAULT_APP_VERSION)),
-                                app_name=str(body.get("app_name", DEFAULT_APP_NAME)),
+                                protocol_version=session_kwargs["protocol_version"],
+                                app_version=session_kwargs["app_version"],
+                                app_name=session_kwargs["app_name"],
                             )
                 self._send_json(
                     {
@@ -29261,6 +29324,9 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                         protocol_version=session_kwargs["protocol_version"],
                         app_version=session_kwargs["app_version"],
                         app_name=session_kwargs["app_name"],
+                        transport_type=session_kwargs["transport_type"],
+                        transport_id=session_kwargs["transport_id"],
+                        display_label=str((session_kwargs.get("connection") or {}).get("display_label") or session_kwargs["transport_id"]),
                     )
                 )
                 snapshot = _wait_for_background_session(session)
@@ -29296,6 +29362,11 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                         "radio_stats": response_snapshot["radio_stats"],
                         "self_telemetry": response_snapshot["self_telemetry"],
                         "battery_info": response_snapshot["battery_info"],
+                        "connection": response_snapshot.get("connection") or {},
+                        "port": response_snapshot.get("port"),
+                        "baudrate": response_snapshot.get("baudrate"),
+                        "transport_type": response_snapshot.get("transport_type"),
+                        "transport_id": response_snapshot.get("transport_id"),
                     }
                 )
                 return
@@ -29395,13 +29466,9 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                         self._send_json({"channels": snapshot["channels"]})
                         return
                 session_kwargs = self._session_kwargs(body)
-                with _paused_background_session(conn["port"]):
-                    with _serial_port_access(conn["port"]):
-                        with MeshCoreSerialClient(
-                            port=session_kwargs["port"],
-                            baudrate=session_kwargs["baudrate"],
-                            timeout=session_kwargs["timeout"],
-                        ) as client:
+                with _paused_background_session(session_kwargs["port"]):
+                    with _connection_access_from_kwargs(session_kwargs):
+                        with _open_meshcore_client(session_kwargs) as client:
                             _device_dict, channels_dict = _load_channels_snapshot_with_client(
                                 client,
                                 protocol_version=session_kwargs["protocol_version"],
@@ -29461,9 +29528,13 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                     )
                     epoch = int(response.get("epoch") or 0)
                 else:
-                    with _paused_background_session(conn["port"]):
-                        with _serial_port_access(conn["port"]):
-                            epoch = fetch_time(**self._session_kwargs(body))
+                    session_kwargs = self._session_kwargs(body)
+                    with _paused_background_session(session_kwargs["port"]):
+                        with _connection_access_from_kwargs(session_kwargs):
+                            with _open_meshcore_client(session_kwargs) as client:
+                                client.query_device(session_kwargs["protocol_version"])
+                                client.app_start(session_kwargs["app_name"], session_kwargs["app_version"])
+                                epoch = client.get_device_time()
                 self._send_json(
                     {
                         "epoch": epoch,
@@ -29488,9 +29559,15 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                     after = int(response.get("after") or 0)
                     requested_epoch = int(response.get("requested_epoch") or requested_epoch)
                 else:
-                    with _paused_background_session(conn["port"]):
-                        with _serial_port_access(conn["port"]):
-                            before, after = sync_time(epoch=requested_epoch, **self._session_kwargs(body))
+                    session_kwargs = self._session_kwargs(body)
+                    with _paused_background_session(session_kwargs["port"]):
+                        with _connection_access_from_kwargs(session_kwargs):
+                            with _open_meshcore_client(session_kwargs) as client:
+                                client.query_device(session_kwargs["protocol_version"])
+                                client.app_start(session_kwargs["app_name"], session_kwargs["app_version"])
+                                before = client.get_device_time()
+                                client.set_device_time(requested_epoch)
+                                after = client.get_device_time()
                 self._send_json(
                     {
                         "requested_epoch": requested_epoch,
@@ -29541,8 +29618,8 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                             refreshed = CONTACT_BACKEND.refresh_snapshot(
                                 session_kwargs,
                                 since=body.get("since"),
-                                serial_port_access=_serial_port_access,
-                                client_factory=MeshCoreSerialClient,
+                                client_factory=_router_client_factory,
+                                connection_access=_connection_access_from_kwargs,
                             )
                 contacts_dict = list(refreshed.get("live_contacts") or [])
                 cursor = refreshed.get("next_since")
@@ -29607,8 +29684,8 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                                 session_kwargs,
                                 mode=mode,
                                 protect_favorites=protect_favorites,
-                                serial_port_access=_serial_port_access,
-                                client_factory=MeshCoreSerialClient,
+                                client_factory=_router_client_factory,
+                                connection_access=_connection_access_from_kwargs,
                             )
                 _set_background_session_contacts(conn["port"], result.get("live_contacts"))
                 logging.info(
@@ -29636,13 +29713,16 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                         timeout_secs=12.0,
                     )
                 else:
-                    with _paused_background_session(conn["port"]):
-                        with _serial_port_access(conn["port"]):
-                            send_advert(
-                                name=body.get("advert_name") or None,
-                                flood=bool(body.get("flood", False)),
-                                **self._session_kwargs(body),
-                            )
+                    session_kwargs = self._session_kwargs(body)
+                    with _paused_background_session(session_kwargs["port"]):
+                        with _connection_access_from_kwargs(session_kwargs):
+                            with _open_meshcore_client(session_kwargs) as client:
+                                client.query_device(session_kwargs["protocol_version"])
+                                client.app_start(session_kwargs["app_name"], session_kwargs["app_version"])
+                                advert_name = body.get("advert_name") or None
+                                if advert_name:
+                                    client.set_advert_name(advert_name)
+                                client.send_self_advert(flood=bool(body.get("flood", False)))
                 logging.info("api advert completed port=%s baudrate=%s", conn["port"], conn["baudrate"])
                 self._send_json({"ok": True})
                 return
@@ -29672,13 +29752,9 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                         "battery_info": response.get("battery_info"),
                     })
                     return
-                with _paused_background_session(conn["port"]):
-                    with _serial_port_access(conn["port"]):
-                        with MeshCoreSerialClient(
-                            port=session_kwargs["port"],
-                            baudrate=session_kwargs["baudrate"],
-                            timeout=session_kwargs["timeout"],
-                        ) as client:
+                with _paused_background_session(session_kwargs["port"]):
+                    with _connection_access_from_kwargs(session_kwargs):
+                        with _open_meshcore_client(session_kwargs) as client:
                             client.set_advert_name(new_name)
                             snapshot = _collect_node_snapshot_with_client(
                                 client,
@@ -29773,13 +29849,9 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                         "battery_info": response.get("battery_info"),
                     })
                     return
-                with _paused_background_session(conn["port"]):
-                    with _serial_port_access(conn["port"]):
-                        with MeshCoreSerialClient(
-                            port=session_kwargs["port"],
-                            baudrate=session_kwargs["baudrate"],
-                            timeout=session_kwargs["timeout"],
-                        ) as client:
+                with _paused_background_session(session_kwargs["port"]):
+                    with _connection_access_from_kwargs(session_kwargs):
+                        with _open_meshcore_client(session_kwargs) as client:
                             snapshot = _set_node_location_with_client(
                                 client,
                                 protocol_version=session_kwargs["protocol_version"],
@@ -29990,8 +30062,8 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                         lambda: CONTACT_BACKEND.sync_favorites_group(
                             session_kwargs,
                             list(body.get("members") or []),
-                            serial_port_access=_serial_port_access,
-                            client_factory=MeshCoreSerialClient,
+                            client_factory=_router_client_factory,
+                            connection_access=_connection_access_from_kwargs,
                         ),
                     )
                 self._send_json(result)
@@ -30022,8 +30094,8 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                             action="import",
                             favorite=None,
                             import_uri=str(body.get("uri") or ""),
-                            serial_port_access=_serial_port_access,
-                            client_factory=MeshCoreSerialClient,
+                            client_factory=_router_client_factory,
+                            connection_access=_connection_access_from_kwargs,
                         ),
                     )
                     self._send_json(result)
@@ -30045,8 +30117,8 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                         with _contact_owner_scope(port=conn["port"], access_all=False):
                             uri = CONTACT_BACKEND.export_self_contact_uri(
                                 session_kwargs,
-                                serial_port_access=_serial_port_access,
-                                client_factory=MeshCoreSerialClient,
+                                client_factory=_router_client_factory,
+                                connection_access=_connection_access_from_kwargs,
                             )
                 self._send_json({"ok": True, "uri": uri})
                 return
@@ -30100,8 +30172,8 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                             route_path_len=None if body.get("route_path_len") in (None, "") else int(body.get("route_path_len")),
                             route_path_hash_len=None if body.get("route_path_hash_len") in (None, "") else int(body.get("route_path_hash_len")),
                             route_path_hex=str(body.get("route_path_hex") or ""),
-                            serial_port_access=_serial_port_access,
-                            client_factory=MeshCoreSerialClient,
+                            client_factory=_router_client_factory,
+                            connection_access=_connection_access_from_kwargs,
                         ),
                     )
                     self._send_json(result)
@@ -30155,7 +30227,7 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                     )
                 else:
                     with _paused_background_session(conn["port"]):
-                        with MeshCoreSerialClient(**self._conn_kwargs(body)) as client:
+                        with _open_meshcore_client(self._conn_kwargs(body)) as client:
                             client.query_device(DEFAULT_PROTOCOL_VERSION)
                             client.app_start(DEFAULT_APP_NAME, DEFAULT_APP_VERSION)
                             live_contacts = client.get_contacts()[1]
@@ -30213,14 +30285,17 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                     )
                     sent = response.get("sent")
                 else:
-                    with _paused_background_session(conn["port"]):
-                        with _serial_port_access(conn["port"]):
-                            sent = send_channel_text(
-                                channel_idx=channel_idx,
-                                text=text,
-                                timestamp=sender_timestamp,
-                                **self._session_kwargs(body),
-                            )
+                    session_kwargs = self._session_kwargs(body)
+                    with _paused_background_session(session_kwargs["port"]):
+                        with _connection_access_from_kwargs(session_kwargs):
+                            with _open_meshcore_client(session_kwargs) as client:
+                                client.query_device(session_kwargs["protocol_version"])
+                                client.app_start(session_kwargs["app_name"], session_kwargs["app_version"])
+                                sent = client.send_channel_text_message(
+                                    channel_idx,
+                                    text,
+                                    timestamp=sender_timestamp,
+                                )
                 expected_ack_hex = None
                 if sent is not None:
                     expected_ack = getattr(sent, "expected_ack", b"")
@@ -30288,8 +30363,8 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                                 public_key=public_key,
                                 text=text,
                                 sender_timestamp=sender_timestamp,
-                                serial_port_access=_serial_port_access,
-                                client_factory=MeshCoreSerialClient,
+                                client_factory=_router_client_factory,
+                                connection_access=_connection_access_from_kwargs,
                             )
                         sent = send_result["sent"]
                 _log_delivery_debug(
@@ -30346,13 +30421,9 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                         password_source,
                         remember_auth,
                     )
-                    with _paused_background_session(conn["port"]):
-                        with _serial_port_access(conn["port"]):
-                            with MeshCoreSerialClient(
-                                port=session_kwargs["port"],
-                                baudrate=session_kwargs["baudrate"],
-                                timeout=session_kwargs["timeout"],
-                            ) as client:
+                    with _paused_background_session(session_kwargs["port"]):
+                        with _connection_access_from_kwargs(session_kwargs):
+                            with _open_meshcore_client(session_kwargs) as client:
                                 device = client.query_device(session_kwargs["protocol_version"])
                                 client.app_start(session_kwargs["app_name"], session_kwargs["app_version"])
                                 login_payload, _current_contacts, materialized_on_node = _login_to_repeater_with_client(
@@ -30387,13 +30458,9 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                         len(commands),
                         password_source,
                     )
-                    with _paused_background_session(conn["port"]):
-                        with _serial_port_access(conn["port"]):
-                            with MeshCoreSerialClient(
-                                port=session_kwargs["port"],
-                                baudrate=session_kwargs["baudrate"],
-                                timeout=session_kwargs["timeout"],
-                            ) as client:
+                    with _paused_background_session(session_kwargs["port"]):
+                        with _connection_access_from_kwargs(session_kwargs):
+                            with _open_meshcore_client(session_kwargs) as client:
                                 device = client.query_device(session_kwargs["protocol_version"])
                                 client.app_start(session_kwargs["app_name"], session_kwargs["app_version"])
                                 result = _run_repeater_cli_batch_with_client(
@@ -30427,7 +30494,7 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                         "contact": CONTACT_BACKEND.get_cached_contact(public_key),
                     })
                 return
-        except (MeshCoreError, serial.SerialException, sqlite3.Error, ValueError) as exc:
+        except (MeshCoreError, SerialException, sqlite3.Error, ValueError) as exc:
             conn = self._session_log_fields(locals().get("body"))
             logging.exception(
                 "api request failed path=%s port=%s baudrate=%s error=%s",
@@ -30444,13 +30511,14 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
         return
 
     def _conn_kwargs(self, body: dict) -> dict:
-        port = _normalize_port_value(body.get("port"))
-        if not port:
-            raise ValueError("port is required")
+        descriptor = DEFAULT_CONNECTION_ROUTER.from_request(body)
         return {
-            "port": port,
-            "baudrate": int(body.get("baudrate", DEFAULT_BAUDRATE)),
-            "timeout": float(body.get("timeout", DEFAULT_TIMEOUT)),
+            "connection": descriptor.to_dict(),
+            "port": descriptor.port,
+            "baudrate": int(descriptor.baudrate),
+            "timeout": float(descriptor.timeout),
+            "transport_type": descriptor.transport_type,
+            "transport_id": descriptor.transport_id,
             "protocol_version": int(body.get("protocol_version", DEFAULT_PROTOCOL_VERSION)),
         }
 
@@ -30462,10 +30530,17 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
 
     def _session_log_fields(self, body: dict | None) -> dict[str, str]:
         if not isinstance(body, dict):
-            return {"port": "-", "baudrate": "-"}
-        port = _normalize_port_value(body.get("port")) or "-"
-        baudrate = str(body.get("baudrate") or DEFAULT_BAUDRATE)
-        return {"port": port, "baudrate": baudrate}
+            return {"port": "-", "baudrate": "-", "transport_type": "-", "transport_id": "-"}
+        try:
+            descriptor = DEFAULT_CONNECTION_ROUTER.from_request(body)
+        except (TypeError, ValueError):
+            return {"port": "-", "baudrate": "-", "transport_type": "-", "transport_id": "-"}
+        return {
+            "port": descriptor.port,
+            "baudrate": str(descriptor.baudrate),
+            "transport_type": descriptor.transport_type,
+            "transport_id": descriptor.transport_id,
+        }
 
     def _read_json(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))

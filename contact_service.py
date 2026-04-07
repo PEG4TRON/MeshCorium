@@ -18,6 +18,14 @@ CONTACT_FLAG_STAR = 0x01
 BASE_NODE_NON_FAVORITE_CONTACT_LIMIT = 50
 
 
+def _connection_access_context(session_kwargs: dict, *, connection_access=None, serial_port_access=None):
+    if connection_access is not None:
+        return connection_access(session_kwargs)
+    if serial_port_access is None:
+        raise ValueError("connection_access or serial_port_access is required")
+    return serial_port_access(session_kwargs["port"])
+
+
 def favorite_contact_count(live_contacts: list[dict] | None = None) -> int:
     return sum(
         1
@@ -242,10 +250,11 @@ def export_contact_uri(advert_packet: bytes) -> str:
 def export_self_contact_uri(
     session_kwargs: dict,
     *,
-    serial_port_access,
     client_factory,
+    connection_access=None,
+    serial_port_access=None,
 ) -> str:
-    with serial_port_access(session_kwargs["port"]):
+    with _connection_access_context(session_kwargs, connection_access=connection_access, serial_port_access=serial_port_access):
         with client_factory(
             port=session_kwargs["port"],
             baudrate=session_kwargs["baudrate"],
@@ -482,13 +491,14 @@ def send_contact_text(
     public_key: str,
     text: str,
     sender_timestamp: int,
-    serial_port_access,
     client_factory,
+    connection_access=None,
+    serial_port_access=None,
     ensure_contact_on_node,
     touch_cached_contact,
 ):
     target_public_key = str(public_key or "").strip().lower()
-    with serial_port_access(session_kwargs["port"]):
+    with _connection_access_context(session_kwargs, connection_access=connection_access, serial_port_access=serial_port_access):
         with client_factory(
             port=session_kwargs["port"],
             baudrate=session_kwargs["baudrate"],
@@ -551,12 +561,13 @@ def send_contact_text_with_client(
 def reload_contacts_snapshot(
     session_kwargs: dict,
     *,
-    serial_port_access,
     client_factory,
+    connection_access=None,
+    serial_port_access=None,
     prepare_contacts_snapshot,
     compose_contacts_snapshot,
 ) -> list[dict]:
-    with serial_port_access(session_kwargs["port"]):
+    with _connection_access_context(session_kwargs, connection_access=connection_access, serial_port_access=serial_port_access):
         with client_factory(
             port=session_kwargs["port"],
             baudrate=session_kwargs["baudrate"],
@@ -607,8 +618,9 @@ def sync_favorites_group(
     session_kwargs: dict,
     members: list[str],
     *,
-    serial_port_access,
     client_factory,
+    connection_access=None,
+    serial_port_access=None,
     contact_flag_star: int,
     prepare_contacts_snapshot,
     compose_contacts_snapshot,
@@ -618,7 +630,7 @@ def sync_favorites_group(
         for public_key in (members or [])
         if len(str(public_key or "").strip()) == 64
     }
-    with serial_port_access(session_kwargs["port"]):
+    with _connection_access_context(session_kwargs, connection_access=connection_access, serial_port_access=serial_port_access):
         with client_factory(
             port=session_kwargs["port"],
             baudrate=session_kwargs["baudrate"],
@@ -651,8 +663,9 @@ def perform_contact_action(
     route_path_len: int | None,
     route_path_hash_len: int | None,
     route_path_hex: str | None,
-    serial_port_access,
     client_factory,
+    connection_access=None,
+    serial_port_access=None,
     ensure_contact_on_node,
     touch_cached_contact,
     set_cached_contact_route,
@@ -666,7 +679,7 @@ def perform_contact_action(
     compose_contacts_snapshot,
     prepare_contacts_snapshot,
 ) -> dict:
-    with serial_port_access(session_kwargs["port"]):
+    with _connection_access_context(session_kwargs, connection_access=connection_access, serial_port_access=serial_port_access):
         with client_factory(
             port=session_kwargs["port"],
             baudrate=session_kwargs["baudrate"],

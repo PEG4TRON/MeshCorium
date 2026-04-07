@@ -6,13 +6,22 @@ from contact_service import effective_node_contact_limit
 from contact_store import ADVERT_TYPE_REPEATER
 
 
+def _connection_access_context(session_kwargs: dict, *, connection_access=None, serial_port_access=None):
+    if connection_access is not None:
+        return connection_access(session_kwargs)
+    if serial_port_access is None:
+        raise ValueError("connection_access or serial_port_access is required")
+    return serial_port_access(session_kwargs["port"])
+
+
 def remove_contacts_and_reload(
     session_kwargs: dict,
     *,
     mode: str,
     protect_favorites: bool,
-    serial_port_access,
     client_factory,
+    connection_access=None,
+    serial_port_access=None,
     is_favorite_contact,
     get_contact_message_stats,
     contact_to_dict,
@@ -76,7 +85,7 @@ def remove_contacts_and_reload(
             try:
                 if attempt["sleep_secs"] > 0:
                     time.sleep(float(attempt["sleep_secs"]))
-                with serial_port_access(session_kwargs["port"]):
+                with _connection_access_context(session_kwargs, connection_access=connection_access, serial_port_access=serial_port_access):
                     with client_factory(
                         port=session_kwargs["port"],
                         baudrate=session_kwargs["baudrate"],
@@ -91,7 +100,7 @@ def remove_contacts_and_reload(
             raise last_error
         raise RuntimeError("bulk-remove reload failed without a captured exception")
 
-    with serial_port_access(session_kwargs["port"]):
+    with _connection_access_context(session_kwargs, connection_access=connection_access, serial_port_access=serial_port_access):
         with client_factory(
             port=session_kwargs["port"],
             baudrate=session_kwargs["baudrate"],

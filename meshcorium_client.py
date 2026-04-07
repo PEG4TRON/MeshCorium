@@ -13,12 +13,12 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Iterable
 
-import serial
-from serial.tools import list_ports
-
-
-USB_INBOUND_PREFIX = b"<"
-USB_OUTBOUND_PREFIX = b">"
+from meshcorium_serial_transport import (
+    SerialException,
+    SerialPortTransport,
+    UsbSerialFrameTransport,
+    discover_serial_ports,
+)
 
 DEFAULT_BAUDRATE = 115200
 DEFAULT_TIMEOUT = 4.0
@@ -390,41 +390,9 @@ class QueueDrainResult:
     hit_message_limit: bool
 
 
-class _SerialFrameReader:
-    def __init__(self, serial_port):
-        self.serial = serial_port
+class _PendingPushFrameBuffer:
+    def __init__(self):
         self._pending_push_frames: deque[bytes] = deque()
-
-    def read_exact(self, size: int) -> bytes:
-        data = self.serial.read(size)
-        if len(data) != size:
-            raise MeshCoreError(f"serial timeout while reading {size} bytes, got {len(data)}")
-        return data
-
-    def read_prefixed_byte(self, expected_prefix: bytes, *, max_discard: int = 256) -> bytes:
-        discarded = bytearray()
-        while True:
-            prefix = self.serial.read(1)
-            if len(prefix) != 1:
-                if discarded:
-                    preview = discarded[:16].hex().upper()
-                    raise MeshCoreError(
-                        f"serial timeout while resyncing frame prefix after discarding {len(discarded)} bytes ({preview})"
-                    )
-                raise MeshCoreError("serial timeout while reading 1 bytes, got 0")
-            if prefix == expected_prefix:
-                return prefix
-            discarded.extend(prefix)
-            if len(discarded) >= max_discard:
-                preview = bytes(discarded[:16]).hex().upper()
-                raise MeshCoreError(
-                    f"serial lost framing after discarding {len(discarded)} bytes while waiting for {expected_prefix!r} ({preview})"
-                )
-
-    def read_wire_frame(self) -> bytes:
-        self.read_prefixed_byte(USB_OUTBOUND_PREFIX)
-        length = struct.unpack("<H", self.read_exact(2))[0]
-        return self.read_exact(length)
 
     def pending_push_count(self) -> int:
         return len(self._pending_push_frames)
@@ -549,13 +517,13 @@ class _ReaderOwnedFrameHub:
         self,
         *,
         port: str,
-        serial_port,
-        frame_reader: _SerialFrameReader,
+        frame_transport,
+        push_buffer: _PendingPushFrameBuffer,
         response_wait_registry: _ResponseWaitRegistry,
     ):
         self.port = port
-        self.serial = serial_port
-        self._frame_reader = frame_reader
+        self._frame_transport = frame_transport
+        self._push_buffer = push_buffer
         self._response_wait_registry = response_wait_registry
         self._condition = threading.Condition()
         self._reader_thread: threading.Thread | None = None
@@ -581,13 +549,13 @@ class _ReaderOwnedFrameHub:
                 self._reader_error = MeshCoreError("serial client closed")
             thread = self._reader_thread
             self._condition.notify_all()
-        cancel_read = getattr(self.serial, "cancel_read", None)
+        cancel_read = getattr(self._frame_transport, "cancel_read", None)
         if callable(cancel_read):
             try:
                 cancel_read()
             except Exception:
                 pass
-        self.serial.close()
+        self._frame_transport.close()
         if thread is not None and thread.is_alive():
             thread.join(timeout=0.25)
 
@@ -631,7 +599,7 @@ class _ReaderOwnedFrameHub:
                     self._condition.notify_all()
                     return
             try:
-                frame = self._frame_reader.read_wire_frame()
+                frame = self._frame_transport.read_frame()
             except Exception as exc:
                 with self._condition:
                     self._reader_error = exc
@@ -644,7 +612,7 @@ class _ReaderOwnedFrameHub:
                     if int(self._typed_push_waiters.get(code, 0)) > 0:
                         self._typed_push_frames.setdefault(code, deque()).append(frame)
                     else:
-                        self._frame_reader.push_pending_frame(frame)
+                        self._push_buffer.push_pending_frame(frame)
                 else:
                     matched_waiter = self._response_wait_registry.dispatch(frame)
                     if matched_waiter is None:
@@ -766,7 +734,7 @@ class _ReaderOwnedFrameHub:
             normalized_code = int(push_code)
             frame = self._pop_matching_typed_push_by_code_locked(normalized_code, predicate)
             if frame is None:
-                frame = self._frame_reader.pop_matching_pending_push_frame(predicate)
+                frame = self._push_buffer.pop_matching_pending_push_frame(predicate)
             if frame is not None:
                 return frame
             self._typed_push_waiter_enter_locked(normalized_code)
@@ -775,7 +743,7 @@ class _ReaderOwnedFrameHub:
                 while True:
                     frame = self._pop_matching_typed_push_by_code_locked(normalized_code, predicate)
                     if frame is None:
-                        frame = self._frame_reader.pop_matching_pending_push_frame(predicate)
+                        frame = self._push_buffer.pop_matching_pending_push_frame(predicate)
                     if frame is not None:
                         return frame
                     self._wait_for_reader_activity_locked(deadline_monotonic, empty_error=empty_error)
@@ -833,7 +801,7 @@ class _ReaderOwnedFrameHub:
                 if frame is not None:
                     break
             if frame is None:
-                frame = self._frame_reader.pop_matching_pending_push_frame(_matches_push)
+                frame = self._push_buffer.pop_matching_pending_push_frame(_matches_push)
             if frame is not None:
                 return frame
             response_frame = self._pop_matching_unclaimed_response_locked(_matches_response)
@@ -850,7 +818,7 @@ class _ReaderOwnedFrameHub:
                         if frame is not None:
                             break
                     if frame is None:
-                        frame = self._frame_reader.pop_matching_pending_push_frame(_matches_push)
+                        frame = self._push_buffer.pop_matching_pending_push_frame(_matches_push)
                     if frame is not None:
                         return frame
                     response_frame = self._pop_matching_unclaimed_response_locked(_matches_response)
@@ -876,7 +844,7 @@ class _ReaderOwnedFrameHub:
         empty_error: str = "empty frame",
     ) -> bytes:
         with self._condition:
-            frame = self._frame_reader.pop_next_pending_push_frame()
+            frame = self._push_buffer.pop_next_pending_push_frame()
             if frame is not None:
                 return frame
             if self._unclaimed_response_frames:
@@ -885,7 +853,7 @@ class _ReaderOwnedFrameHub:
             self._ensure_reader_loop_locked()
             try:
                 while True:
-                    frame = self._frame_reader.pop_next_pending_push_frame()
+                    frame = self._push_buffer.pop_next_pending_push_frame()
                     if frame is not None:
                         return frame
                     if self._unclaimed_response_frames:
@@ -1324,22 +1292,25 @@ def parse_channel_message_v3(payload: bytes) -> ChannelMessageV3Info:
     )
 
 
-class MeshCoreSerialClient:
+class MeshCoreClient:
     def __init__(
         self,
         port: str,
         baudrate: int = DEFAULT_BAUDRATE,
         timeout: float = DEFAULT_TIMEOUT,
         open_settle: float = DEFAULT_OPEN_SETTLE,
+        transport=None,
+        frame_transport=None,
     ):
         self.port = port
-        self.serial = serial.Serial(port=port, baudrate=baudrate, timeout=timeout)
-        self._frame_reader = _SerialFrameReader(self.serial)
+        self.serial = transport or SerialPortTransport(port=port, baudrate=baudrate, timeout=timeout)
+        self._frame_transport = frame_transport or UsbSerialFrameTransport(self.serial, frame_error=MeshCoreError)
+        self._push_buffer = _PendingPushFrameBuffer()
         self._response_wait_registry = _ResponseWaitRegistry()
         self._frame_hub = _ReaderOwnedFrameHub(
             port=port,
-            serial_port=self.serial,
-            frame_reader=self._frame_reader,
+            frame_transport=self._frame_transport,
+            push_buffer=self._push_buffer,
             response_wait_registry=self._response_wait_registry,
         )
         if open_settle > 0:
@@ -1350,7 +1321,7 @@ class MeshCoreSerialClient:
     def close(self) -> None:
         self._frame_hub.close()
 
-    def __enter__(self) -> MeshCoreSerialClient:
+    def __enter__(self) -> MeshCoreClient:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
@@ -1365,7 +1336,7 @@ class MeshCoreSerialClient:
         try:
             self.serial.timeout = max(0.0, float(timeout))
             return True
-        except (AttributeError, OSError, ValueError, serial.SerialException):
+        except (AttributeError, OSError, ValueError, SerialException):
             if suppress_errors:
                 return False
             raise
@@ -1384,9 +1355,7 @@ class MeshCoreSerialClient:
 
     def send_frame(self, payload: bytes) -> None:
         self._frame_hub.ensure_send_allowed()
-        header = USB_INBOUND_PREFIX + struct.pack("<H", len(payload))
-        self.serial.write(header + payload)
-        self.serial.flush()
+        self._frame_transport.write_frame(payload)
 
     def send_command(self, payload: bytes) -> None:
         self.send_frame(payload)
@@ -1434,10 +1403,10 @@ class MeshCoreSerialClient:
         return max(2.0, min(serial_timeout * 4.0, 30.0))
 
     def read_exact(self, size: int) -> bytes:
-        return self._frame_reader.read_exact(size)
+        return self._frame_transport.read_exact(size)
 
     def read_frame(self) -> bytes:
-        return self._frame_reader.read_wire_frame()
+        return self._frame_transport.read_frame()
 
     def read_response_frame(self) -> bytes:
         return self.await_response_frame()
@@ -1471,10 +1440,10 @@ class MeshCoreSerialClient:
         )
 
     def pending_push_count(self) -> int:
-        return self._frame_reader.pending_push_count()
+        return self._push_buffer.pending_push_count()
 
     def pop_pending_push_frames(self, max_frames: int | None = None) -> list[bytes]:
-        return self._frame_reader.pop_pending_push_frames(max_frames)
+        return self._push_buffer.pop_pending_push_frames(max_frames)
 
     def response_waiter_count(self) -> int:
         return self._frame_hub.response_waiter_count()
@@ -1779,7 +1748,7 @@ class MeshCoreSerialClient:
         if response_grace_secs > 0:
             try:
                 response_frame = _await_trace_probe_frame(time.monotonic() + max(0.0, float(response_grace_secs)))
-            except (MeshCoreError, serial.SerialException):
+            except (MeshCoreError, SerialException):
                 response_frame = None
             if response_frame is not None:
                 if response_frame[0] == RESP_ERR:
@@ -1812,7 +1781,7 @@ class MeshCoreSerialClient:
                 empty_error="empty frame while waiting for ack",
             )
             return True
-        except (MeshCoreError, serial.SerialException):
+        except (MeshCoreError, SerialException):
             return False
 
     def wait_for_trace_data(
@@ -1840,7 +1809,7 @@ class MeshCoreSerialClient:
                     empty_error=empty_error,
                 )
                 return parse_trace_data_push(frame)
-            except serial.SerialException:
+            except SerialException:
                 return None
             except MeshCoreError as exc:
                 if cancel_event is not None and cancel_event.is_set():
@@ -1866,7 +1835,7 @@ class MeshCoreSerialClient:
                 empty_error="empty frame while waiting for status response",
             )
             return True
-        except (MeshCoreError, serial.SerialException):
+        except (MeshCoreError, SerialException):
             return False
 
     def send_self_advert(self, flood: bool = False) -> None:
@@ -2198,34 +2167,11 @@ class MeshCoreSerialClient:
         )
 
 
+MeshCoreSerialClient = MeshCoreClient
+
+
 def discover_ports() -> list[dict[str, str]]:
-    result = []
-    for port in list_ports.comports():
-        device = port.device or ""
-        description = port.description or ""
-        hwid = port.hwid or ""
-        manufacturer = port.manufacturer or ""
-        product = port.product or ""
-        usb_info = " ".join([device, description, hwid, manufacturer, product]).lower()
-        if not (
-            "usb" in usb_info
-            or "vid:pid" in usb_info
-            or device.startswith("/dev/ttyUSB")
-            or device.startswith("/dev/ttyACM")
-            or device.startswith("/dev/cu.usb")
-            or device.startswith("COM")
-        ):
-            continue
-        result.append(
-            {
-                "device": device,
-                "description": description,
-                "hwid": hwid,
-                "manufacturer": manufacturer,
-                "product": product,
-            }
-        )
-    return result
+    return discover_serial_ports()
 
 
 def auto_pick_port() -> str:
@@ -2239,9 +2185,9 @@ def auto_pick_port() -> str:
     return ports[0]["device"]
 
 
-def open_client(args: argparse.Namespace) -> MeshCoreSerialClient:
+def open_client(args: argparse.Namespace) -> MeshCoreClient:
     port = args.port or auto_pick_port()
-    return MeshCoreSerialClient(port=port, baudrate=args.baudrate, timeout=args.timeout)
+    return MeshCoreClient(port=port, baudrate=args.baudrate, timeout=args.timeout)
 
 
 def print_device_info(device_info: DeviceInfo) -> None:
@@ -2688,7 +2634,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     args = parser.parse_args(list(argv) if argv is not None else None)
     try:
         return args.func(args)
-    except serial.SerialException as exc:
+    except SerialException as exc:
         print(f"Serial error: {exc}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
