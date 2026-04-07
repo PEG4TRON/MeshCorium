@@ -224,7 +224,11 @@ collect_missing_system_packages() {
             needs_venv_support=1
             SYSTEM_REQUIREMENTS+=("python venv support")
         fi
-        if ! "${PYTHON_BIN}" -m pip --version >/dev/null 2>&1; then
+        if [[ -x "${VENV_DIR}/bin/python" ]] && "${VENV_DIR}/bin/python" -m pip --version >/dev/null 2>&1; then
+            needs_python_pip=0
+        elif [[ -x "${VENV_DIR}/bin/python3" ]] && "${VENV_DIR}/bin/python3" -m pip --version >/dev/null 2>&1; then
+            needs_python_pip=0
+        elif ! "${PYTHON_BIN}" -m pip --version >/dev/null 2>&1; then
             needs_python_pip=1
             SYSTEM_REQUIREMENTS+=("python pip")
         fi
