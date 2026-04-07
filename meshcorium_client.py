@@ -537,7 +537,10 @@ class _ReaderOwnedFrameHub:
 
     @staticmethod
     def _is_transient_read_timeout(exc: Exception | None) -> bool:
-        return isinstance(exc, MeshCoreError) and str(exc) == "serial timeout while reading 1 bytes, got 0"
+        return isinstance(exc, MeshCoreError) and str(exc) in {
+            "serial timeout while reading 1 bytes, got 0",
+            "ble timeout while reading frame",
+        }
 
     def close(self) -> None:
         thread: threading.Thread | None = None

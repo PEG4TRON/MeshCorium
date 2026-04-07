@@ -8,4 +8,10 @@ Basic project overview:
 
 MeshCorium is a self-hosted MeshCore client with a hybrid contact system and a local web interface for working with a MeshCore node through companion firmware.
 
+## Development branch status
+
+This `dev` branch contains active BLE transport work. USB/serial remains the
+validated connection path; BLE discovery and connection plumbing are present,
+but BLE operation is not fully debugged or validated yet.
+
 ![MeshCorium screenshot](./SCREENSHOT.png)

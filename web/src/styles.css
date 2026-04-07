@@ -2302,6 +2302,41 @@ button {
   margin-bottom: 0;
 }
 
+.mc-connect-transport-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 6px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.mc-connect-transport-option {
+  min-height: 38px;
+  border: 0;
+  border-radius: 12px;
+  color: var(--muted);
+  background: transparent;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.mc-connect-transport-option.is-active {
+  color: #e8f7ff;
+  background:
+    radial-gradient(circle at 45% 20%, rgba(83, 220, 255, 0.32), transparent 58%),
+    rgba(51, 144, 236, 0.2);
+  box-shadow: 0 0 22px rgba(51, 144, 236, 0.18);
+}
+
+.mc-connect-ble-hint {
+  margin: -4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .mc-connect-meta,
 .mc-connect-float-note {
   padding: 12px 14px;
@@ -2331,6 +2366,7 @@ button {
   border: 0;
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
 }
 
 .mc-connect-history-card:hover {
@@ -2388,6 +2424,21 @@ button {
   color: #91d3ff;
   font-size: 11px;
   font-weight: 700;
+}
+
+.mc-connect-history-forget {
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  color: #ffc4c4;
+  background: rgba(180, 54, 54, 0.14);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.mc-connect-history-forget:hover {
+  background: rgba(220, 70, 70, 0.22);
 }
 
 .mc-connect-float-locale {

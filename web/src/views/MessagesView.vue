@@ -22,7 +22,6 @@ import {
   buildContactRoutePayloadFromMessage,
   buildKnownRoutePublicKeys,
 } from '../lib/contactRoutes'
-import { toLegacyPath } from '../lib/legacyPath'
 import { resolveNodePreviewUrl } from '../lib/nodePreview'
 import { resolveCachedWallpaperAsset } from '../lib/wallpaperCache'
 import {
@@ -4027,10 +4026,6 @@ async function disconnectAndStop() {
   await session.disconnectNode()
   messages.value = []
   openConnectScreenAfterDisconnect(t('connect.notice.disconnected'))
-}
-
-function goLegacy(path) {
-  window.location.assign(toLegacyPath(path))
 }
 
 function handleGlobalPointerDown(event) {

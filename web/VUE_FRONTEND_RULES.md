@@ -2,7 +2,7 @@
 
 Purpose:
 - Define the agreed Vue frontend architecture for MeshCorium.
-- Keep the new frontend as close to the legacy UI behavior as possible while moving implementation to Vue.
+- Keep the Vue frontend route/API behavior stable while the old non-Vue frontend remains retired.
 - Freeze a small set of rules so future migration work stays consistent across sessions.
 
 Official basis:
@@ -44,14 +44,14 @@ Why this stack:
 
 ## Mandatory architecture rules
 
-1. Preserve the legacy route contract.
-- The Vue app must keep the same path model as the legacy client whenever the same screen already exists: `/`, `/connect`, `/messages`, `/contacts`, `/contacts/groups`, `/contacts/repeater-login/:key`, `/contacts/repeater/:key/:category?`, `/maps`, `/settings/:section?`.
+1. Preserve the Vue route contract.
+- The Vue app owns the current path model: `/`, `/connect`, `/messages`, `/contacts`, `/contacts/groups`, `/contacts/repeater-login/:key`, `/contacts/repeater/:key/:category?`, `/maps`, `/maps/route-checks`, `/settings/:section?`.
 - Do not switch the project to hash routing.
 - Deep links, browser back/forward, and reload behavior must stay compatible with the current Python host.
 
 2. Model the desktop shell with nested routes.
 - Use `Vue Router` nested routes so the shared `rail / scroller / workspace / phonebar` frame is one durable shell, and feature screens render inside it.
-- Internal workspace flows that already behave like nested screens in legacy UI should map to nested route records, not to ad-hoc boolean toggles.
+- Internal workspace flows that behave like nested screens should map to nested route records, not to ad-hoc boolean toggles.
 - Project decision: the connect/auth overlay is part of the shell model and should eventually live as a true overlay above the shared messages shell instead of being reimplemented as a disconnected standalone page.
 
 3. Keep scroll ownership explicit.
@@ -85,7 +85,7 @@ Why this stack:
 - Project decision: prefer `script setup` for new components unless there is a concrete reason not to.
 - Project decision: separate shell/container components from reusable presentational primitives so layout migration and behavior migration can progress independently.
 
-9. Preserve the legacy shell before polishing visuals.
+9. Preserve the shared Vue shell before polishing visuals.
 - Match layout structure and interaction flow first: route, frame, overlay behavior, connect flow, scroller ownership, and session state.
 - Then tighten visual parity against screenshots and Chromium renders.
 - Project decision: do not introduce third-party UI kits unless they clearly remove complexity without pulling the design away from the current MeshCorium look and behavior.
@@ -109,10 +109,10 @@ Why this stack:
 - Prefer `Vitest` for unit/component checks and `Playwright` for browser smoke/parity when adding or changing significant frontend behavior.
 - Project decision: "we will wire it later" is not the default path for these tools in this repository.
 
-13. Migrate incrementally with compatibility handoff.
-- Temporary handoff from Vue routes into legacy pages is acceptable while parity is incomplete.
-- Each migrated screen should preserve URL, auth, API, and reconnect semantics before the legacy implementation is removed.
-- Project decision: replace the legacy frontend screen-by-screen behind a stable shell and shared state model, not by a big-bang rewrite.
+13. Keep the retired legacy namespace from returning as a fallback.
+- Do not add new Vue-to-legacy handoffs.
+- `/legacy/*` should redirect to Vue equivalents when a direct mapping exists or fail clearly for unmapped paths.
+- Project decision: the old non-Vue desktop/mobile frontend has been removed from active serving; future mobile work should be built in Vue rather than restored from legacy code.
 
 ## Recommended source layout for `web/src`
 

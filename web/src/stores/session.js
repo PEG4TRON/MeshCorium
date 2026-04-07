@@ -74,6 +74,8 @@ function normalizeConnectionDescriptor(source = {}, fallback = {}) {
     transport_type: transportType,
     transport_id: transportId,
     display_label: String(sourceConnection.display_label || source?.display_label || fallbackConnection.display_label || fallback?.display_label || transportId || '').trim(),
+    adapter_id: String(sourceConnection.adapter_id || source?.adapter_id || fallbackConnection.adapter_id || fallback?.adapter_id || '').trim(),
+    pin: String(sourceConnection.pin || source?.pin || '').trim(),
     port: transportType === 'serial' ? transportId : normalizePort(source?.port || fallback?.port),
     baudrate,
     timeout,
@@ -189,6 +191,7 @@ function shouldPreserveNonEmptyCollection(previousItems, nextItems, options = {}
 export const useSessionStore = defineStore('session', () => {
   const { t } = i18n.global
   const ports = ref([])
+  const bleConnections = ref([])
   const savedConnections = ref([])
   const activeSessions = ref([])
   const recoveringSessions = ref([])
@@ -203,11 +206,15 @@ export const useSessionStore = defineStore('session', () => {
   // these storage keys until a non-USB transport UI exists.
   const selectedPort = useStorage('selected_port', '')
   const selectedBaudrate = useStorage('selected_baudrate', DEFAULT_BAUDRATE)
+  const selectedTransportType = useStorage('selected_transport_type', 'serial')
+  const selectedBleDevice = useStorage('selected_ble_device', '')
+  const selectedBlePin = useStorage('selected_ble_pin', '')
 
   const statusText = ref('')
   const statusError = ref(false)
   const loadingClientSettings = ref(false)
   const loadingPorts = ref(false)
+  const loadingBleConnections = ref(false)
   const loadingContacts = ref(false)
   const syncingSession = ref(false)
   const connecting = ref(false)
@@ -434,14 +441,19 @@ export const useSessionStore = defineStore('session', () => {
 
   function pickInitialSelection() {
     const storagePort = normalizePort(selectedPort.value)
+    const storageBleDevice = normalizePort(selectedBleDevice.value)
     const storageBaudrate = Number(selectedBaudrate.value || DEFAULT_BAUDRATE)
     const startup = resolvedStartupConnection.value || {}
     const lastSuccessful = lastSuccessfulConfig.value || {}
     const firstSaved = savedConnections.value[0] || {}
-    const firstPort = ports.value[0]?.device || ''
+    const firstPort = ports.value[0]?.transport_id || ports.value[0]?.device || ''
     const startupConnection = normalizeConnectionDescriptor(startup)
     const lastSuccessfulConnection = normalizeConnectionDescriptor(lastSuccessful)
     const firstSavedConnection = normalizeConnectionDescriptor(firstSaved)
+    const storedTransportType = String(selectedTransportType.value || '').trim().toLowerCase()
+    const nextTransportType = ['serial', 'ble'].includes(storedTransportType)
+      ? storedTransportType
+      : (startupConnection.transport_type || lastSuccessfulConnection.transport_type || firstSavedConnection.transport_type || 'serial')
 
     const nextPort = normalizePort(
       storagePort
@@ -461,6 +473,14 @@ export const useSessionStore = defineStore('session', () => {
 
     selectedPort.value = nextPort
     selectedBaudrate.value = nextBaudrate
+    selectedTransportType.value = nextTransportType
+    if (!storageBleDevice) {
+      const nextBleDevice = [startupConnection, lastSuccessfulConnection, firstSavedConnection]
+        .find((connection) => connection.transport_type === 'ble' && normalizePort(connection.transport_id))
+      if (nextBleDevice) {
+        selectedBleDevice.value = normalizePort(nextBleDevice.transport_id)
+      }
+    }
   }
 
   function applyClientSettingsPayload(data) {
@@ -712,11 +732,13 @@ export const useSessionStore = defineStore('session', () => {
     try {
       const data = await api('/api/ports')
       ports.value = Array.isArray(data?.ports) ? data.ports : []
-      if (!normalizePort(selectedPort.value)) {
+      if (selectedTransportType.value === 'serial' && !normalizePort(selectedPort.value)) {
         pickInitialSelection()
       }
       if (
-        normalizePort(selectedPort.value)
+        selectedTransportType.value === 'serial'
+        && ports.value.length
+        && normalizePort(selectedPort.value)
         && !ports.value.some((entry) => normalizePort(entry?.transport_id || entry?.device) === normalizePort(selectedPort.value))
       ) {
         selectedPort.value = normalizePort(ports.value[0]?.transport_id || ports.value[0]?.device || '')
@@ -730,6 +752,32 @@ export const useSessionStore = defineStore('session', () => {
     }
   }
 
+  async function refreshBleConnections({ timeout = 6 } = {}) {
+    loadingBleConnections.value = true
+    try {
+      const query = new URLSearchParams({
+        type: 'ble',
+        timeout: String(Math.max(1, Number(timeout || 6))),
+      })
+      const data = await api(`/api/transports?${query.toString()}`)
+      const bleTransport = Array.isArray(data?.transports)
+        ? data.transports.find((entry) => String(entry?.transport_type || '') === 'ble')
+        : null
+      bleConnections.value = Array.isArray(bleTransport?.connections) ? bleTransport.connections : []
+      if (bleTransport && bleTransport.available === false) {
+        setStatus(bleTransport?.diagnostics?.message || bleTransport?.error || t('connect.ble.scanUnavailable'), true)
+      } else if (!bleConnections.value.length) {
+        setStatus(t('connect.ble.noDevices'), true)
+      }
+      if (!normalizePort(selectedBleDevice.value) && bleConnections.value.length) {
+        selectedBleDevice.value = normalizePort(bleConnections.value[0]?.transport_id || bleConnections.value[0]?.address || '')
+      }
+      return bleConnections.value
+    } finally {
+      loadingBleConnections.value = false
+    }
+  }
+
   function configBody(extra = {}) {
     const connection = selectedConnection.value
     const port = normalizePort(connection.port || connection.transport_id)
@@ -740,13 +788,14 @@ export const useSessionStore = defineStore('session', () => {
       transport_id: connection.transport_id,
       port,
       baudrate,
-      timeout: DEFAULT_TIMEOUT,
+      timeout: Number(connection.timeout || DEFAULT_TIMEOUT) || DEFAULT_TIMEOUT,
       ...extra,
     }
   }
 
   async function syncSessionState({ light = true } = {}) {
-    const port = normalizePort(selectedPort.value)
+    const connection = selectedConnection.value
+    const port = normalizePort(connection.port || connection.transport_id)
     if (!port) {
       sessionSnapshot.value = { active: false }
       return sessionSnapshot.value
@@ -829,7 +878,8 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   async function loadUnreadSummary({ port = '', mentionName = '' } = {}) {
-    const resolvedPort = normalizePort(port || selectedPort.value)
+    const connection = selectedConnection.value
+    const resolvedPort = normalizePort(port || connection.port || connection.transport_id)
     if (!resolvedPort || !connected.value) {
       clearUnreadSummary()
       return unreadSummary.value
@@ -847,12 +897,13 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   async function connectNode({ light = false } = {}) {
-    const port = normalizePort(selectedPort.value)
+    const connection = selectedConnection.value
+    const port = normalizePort(connection.port || connection.transport_id)
     if (!port) {
-      throw new Error(t('connect.status.portRequired'))
+      throw new Error(connection.transport_type === 'ble' ? t('connect.status.bleRequired') : t('connect.status.portRequired'))
     }
     connecting.value = true
-    setStatus(t('connect.status.connectingTo', { port }))
+    setStatus(t('connect.status.connectingTo', { port: connection.display_label || port }))
     try {
       const payload = await api('/api/connect', {
         method: 'POST',
@@ -864,7 +915,7 @@ export const useSessionStore = defineStore('session', () => {
       })
       await loadClientSettings()
       clearConnectNotice()
-      setStatus(t('connect.status.connectedTo', { target: payload?.self?.name || port }))
+      setStatus(t('connect.status.connectedTo', { target: payload?.self?.name || connection.display_label || port }))
       return payload
     } finally {
       connecting.value = false
@@ -872,7 +923,8 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   async function disconnectNode() {
-    const port = normalizePort(selectedPort.value)
+    const connection = selectedConnection.value
+    const port = normalizePort(connection.port || connection.transport_id)
     if (!port) {
       return
     }
@@ -884,6 +936,19 @@ export const useSessionStore = defineStore('session', () => {
     clearUnreadSummary()
     clearRadioTransmission()
     setStatus(t('connect.status.disconnected'))
+  }
+
+  async function forgetSavedConnection(profileOrKey) {
+    const key = isPlainObject(profileOrKey) ? String(profileOrKey?.key || '') : String(profileOrKey || '')
+    if (!key.trim()) {
+      return settingsPayload.value
+    }
+    const data = await api('/api/client-settings/forget-connection', {
+      method: 'POST',
+      body: JSON.stringify({ key }),
+    })
+    applyClientSettingsPayload(data)
+    return data
   }
 
   const connected = computed(() => {
@@ -904,17 +969,39 @@ export const useSessionStore = defineStore('session', () => {
   const selfPublicKey = computed(() => String(self.value?.public_key || '').trim())
   const deviceModel = computed(() => String(device.value?.manufacturer_model || '').trim())
   const notificationSoundEnabled = computed(() => Boolean(settingsPayload.value?.settings?.notifications_sound_enabled))
-  const selectedConnection = computed(() => normalizeConnectionDescriptor({
-    transport_type: 'serial',
-    transport_id: selectedPort.value,
-    port: selectedPort.value,
-    baudrate: selectedBaudrate.value,
-    timeout: DEFAULT_TIMEOUT,
-  }))
+  const selectedBleDeviceInfo = computed(() => {
+    const target = normalizePort(selectedBleDevice.value)
+    return bleConnections.value.find((entry) => normalizePort(entry?.transport_id || entry?.address) === target) || null
+  })
+  const selectedConnection = computed(() => {
+    const transportType = String(selectedTransportType.value || 'serial').trim().toLowerCase() === 'ble' ? 'ble' : 'serial'
+    if (transportType === 'ble') {
+      const bleDevice = selectedBleDeviceInfo.value || {}
+      const transportId = normalizePort(selectedBleDevice.value || bleDevice?.transport_id || bleDevice?.address)
+      return normalizeConnectionDescriptor({
+        connection: {
+          transport_type: 'ble',
+          transport_id: transportId,
+          display_label: String(bleDevice?.display_label || bleDevice?.name || transportId || '').trim(),
+          adapter_id: String(bleDevice?.adapter_id || '').trim(),
+          pin: String(selectedBlePin.value || '').trim(),
+          timeout: Math.max(DEFAULT_TIMEOUT, 8),
+        },
+      })
+    }
+    return normalizeConnectionDescriptor({
+      transport_type: 'serial',
+      transport_id: selectedPort.value,
+      port: selectedPort.value,
+      baudrate: selectedBaudrate.value,
+      timeout: DEFAULT_TIMEOUT,
+    })
+  })
   const selectedSavedConnection = computed(() => {
     return savedConnections.value.find((item) => (
       normalizeConnectionDescriptor(item).transport_id === selectedConnection.value.transport_id
-      && Number(item?.baudrate || 0) === Number(selectedBaudrate.value || DEFAULT_BAUDRATE)
+      && normalizeConnectionDescriptor(item).transport_type === selectedConnection.value.transport_type
+      && (selectedConnection.value.transport_type !== 'serial' || Number(item?.baudrate || 0) === Number(selectedBaudrate.value || DEFAULT_BAUDRATE))
     )) || null
   })
   const transientDisconnectSuppressed = computed(() => Number(transientDisconnectSuppressedUntil.value || 0) > Date.now())
@@ -923,6 +1010,7 @@ export const useSessionStore = defineStore('session', () => {
     DEFAULT_TIMEOUT,
     DEFAULT_BAUDRATE,
     ports,
+    bleConnections,
     savedConnections,
     activeSessions,
     recoveringSessions,
@@ -935,10 +1023,14 @@ export const useSessionStore = defineStore('session', () => {
     selectedConnection,
     selectedPort,
     selectedBaudrate,
+    selectedTransportType,
+    selectedBleDevice,
+    selectedBlePin,
     statusText,
     statusError,
     loadingClientSettings,
     loadingPorts,
+    loadingBleConnections,
     loadingContacts,
     syncingSession,
     connecting,
@@ -985,6 +1077,7 @@ export const useSessionStore = defineStore('session', () => {
     applySessionSnapshot,
     loadClientSettings,
     refreshPorts,
+    refreshBleConnections,
     configBody,
     syncSessionState,
     loadChannels,
@@ -992,5 +1085,6 @@ export const useSessionStore = defineStore('session', () => {
     loadUnreadSummary,
     connectNode,
     disconnectNode,
+    forgetSavedConnection,
   }
 })

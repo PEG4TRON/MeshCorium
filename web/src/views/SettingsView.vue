@@ -10,7 +10,6 @@ import ShellPageFrame from '../components/layout/ShellPageFrame.vue'
 import ShellPhonebar from '../components/layout/ShellPhonebar.vue'
 import { useLocale } from '../composables/useLocale'
 import { logFrontendDiagnostic } from '../lib/frontendDiagnostics'
-import { toLegacyPath } from '../lib/legacyPath'
 import { resolveNodePreviewUrl } from '../lib/nodePreview'
 import { useSessionStore } from '../stores/session'
 
@@ -80,10 +79,6 @@ const chatBackgroundPresetOptions = [
   { value: 'chat-backplane-blue', labelKey: 'settings.meshcorium.chatBackground.options.blue' },
 ]
 const baudrateOptions = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600]
-
-function goLegacy(path) {
-  window.location.assign(toLegacyPath(path))
-}
 
 function getBatteryPercentage(millivolts) {
   const numeric = Number(millivolts)
@@ -2757,16 +2752,14 @@ onBeforeUnmount(() => {
         <button
           v-for="section in settingsSections"
           :key="section.id"
-          v-tooltip="{ content: t('settings.nav.legacyHint'), theme: 'meshcorium-tooltip', placement: 'right', disabled: section.kind !== 'legacy' }"
           class="mc-settings-nav-item"
-          :class="{ active: section.id === activeSettingsSection.id && section.kind === 'vue' }"
+          :class="{ active: section.id === activeSettingsSection.id }"
           type="button"
           @click="selectSettingsSection(section)"
         >
           <div class="mc-settings-nav-copy">
             <div class="mc-settings-nav-title-row">
               <p class="mc-settings-nav-title">{{ section.title }}</p>
-              <span v-if="section.kind === 'legacy'" class="mc-settings-nav-pill">{{ t('settings.nav.legacyPill') }}</span>
             </div>
             <p class="mc-settings-nav-subtitle">{{ section.subtitle }}</p>
           </div>

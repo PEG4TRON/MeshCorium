@@ -213,6 +213,7 @@ collect_missing_system_packages() {
     local needs_venv_support=0
     local needs_node=0
     local needs_npm=0
+    local needs_bluez=0
 
     if ! command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
         needs_python=1
@@ -245,6 +246,13 @@ collect_missing_system_packages() {
         fi
     fi
 
+    if [[ -f "${SCRIPT_DIR}/requirements.txt" ]] && grep -Eq '^[[:space:]]*bleak([<>=[:space:]]|$)' "${SCRIPT_DIR}/requirements.txt"; then
+        if ! command -v bluetoothctl >/dev/null 2>&1; then
+            needs_bluez=1
+            SYSTEM_REQUIREMENTS+=("bluez/bluetoothctl")
+        fi
+    fi
+
     if [[ "${#SYSTEM_REQUIREMENTS[@]}" -eq 0 ]]; then
         return 0
     fi
@@ -270,6 +278,9 @@ collect_missing_system_packages() {
             if [[ "${needs_npm}" -eq 1 ]]; then
                 add_unique_package npm
             fi
+            if [[ "${needs_bluez}" -eq 1 ]]; then
+                add_unique_package bluez
+            fi
             ;;
         dnf|yum)
             if [[ "${needs_python}" -eq 1 ]]; then
@@ -286,6 +297,9 @@ collect_missing_system_packages() {
             fi
             if [[ "${needs_npm}" -eq 1 ]]; then
                 add_unique_package npm
+            fi
+            if [[ "${needs_bluez}" -eq 1 ]]; then
+                add_unique_package bluez
             fi
             ;;
     esac

@@ -22,7 +22,14 @@ const session = useSessionStore()
 const baudrateOptions = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600]
 const brandLogoUrl = '/icons/Meshcorium3.png'
 
-const selectedPortLabel = computed(() => {
+const selectedConnectionLabel = computed(() => {
+  if (session.selectedTransportType === 'ble') {
+    const match = session.bleConnections.find((entry) => String(entry?.transport_id || entry?.address || '') === String(session.selectedBleDevice || ''))
+    if (match) {
+      return `${match.display_label || match.name || match.address} | RSSI ${match.rssi ?? 'n/a'}`
+    }
+    return session.selectedBleDevice ? session.selectedBleDevice : t('connect.status.bleNotSelected')
+  }
   const match = session.ports.find((entry) => String(entry?.transport_id || entry?.device || '') === String(session.selectedPort || ''))
   return match
     ? `${match.transport_id || match.device} | ${match.description || t('common.unknown')}`
@@ -43,6 +50,32 @@ const baudrateDropdownOptions = computed(() => {
     value: baudrate,
     label: String(baudrate),
   }))
+})
+
+const bleDeviceOptions = computed(() => {
+  return session.bleConnections.map((entry) => ({
+    value: String(entry?.transport_id || entry?.address || ''),
+    label: String(entry?.display_label || entry?.name || entry?.transport_id || entry?.address || ''),
+    meta: entry?.rssi == null ? String(entry?.address || '') : `RSSI ${entry.rssi} | ${entry?.address || ''}`,
+    triggerLabel: `${entry?.display_label || entry?.name || entry?.address || ''} | ${entry?.address || ''}`,
+  }))
+})
+
+const filteredSavedConnections = computed(() => {
+  const activeTransportType = session.selectedTransportType === 'ble' ? 'ble' : 'serial'
+  return session.savedConnections.filter((profile) => resolveSavedConnectionTransportType(profile) === activeTransportType)
+})
+
+const historyTitle = computed(() => {
+  return session.selectedTransportType === 'ble' ? t('connect.history.bleTitle') : t('connect.history.usbTitle')
+})
+
+const historySubtitle = computed(() => {
+  return session.selectedTransportType === 'ble' ? t('connect.history.bleSubtitle') : t('connect.history.usbSubtitle')
+})
+
+const historyEmptyText = computed(() => {
+  return session.selectedTransportType === 'ble' ? t('connect.history.bleEmpty') : t('connect.history.usbEmpty')
 })
 
 function resolveSavedConnectionDisplayName(profile) {
@@ -82,6 +115,20 @@ function resolveSavedConnectionPort(profile) {
   return String(profile?.connection?.transport_id || profile?.transport_id || profile?.port || '').trim()
 }
 
+function resolveSavedConnectionTransportType(profile) {
+  return String(profile?.connection?.transport_type || profile?.transport_type || profile?.connection_type || 'serial').trim().toLowerCase() === 'ble'
+    ? 'ble'
+    : 'serial'
+}
+
+function resolveSavedConnectionKind(profile) {
+  return resolveSavedConnectionTransportType(profile) === 'ble' ? t('connect.transport.ble') : t('connect.transport.usb')
+}
+
+function resolveSavedConnectionBaudrate(profile) {
+  return Number(profile?.connection?.baudrate || profile?.baudrate || session.DEFAULT_BAUDRATE) || session.DEFAULT_BAUDRATE
+}
+
 async function connectNode() {
   try {
     const payload = await session.connectNode({ light: true })
@@ -91,9 +138,28 @@ async function connectNode() {
   }
 }
 
+async function refreshTransport() {
+  if (session.selectedTransportType === 'ble') {
+    await session.refreshBleConnections()
+    return
+  }
+  await session.refreshPorts()
+}
+
 function pickSavedConnection(profile) {
+  const transportType = resolveSavedConnectionTransportType(profile)
+  session.selectedTransportType = transportType
+  if (transportType === 'ble') {
+    session.selectedBleDevice = resolveSavedConnectionPort(profile)
+    session.selectedBlePin = ''
+    return
+  }
   session.selectedPort = resolveSavedConnectionPort(profile)
-  session.selectedBaudrate = Number(profile?.connection?.baudrate || profile?.baudrate || session.DEFAULT_BAUDRATE) || session.DEFAULT_BAUDRATE
+  session.selectedBaudrate = resolveSavedConnectionBaudrate(profile)
+}
+
+async function forgetSavedConnection(profile) {
+  await session.forgetSavedConnection(profile)
 }
 </script>
 
@@ -123,38 +189,89 @@ function pickSavedConnection(profile) {
               {{ session.connecting ? t('connect.actions.connecting') : t('connect.actions.connect') }}
             </button>
             <button
-              v-tooltip="{ content: t('common.refreshPorts'), theme: 'meshcorium-tooltip' }"
+              v-tooltip="{ content: session.selectedTransportType === 'ble' ? t('connect.ble.scan') : t('common.refreshPorts'), theme: 'meshcorium-tooltip' }"
               class="mc-icon-button"
               type="button"
-              :aria-label="t('common.refreshPorts')"
-              @click="session.refreshPorts()"
+              :aria-label="session.selectedTransportType === 'ble' ? t('connect.ble.scan') : t('common.refreshPorts')"
+              :disabled="session.loadingPorts || session.loadingBleConnections"
+              @click="refreshTransport"
             >
               ↻
             </button>
           </div>
 
-          <label class="mc-field">
-            <span>{{ t('connect.fields.port') }}</span>
-            <PluginDropdown
-              v-model="session.selectedPort"
-              :options="portOptions"
-              :placeholder="t('connect.fields.selectPort')"
-              :disabled="!portOptions.length"
-              :min-width="280"
-            />
-          </label>
+          <div class="mc-connect-transport-toggle" role="group" :aria-label="t('connect.transport.title')">
+            <button
+              class="mc-connect-transport-option"
+              :class="{ 'is-active': session.selectedTransportType !== 'ble' }"
+              type="button"
+              @click="session.selectedTransportType = 'serial'"
+            >
+              {{ t('connect.transport.usb') }}
+            </button>
+            <button
+              class="mc-connect-transport-option"
+              :class="{ 'is-active': session.selectedTransportType === 'ble' }"
+              type="button"
+              @click="session.selectedTransportType = 'ble'; session.refreshBleConnections()"
+            >
+              {{ t('connect.transport.ble') }}
+            </button>
+          </div>
 
-          <label class="mc-field">
-            <span>{{ t('connect.fields.baudrate') }}</span>
-            <PluginDropdown
-              v-model="session.selectedBaudrate"
-              :options="baudrateDropdownOptions"
-              :min-width="180"
-            />
-          </label>
+          <template v-if="session.selectedTransportType === 'ble'">
+            <label class="mc-field">
+              <span>{{ t('connect.ble.device') }}</span>
+              <PluginDropdown
+                v-model="session.selectedBleDevice"
+                :options="bleDeviceOptions"
+                :placeholder="t('connect.ble.selectDevice')"
+                :disabled="!bleDeviceOptions.length"
+                :min-width="280"
+              />
+            </label>
+
+            <label class="mc-field">
+              <span>{{ t('connect.ble.pin') }}</span>
+              <input
+                v-model="session.selectedBlePin"
+                class="mc-input"
+                type="password"
+                inputmode="numeric"
+                autocomplete="new-password"
+                data-lpignore="true"
+                data-1p-ignore="true"
+                :placeholder="t('connect.ble.pinPlaceholder')"
+              />
+            </label>
+
+            <p class="mc-connect-ble-hint">{{ t('connect.ble.pinHint') }}</p>
+          </template>
+
+          <template v-else>
+            <label class="mc-field">
+              <span>{{ t('connect.fields.port') }}</span>
+              <PluginDropdown
+                v-model="session.selectedPort"
+                :options="portOptions"
+                :placeholder="t('connect.fields.selectPort')"
+                :disabled="!portOptions.length"
+                :min-width="280"
+              />
+            </label>
+
+            <label class="mc-field">
+              <span>{{ t('connect.fields.baudrate') }}</span>
+              <PluginDropdown
+                v-model="session.selectedBaudrate"
+                :options="baudrateDropdownOptions"
+                :min-width="180"
+              />
+            </label>
+          </template>
 
           <div class="mc-connect-meta">
-            <p>{{ selectedPortLabel }}</p>
+            <p>{{ selectedConnectionLabel }}</p>
           </div>
         </div>
 
@@ -164,15 +281,18 @@ function pickSavedConnection(profile) {
       <aside class="mc-connect-history-shell">
         <div class="mc-connect-history-header">
           <p class="mc-overline">{{ t('connect.history.overline') }}</p>
-          <h3>{{ t('connect.history.title') }}</h3>
-          <p>{{ t('connect.history.subtitle') }}</p>
+          <h3>{{ historyTitle }}</h3>
+          <p>{{ historySubtitle }}</p>
         </div>
         <div class="mc-connect-history-list">
-          <button
-            v-for="profile in session.savedConnections"
+          <article
+            v-for="profile in filteredSavedConnections"
             :key="profile.key || `${resolveSavedConnectionPort(profile)}-${profile.baudrate}-${profile.public_key || profile.node_name}`"
             class="mc-connect-history-card"
+            role="button"
+            tabindex="0"
             @click="pickSavedConnection(profile)"
+            @keydown.enter.prevent="pickSavedConnection(profile)"
           >
             <div class="mc-connect-history-preview">
               <img
@@ -185,16 +305,19 @@ function pickSavedConnection(profile) {
             <div class="mc-connect-history-main">
               <div class="mc-connect-history-top">
                 <strong>{{ resolveSavedConnectionDisplayName(profile) }}</strong>
-                <span class="mc-connect-history-kind">{{ profile.connection_type || t('common.usb') }}</span>
+                <span class="mc-connect-history-kind">{{ resolveSavedConnectionKind(profile) }}</span>
               </div>
               <div class="mc-connect-history-bottom">
                 <span>{{ resolveSavedConnectionModelName(profile) }}</span>
                 <span>{{ resolveSavedConnectionPort(profile) }}</span>
-                <span>{{ profile.connection?.baudrate || profile.baudrate }}</span>
+                <span v-if="resolveSavedConnectionTransportType(profile) !== 'ble'">{{ resolveSavedConnectionBaudrate(profile) }}</span>
+                <button class="mc-connect-history-forget" type="button" @click.stop="forgetSavedConnection(profile)">
+                  {{ t('connect.history.forget') }}
+                </button>
               </div>
             </div>
-          </button>
-          <div v-if="!session.savedConnections.length" class="mc-connect-history-empty">{{ t('connect.history.empty') }}</div>
+          </article>
+          <div v-if="!filteredSavedConnections.length" class="mc-connect-history-empty">{{ historyEmptyText }}</div>
         </div>
       </aside>
     </div>

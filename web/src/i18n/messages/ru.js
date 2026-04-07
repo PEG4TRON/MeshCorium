@@ -1066,6 +1066,21 @@ export default {
       baudrate: 'Baudrate',
       selectPort: 'Выбери serial-порт',
     },
+    transport: {
+      title: 'Тип подключения',
+      usb: 'USB',
+      ble: 'BLE',
+    },
+    ble: {
+      device: 'BLE-устройство',
+      selectDevice: 'Выбери BLE-ноду',
+      scan: 'Сканировать BLE',
+      noDevices: 'BLE-ноды MeshCore не найдены.',
+      scanUnavailable: 'BLE-сканирование недоступно.',
+      pin: 'Пароль сопряжения',
+      pinPlaceholder: 'Например, 323411',
+      pinHint: 'Нужен только если устройство ещё не сопряжено с этим Linux-хостом. Пароль не сохраняется в браузере.',
+    },
     actions: {
       connect: 'Connect',
       connecting: 'Подключение…',
@@ -1075,6 +1090,13 @@ export default {
       title: 'Connection History',
       subtitle: 'Выбери карточку, чтобы подставить порт и baudrate, затем нажми Connect.',
       empty: 'История подключений появится после первого connect.',
+      usbTitle: 'USB-ноды',
+      usbSubtitle: 'Только ранее подключённые USB companion-профили.',
+      usbEmpty: 'USB-история появится после первого успешного USB-подключения.',
+      bleTitle: 'BLE-ноды',
+      bleSubtitle: 'Только ранее подключённые BLE companion-профили.',
+      bleEmpty: 'BLE-история появится после первого успешного BLE-подключения.',
+      forget: 'Забыть',
     },
     ghost: {
       channel: 'Канал {index}',
@@ -1087,6 +1109,8 @@ export default {
       pickPort: 'Выбери порт и baudrate, затем нажми Connect.',
       portNotSelected: 'Порт не выбран',
       portRequired: 'Выбери serial-порт.',
+      bleNotSelected: 'BLE-нода не выбрана',
+      bleRequired: 'Выбери BLE-ноду.',
       noVisiblePorts: 'Нет видимых serial-портов. Проверь подключение ноды.',
       loadFailed: 'Не удалось загрузить экран подключения.',
       connectFailed: 'Connect failed',
@@ -1180,12 +1204,8 @@ export default {
         subtitle: 'Ссылки на библиотеки, тулчейн и upstream git-репозитории проекта.',
       },
     },
-    nav: {
-      legacyHint: 'Временно открывает существующую legacy-страницу этого раздела.',
-      legacyPill: 'legacy',
-    },
     meshcorium: {
-      subtitle: 'Здесь живут собственные настройки клиента, которые не относятся к конкретной ноде или отдельному legacy-разделу.',
+      subtitle: 'Здесь живут собственные настройки клиента, которые не относятся к конкретной ноде.',
       notifications: {
         title: 'Звуки уведомлений',
         subtitle: 'Локальные звуки клиента для обычных уведомлений и mention.',
@@ -1322,7 +1342,7 @@ export default {
     },
     nodeCompanion: {
       backToSettings: 'Назад к настройкам',
-      subtitle: 'Оснастка companion-ноды внутри workspace настроек, без перехода в legacy settings.',
+      subtitle: 'Оснастка companion-ноды внутри workspace настроек.',
       sections: {
         general: {
           title: 'Общее',

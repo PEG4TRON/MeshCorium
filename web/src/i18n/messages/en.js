@@ -1066,6 +1066,21 @@ export default {
       baudrate: 'Baudrate',
       selectPort: 'Select a serial port',
     },
+    transport: {
+      title: 'Connection type',
+      usb: 'USB',
+      ble: 'BLE',
+    },
+    ble: {
+      device: 'BLE device',
+      selectDevice: 'Select a BLE node',
+      scan: 'Scan BLE',
+      noDevices: 'No MeshCore BLE nodes found.',
+      scanUnavailable: 'BLE scanning is unavailable.',
+      pin: 'Pairing password',
+      pinPlaceholder: 'For example, 323411',
+      pinHint: 'Needed only if the device is not paired with this Linux host yet. The password is not stored in the browser.',
+    },
     actions: {
       connect: 'Connect',
       connecting: 'Connecting…',
@@ -1075,6 +1090,13 @@ export default {
       title: 'Connection History',
       subtitle: 'Choose a card to prefill port and baudrate, then click Connect.',
       empty: 'Connection history will appear after the first connect.',
+      usbTitle: 'USB nodes',
+      usbSubtitle: 'Only previously connected USB companion profiles.',
+      usbEmpty: 'USB history will appear after the first successful USB connection.',
+      bleTitle: 'BLE nodes',
+      bleSubtitle: 'Only previously connected BLE companion profiles.',
+      bleEmpty: 'BLE history will appear after the first successful BLE connection.',
+      forget: 'Forget',
     },
     ghost: {
       channel: 'Channel {index}',
@@ -1087,6 +1109,8 @@ export default {
       pickPort: 'Choose a port and baudrate, then click Connect.',
       portNotSelected: 'No port selected',
       portRequired: 'Choose a serial port.',
+      bleNotSelected: 'No BLE node selected',
+      bleRequired: 'Choose a BLE node.',
       noVisiblePorts: 'No visible serial ports. Check the node connection.',
       loadFailed: 'Failed to load the connect screen.',
       connectFailed: 'Connect failed',
@@ -1180,12 +1204,8 @@ export default {
         subtitle: 'Links to the libraries, tooling, and upstream git repositories used by the project.',
       },
     },
-    nav: {
-      legacyHint: 'Temporarily opens the existing legacy page for this section.',
-      legacyPill: 'legacy',
-    },
     meshcorium: {
-      subtitle: 'This is where client-owned settings live when they do not belong to a specific node or legacy section.',
+      subtitle: 'This is where client-owned settings live when they do not belong to a specific node.',
       notifications: {
         title: 'Notification sounds',
         subtitle: 'Client-local sounds for regular notifications and mentions.',
@@ -1322,7 +1342,7 @@ export default {
     },
     nodeCompanion: {
       backToSettings: 'Back to Settings',
-      subtitle: 'Companion-node tools inside the settings workspace without leaving for legacy settings.',
+      subtitle: 'Companion-node tools inside the settings workspace.',
       sections: {
         general: {
           title: 'General',
