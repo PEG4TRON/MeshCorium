@@ -2304,7 +2304,7 @@ button {
 
 .mc-connect-transport-toggle {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   padding: 6px;
   border-radius: 16px;
@@ -2334,6 +2334,29 @@ button {
   margin: -4px 0 0;
   color: var(--muted);
   font-size: 12px;
+  line-height: 1.5;
+}
+
+.mc-connect-wifi-placeholder {
+  display: grid;
+  gap: 7px;
+  padding: 15px;
+  border-radius: 16px;
+  color: var(--muted);
+  background:
+    radial-gradient(circle at 90% 10%, rgba(255, 172, 68, 0.18), transparent 42%),
+    rgba(255, 255, 255, 0.045);
+  border: 1px dashed rgba(255, 207, 130, 0.26);
+}
+
+.mc-connect-wifi-placeholder h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 17px;
+}
+
+.mc-connect-wifi-placeholder p {
+  margin: 0;
   line-height: 1.5;
 }
 

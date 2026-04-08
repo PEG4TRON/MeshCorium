@@ -1070,6 +1070,7 @@ export default {
       title: 'Тип подключения',
       usb: 'USB',
       ble: 'BLE',
+      wifi: 'Wi-Fi',
     },
     ble: {
       device: 'BLE-устройство',
@@ -1080,6 +1081,12 @@ export default {
       pin: 'Пароль сопряжения',
       pinPlaceholder: 'Например, 323411',
       pinHint: 'Нужен только если устройство ещё не сопряжено с этим Linux-хостом. Пароль не сохраняется в браузере.',
+    },
+    wifi: {
+      overline: 'Wi-Fi подключение',
+      title: 'Wi-Fi режим пока не реализован',
+      body: 'Это зарезервированный режим подключения к ноде. Сейчас он показан как заглушка, чтобы структура выбора транспорта уже была готова к будущему Wi-Fi адаптеру.',
+      unavailableTitle: 'Wi-Fi пока недоступен',
     },
     actions: {
       connect: 'Connect',
@@ -1096,6 +1103,9 @@ export default {
       bleTitle: 'BLE-ноды',
       bleSubtitle: 'Только ранее подключённые BLE companion-профили.',
       bleEmpty: 'BLE-история появится после первого успешного BLE-подключения.',
+      wifiTitle: 'Wi-Fi-ноды',
+      wifiSubtitle: 'Зарезервировано под будущие Wi-Fi companion-профили.',
+      wifiEmpty: 'Wi-Fi-история появится после реализации Wi-Fi подключения.',
       forget: 'Забыть',
     },
     ghost: {
@@ -1111,6 +1121,7 @@ export default {
       portRequired: 'Выбери serial-порт.',
       bleNotSelected: 'BLE-нода не выбрана',
       bleRequired: 'Выбери BLE-ноду.',
+      wifiUnavailable: 'Wi-Fi подключение пока не реализовано.',
       noVisiblePorts: 'Нет видимых serial-портов. Проверь подключение ноды.',
       loadFailed: 'Не удалось загрузить экран подключения.',
       connectFailed: 'Connect failed',

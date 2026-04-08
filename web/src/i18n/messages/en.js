@@ -1070,6 +1070,7 @@ export default {
       title: 'Connection type',
       usb: 'USB',
       ble: 'BLE',
+      wifi: 'Wi-Fi',
     },
     ble: {
       device: 'BLE device',
@@ -1080,6 +1081,12 @@ export default {
       pin: 'Pairing password',
       pinPlaceholder: 'For example, 323411',
       pinHint: 'Needed only if the device is not paired with this Linux host yet. The password is not stored in the browser.',
+    },
+    wifi: {
+      overline: 'Wi-Fi connection',
+      title: 'Wi-Fi mode is not implemented yet',
+      body: 'This is a reserved node connection mode. It is shown as a placeholder so the transport selector is already ready for the future Wi-Fi adapter.',
+      unavailableTitle: 'Wi-Fi is not available yet',
     },
     actions: {
       connect: 'Connect',
@@ -1096,6 +1103,9 @@ export default {
       bleTitle: 'BLE nodes',
       bleSubtitle: 'Only previously connected BLE companion profiles.',
       bleEmpty: 'BLE history will appear after the first successful BLE connection.',
+      wifiTitle: 'Wi-Fi nodes',
+      wifiSubtitle: 'Reserved for future Wi-Fi companion profiles.',
+      wifiEmpty: 'Wi-Fi history will appear after Wi-Fi connection support is implemented.',
       forget: 'Forget',
     },
     ghost: {
@@ -1111,6 +1121,7 @@ export default {
       portRequired: 'Choose a serial port.',
       bleNotSelected: 'No BLE node selected',
       bleRequired: 'Choose a BLE node.',
+      wifiUnavailable: 'Wi-Fi connection is not implemented yet.',
       noVisiblePorts: 'No visible serial ports. Check the node connection.',
       loadFailed: 'Failed to load the connect screen.',
       connectFailed: 'Connect failed',

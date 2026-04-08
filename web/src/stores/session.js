@@ -208,7 +208,7 @@ export const useSessionStore = defineStore('session', () => {
   const selectedBaudrate = useStorage('selected_baudrate', DEFAULT_BAUDRATE)
   const selectedTransportType = useStorage('selected_transport_type', 'serial')
   const selectedBleDevice = useStorage('selected_ble_device', '')
-  const selectedBlePin = useStorage('selected_ble_pin', '')
+  const selectedBlePin = ref('')
 
   const statusText = ref('')
   const statusError = ref(false)
@@ -451,7 +451,7 @@ export const useSessionStore = defineStore('session', () => {
     const lastSuccessfulConnection = normalizeConnectionDescriptor(lastSuccessful)
     const firstSavedConnection = normalizeConnectionDescriptor(firstSaved)
     const storedTransportType = String(selectedTransportType.value || '').trim().toLowerCase()
-    const nextTransportType = ['serial', 'ble'].includes(storedTransportType)
+    const nextTransportType = ['serial', 'ble', 'wifi'].includes(storedTransportType)
       ? storedTransportType
       : (startupConnection.transport_type || lastSuccessfulConnection.transport_type || firstSavedConnection.transport_type || 'serial')
 
@@ -898,6 +898,9 @@ export const useSessionStore = defineStore('session', () => {
 
   async function connectNode({ light = false } = {}) {
     const connection = selectedConnection.value
+    if (connection.transport_type === 'wifi') {
+      throw new Error(t('connect.status.wifiUnavailable'))
+    }
     const port = normalizePort(connection.port || connection.transport_id)
     if (!port) {
       throw new Error(connection.transport_type === 'ble' ? t('connect.status.bleRequired') : t('connect.status.portRequired'))
@@ -974,7 +977,18 @@ export const useSessionStore = defineStore('session', () => {
     return bleConnections.value.find((entry) => normalizePort(entry?.transport_id || entry?.address) === target) || null
   })
   const selectedConnection = computed(() => {
-    const transportType = String(selectedTransportType.value || 'serial').trim().toLowerCase() === 'ble' ? 'ble' : 'serial'
+    const rawTransportType = String(selectedTransportType.value || 'serial').trim().toLowerCase()
+    const transportType = ['serial', 'ble', 'wifi'].includes(rawTransportType) ? rawTransportType : 'serial'
+    if (transportType === 'wifi') {
+      return normalizeConnectionDescriptor({
+        connection: {
+          transport_type: 'wifi',
+          transport_id: '',
+          display_label: 'Wi-Fi',
+          timeout: DEFAULT_TIMEOUT,
+        },
+      })
+    }
     if (transportType === 'ble') {
       const bleDevice = selectedBleDeviceInfo.value || {}
       const transportId = normalizePort(selectedBleDevice.value || bleDevice?.transport_id || bleDevice?.address)

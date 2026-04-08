@@ -23,6 +23,9 @@ const baudrateOptions = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 9216
 const brandLogoUrl = '/icons/Meshcorium3.png'
 
 const selectedConnectionLabel = computed(() => {
+  if (session.selectedTransportType === 'wifi') {
+    return t('connect.status.wifiUnavailable')
+  }
   if (session.selectedTransportType === 'ble') {
     const match = session.bleConnections.find((entry) => String(entry?.transport_id || entry?.address || '') === String(session.selectedBleDevice || ''))
     if (match) {
@@ -62,19 +65,28 @@ const bleDeviceOptions = computed(() => {
 })
 
 const filteredSavedConnections = computed(() => {
-  const activeTransportType = session.selectedTransportType === 'ble' ? 'ble' : 'serial'
+  const activeTransportType = ['ble', 'wifi'].includes(session.selectedTransportType) ? session.selectedTransportType : 'serial'
   return session.savedConnections.filter((profile) => resolveSavedConnectionTransportType(profile) === activeTransportType)
 })
 
 const historyTitle = computed(() => {
+  if (session.selectedTransportType === 'wifi') {
+    return t('connect.history.wifiTitle')
+  }
   return session.selectedTransportType === 'ble' ? t('connect.history.bleTitle') : t('connect.history.usbTitle')
 })
 
 const historySubtitle = computed(() => {
+  if (session.selectedTransportType === 'wifi') {
+    return t('connect.history.wifiSubtitle')
+  }
   return session.selectedTransportType === 'ble' ? t('connect.history.bleSubtitle') : t('connect.history.usbSubtitle')
 })
 
 const historyEmptyText = computed(() => {
+  if (session.selectedTransportType === 'wifi') {
+    return t('connect.history.wifiEmpty')
+  }
   return session.selectedTransportType === 'ble' ? t('connect.history.bleEmpty') : t('connect.history.usbEmpty')
 })
 
@@ -116,13 +128,16 @@ function resolveSavedConnectionPort(profile) {
 }
 
 function resolveSavedConnectionTransportType(profile) {
-  return String(profile?.connection?.transport_type || profile?.transport_type || profile?.connection_type || 'serial').trim().toLowerCase() === 'ble'
-    ? 'ble'
-    : 'serial'
+  const transportType = String(profile?.connection?.transport_type || profile?.transport_type || profile?.connection_type || 'serial').trim().toLowerCase()
+  return ['ble', 'wifi'].includes(transportType) ? transportType : 'serial'
 }
 
 function resolveSavedConnectionKind(profile) {
-  return resolveSavedConnectionTransportType(profile) === 'ble' ? t('connect.transport.ble') : t('connect.transport.usb')
+  const transportType = resolveSavedConnectionTransportType(profile)
+  if (transportType === 'wifi') {
+    return t('connect.transport.wifi')
+  }
+  return transportType === 'ble' ? t('connect.transport.ble') : t('connect.transport.usb')
 }
 
 function resolveSavedConnectionBaudrate(profile) {
@@ -143,6 +158,10 @@ async function refreshTransport() {
     await session.refreshBleConnections()
     return
   }
+  if (session.selectedTransportType === 'wifi') {
+    session.setStatus(t('connect.status.wifiUnavailable'), true)
+    return
+  }
   await session.refreshPorts()
 }
 
@@ -152,6 +171,10 @@ function pickSavedConnection(profile) {
   if (transportType === 'ble') {
     session.selectedBleDevice = resolveSavedConnectionPort(profile)
     session.selectedBlePin = ''
+    return
+  }
+  if (transportType === 'wifi') {
+    session.setStatus(t('connect.status.wifiUnavailable'), true)
     return
   }
   session.selectedPort = resolveSavedConnectionPort(profile)
@@ -185,15 +208,15 @@ async function forgetSavedConnection(profile) {
       <div class="mc-connect-float-stack">
         <div class="mc-connect-float-card">
           <div class="mc-connect-float-primary">
-            <button class="mc-button mc-button--primary mc-button--wide" type="button" :disabled="session.connecting" @click="connectNode">
+            <button class="mc-button mc-button--primary mc-button--wide" type="button" :disabled="session.connecting || session.selectedTransportType === 'wifi'" @click="connectNode">
               {{ session.connecting ? t('connect.actions.connecting') : t('connect.actions.connect') }}
             </button>
             <button
-              v-tooltip="{ content: session.selectedTransportType === 'ble' ? t('connect.ble.scan') : t('common.refreshPorts'), theme: 'meshcorium-tooltip' }"
+              v-tooltip="{ content: session.selectedTransportType === 'wifi' ? t('connect.wifi.unavailableTitle') : (session.selectedTransportType === 'ble' ? t('connect.ble.scan') : t('common.refreshPorts')), theme: 'meshcorium-tooltip' }"
               class="mc-icon-button"
               type="button"
-              :aria-label="session.selectedTransportType === 'ble' ? t('connect.ble.scan') : t('common.refreshPorts')"
-              :disabled="session.loadingPorts || session.loadingBleConnections"
+              :aria-label="session.selectedTransportType === 'wifi' ? t('connect.wifi.unavailableTitle') : (session.selectedTransportType === 'ble' ? t('connect.ble.scan') : t('common.refreshPorts'))"
+              :disabled="session.loadingPorts || session.loadingBleConnections || session.selectedTransportType === 'wifi'"
               @click="refreshTransport"
             >
               ↻
@@ -203,7 +226,7 @@ async function forgetSavedConnection(profile) {
           <div class="mc-connect-transport-toggle" role="group" :aria-label="t('connect.transport.title')">
             <button
               class="mc-connect-transport-option"
-              :class="{ 'is-active': session.selectedTransportType !== 'ble' }"
+              :class="{ 'is-active': session.selectedTransportType === 'serial' || !['serial', 'ble', 'wifi'].includes(session.selectedTransportType) }"
               type="button"
               @click="session.selectedTransportType = 'serial'"
             >
@@ -217,9 +240,25 @@ async function forgetSavedConnection(profile) {
             >
               {{ t('connect.transport.ble') }}
             </button>
+            <button
+              class="mc-connect-transport-option"
+              :class="{ 'is-active': session.selectedTransportType === 'wifi' }"
+              type="button"
+              @click="session.selectedTransportType = 'wifi'; session.setStatus(t('connect.status.wifiUnavailable'), true)"
+            >
+              {{ t('connect.transport.wifi') }}
+            </button>
           </div>
 
-          <template v-if="session.selectedTransportType === 'ble'">
+          <template v-if="session.selectedTransportType === 'wifi'">
+            <div class="mc-connect-wifi-placeholder">
+              <p class="mc-overline">{{ t('connect.wifi.overline') }}</p>
+              <h3>{{ t('connect.wifi.title') }}</h3>
+              <p>{{ t('connect.wifi.body') }}</p>
+            </div>
+          </template>
+
+          <template v-else-if="session.selectedTransportType === 'ble'">
             <label class="mc-field">
               <span>{{ t('connect.ble.device') }}</span>
               <PluginDropdown
@@ -310,7 +349,7 @@ async function forgetSavedConnection(profile) {
               <div class="mc-connect-history-bottom">
                 <span>{{ resolveSavedConnectionModelName(profile) }}</span>
                 <span>{{ resolveSavedConnectionPort(profile) }}</span>
-                <span v-if="resolveSavedConnectionTransportType(profile) !== 'ble'">{{ resolveSavedConnectionBaudrate(profile) }}</span>
+                <span v-if="resolveSavedConnectionTransportType(profile) === 'serial'">{{ resolveSavedConnectionBaudrate(profile) }}</span>
                 <button class="mc-connect-history-forget" type="button" @click.stop="forgetSavedConnection(profile)">
                   {{ t('connect.history.forget') }}
                 </button>
