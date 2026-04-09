@@ -392,6 +392,24 @@ create_virtual_environment() {
     esac
 }
 
+virtual_environment_is_usable() {
+    [[ -f "${VENV_DIR}/bin/activate" ]] || return 1
+    [[ -x "${VENV_DIR}/bin/python3" || -x "${VENV_DIR}/bin/python" ]] || return 1
+}
+
+ensure_virtual_environment() {
+    if [[ ! -d "${VENV_DIR}" ]]; then
+        create_virtual_environment
+        return
+    fi
+    if virtual_environment_is_usable; then
+        return
+    fi
+    echo "detected incomplete virtual environment, recreating: ${VENV_DIR}"
+    rm -rf "${VENV_DIR}"
+    create_virtual_environment
+}
+
 print_launcher_banner
 
 for arg in "$@"; do
@@ -427,9 +445,7 @@ if ! command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
     exit 1
 fi
 
-if [[ ! -d "${VENV_DIR}" ]]; then
-    create_virtual_environment
-fi
+ensure_virtual_environment
 
 # shellcheck disable=SC1091
 source "${VENV_DIR}/bin/activate"
