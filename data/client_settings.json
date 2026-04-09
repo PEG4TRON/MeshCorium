@@ -1,8 +1,8 @@
 {
-  "access_all_meshcorium_contacts": false,
+  "access_all_meshcorium_contacts": true,
   "auth_enabled": false,
   "auto_connect_on_service_start": false,
-  "frontend_diagnostics_enabled": false,
+  "frontend_diagnostics_enabled": true,
   "muted_conversations": {},
   "notification_direct_sound_file": "3.mp3",
   "notification_mention_sound_file": "2.mp3",
