@@ -387,7 +387,7 @@ async function refreshShellState({ includePorts = false, suppressStatus = false 
     if (includePorts) {
       backgroundTasks.push(session.refreshPorts())
     }
-    if ((isMapsRoute.value || isContactsRoute.value) && session.connected && !session.contacts.length) {
+    if ((isMapsRoute.value || isContactsRoute.value) && session.connected && session.collectionsReady && !session.contacts.length) {
       backgroundTasks.push(session.loadContacts())
     }
     await Promise.all(backgroundTasks)
@@ -1102,7 +1102,7 @@ function startNotificationListening() {
 }
 
 async function ensureNotificationCollectionsReady() {
-  if (!session.connected) {
+  if (!session.connected || !session.collectionsReady) {
     return
   }
   const jobs = []

@@ -3912,10 +3912,10 @@ async function ensureScreenReady() {
       router.replace({ name: 'connect' })
       return
     }
-    if (!session.channels.length) {
+    if (session.collectionsReady && !session.channels.length) {
       await session.loadChannels()
     }
-    if (!session.contacts.length) {
+    if (session.collectionsReady && !session.contacts.length) {
       await session.loadContacts()
     }
     lastRadioTxSecs.value = session.radioStats?.tx_air_secs == null ? null : Number(session.radioStats.tx_air_secs)

@@ -2245,7 +2245,7 @@ const repeaterGeoSheetModel = computed(() => ({
 }))
 
 async function ensureContactsLoaded({ refresh = false } = {}) {
-  if (!session.connected || contactsLoading.value) {
+  if (!session.connected || !session.collectionsReady || contactsLoading.value) {
     return
   }
   if (!refresh && session.contacts.length) {

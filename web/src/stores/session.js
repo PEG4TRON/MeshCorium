@@ -830,6 +830,9 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   async function loadChannels() {
+    if (connected.value && !collectionsReady.value) {
+      return channels.value
+    }
     const data = await api('/api/channels', {
       method: 'POST',
       body: JSON.stringify(configBody()),
@@ -845,6 +848,9 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   async function loadContacts({ refresh = false } = {}) {
+    if (connected.value && !collectionsReady.value && !refresh) {
+      return contacts.value
+    }
     if (contactsRequestPromise && !refresh) {
       return contactsRequestPromise
     }

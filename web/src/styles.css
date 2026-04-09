@@ -5330,6 +5330,28 @@ button {
   align-items: stretch;
 }
 
+.mc-settings-inline-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: rgba(222, 232, 224, 0.8);
+}
+
+.mc-settings-json-block {
+  margin: 12px 0 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(6, 12, 16, 0.48);
+  color: rgba(232, 240, 235, 0.92);
+  font-family: 'IBM Plex Mono', 'Fira Code', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .mc-settings-row-control .mc-plugin-dropdown-shell {
   width: fit-content;
   min-width: 20px;
@@ -5360,6 +5382,13 @@ button {
   align-items: center;
   gap: 14px;
   flex-wrap: wrap;
+}
+
+.mc-settings-inline-hint {
+  width: min(100%, 420px);
+  font-size: 12px;
+  line-height: 1.45;
+  color: rgba(214, 228, 232, 0.72);
 }
 
 .mc-settings-inline-controls .mc-plugin-dropdown-shell {

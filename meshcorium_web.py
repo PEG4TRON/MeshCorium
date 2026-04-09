@@ -3326,7 +3326,7 @@ def _background_command_priority(kind: str) -> int:
         return 0
     if normalized in ("trace_route",):
         return 1
-    if normalized in ("perform_contact_action", "save_channel", "set_node_name", "sync_device_time", "send_advert"):
+    if normalized in ("perform_contact_action", "save_channel", "set_node_name", "sync_device_time", "send_advert", "meshcore_params_snapshot", "apply_meshcore_params"):
         return 2
     if normalized in ("refresh_contacts", "remove_contacts", "sync_favorites_group", "export_self_contact"):
         return 3
@@ -4003,12 +4003,512 @@ def _get_merged_radio_stats_with_client(client: MeshCoreSerialClient) -> dict | 
     return _merge_core_stats_into_radio_stats(radio_stats, core_stats)
 
 
+MESHCORE_TELEM_MODE_DENY = 0
+MESHCORE_TELEM_MODE_ALLOW_FLAGS = 1
+MESHCORE_TELEM_MODE_ALLOW_ALL = 2
+
+MESHCORE_ADVERT_LOC_NONE = 0
+MESHCORE_ADVERT_LOC_SHARE = 1
+MESHCORE_ADVERT_LOC_PREFS = 2
+
+MESHCORE_AUTOADD_OVERWRITE_OLDEST = 1 << 0
+MESHCORE_AUTOADD_CHAT = 1 << 1
+MESHCORE_AUTOADD_REPEATER = 1 << 2
+MESHCORE_AUTOADD_ROOM_SERVER = 1 << 3
+MESHCORE_AUTOADD_SENSOR = 1 << 4
+
+
+def _decode_meshcore_telemetry_modes(value: object) -> dict[str, int]:
+    raw_value = int(value or 0) & 0xFF
+    return {
+        "base": raw_value & 0x03,
+        "location": (raw_value >> 2) & 0x03,
+        "environment": (raw_value >> 4) & 0x03,
+    }
+
+
+def _encode_meshcore_telemetry_modes(*, base: object, location: object, environment: object) -> int:
+    return (
+        (int(base or 0) & 0x03)
+        | ((int(location or 0) & 0x03) << 2)
+        | ((int(environment or 0) & 0x03) << 4)
+    ) & 0xFF
+
+
+def _parse_boolish(value: object, *, default: bool = False) -> bool:
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    normalized = str(value or "").strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _parse_int_or_default(value: object, *, default: int = 0) -> int:
+    try:
+        if value in (None, ""):
+            return int(default)
+        return int(value)
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def _parse_float_or_default(value: object, *, default: float = 0.0) -> float:
+    try:
+        if value in (None, ""):
+            return float(default)
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _require_int_range(name: str, value: object, *, minimum: int, maximum: int) -> int:
+    parsed = int(value)
+    if parsed < minimum or parsed > maximum:
+        raise ValueError(f"{name} must be in range {minimum}..{maximum}")
+    return parsed
+
+
+def _require_float_range(name: str, value: object, *, minimum: float, maximum: float) -> float:
+    parsed = float(value)
+    if parsed < minimum or parsed > maximum:
+        raise ValueError(f"{name} must be in range {minimum}..{maximum}")
+    return parsed
+
+
+def _validate_meshcore_name(name: str) -> str:
+    normalized = str(name or "").strip()
+    if not normalized:
+        raise ValueError("name is required")
+    if len(normalized.encode("utf-8")) > 32:
+        raise ValueError("name must fit within 32 UTF-8 bytes")
+    return normalized
+
+
+def _collect_meshcore_params_with_client(
+    client: MeshCoreSerialClient,
+    *,
+    device,
+    self_info,
+    radio_stats: dict | None = None,
+    self_telemetry: dict | None = None,
+    battery_info: dict | None = None,
+) -> dict:
+    device_dict = _device_info_to_dict(device)
+    self_dict = _self_info_to_dict(self_info)
+    telemetry_modes = _decode_meshcore_telemetry_modes(self_dict.get("telemetry_modes"))
+    try:
+        tuning_params = client.get_tuning_params()
+    except (MeshCoreError, SerialException, ValueError):
+        tuning_params = None
+    try:
+        custom_vars = client.get_custom_vars()
+    except (MeshCoreError, SerialException, ValueError):
+        custom_vars = {}
+    try:
+        autoadd_config = client.get_autoadd_config()
+    except (MeshCoreError, SerialException, ValueError):
+        autoadd_config = None
+    try:
+        allowed_repeat_ranges = client.get_allowed_repeat_freq_ranges()
+    except (MeshCoreError, SerialException, ValueError):
+        allowed_repeat_ranges = []
+    try:
+        core_stats = _core_stats_to_dict(client.get_core_stats())
+    except (MeshCoreError, SerialException, ValueError):
+        core_stats = None
+    try:
+        packet_stats = _packet_stats_to_dict(client.get_packet_stats())
+    except (MeshCoreError, SerialException, ValueError):
+        packet_stats = None
+    try:
+        device_time_epoch = int(client.get_device_time() or 0)
+    except (MeshCoreError, SerialException, ValueError):
+        device_time_epoch = None
+
+    autoadd_flags = int(getattr(autoadd_config, "config", 0) or 0)
+    autoadd_max_hops = int(getattr(autoadd_config, "max_hops", 0) or 0)
+    gps_enabled = _parse_boolish(custom_vars.get("gps"), default=False)
+    gps_interval = _parse_int_or_default(custom_vars.get("gps_interval"), default=0)
+    current_freq_khz = int(round(float(self_dict.get("radio_freq_hz_x1000") or 0)))
+    allowed_repeat_ranges_payload = [
+        {
+            "lower_freq_khz": int(item.lower_freq_khz),
+            "upper_freq_khz": int(item.upper_freq_khz),
+            "lower_freq_mhz": round(float(item.lower_freq_khz) / 1000.0, 3),
+            "upper_freq_mhz": round(float(item.upper_freq_khz) / 1000.0, 3),
+        }
+        for item in allowed_repeat_ranges
+    ]
+    client_repeat_allowed = any(
+        int(item.get("lower_freq_khz") or 0) <= current_freq_khz <= int(item.get("upper_freq_khz") or 0)
+        for item in allowed_repeat_ranges_payload
+        if isinstance(item, dict)
+    )
+    return {
+        "radio": {
+            "freq_mhz": round(float(self_dict.get("radio_freq_hz_x1000") or 0) / 1000.0, 3),
+            "bw_khz": round(float(self_dict.get("radio_bw_hz_x1000") or 0) / 1000.0, 1),
+            "sf": int(self_dict.get("radio_sf") or 0),
+            "cr": int(self_dict.get("radio_cr") or 0),
+            "tx_power_dbm": int(self_dict.get("tx_power_dbm") or 0),
+            "max_tx_power": int(self_dict.get("max_tx_power") or 0),
+            "client_repeat": bool(device_dict.get("client_repeat")),
+            "client_repeat_allowed": client_repeat_allowed,
+            "allowed_repeat_ranges": allowed_repeat_ranges_payload,
+        },
+        "identity": {
+            "name": str(self_dict.get("name") or ""),
+            "public_key": str(self_dict.get("public_key") or ""),
+            "lat": self_dict.get("lat"),
+            "lon": self_dict.get("lon"),
+            "device_time_epoch": device_time_epoch,
+            "device_time_utc": None if device_time_epoch is None else datetime.fromtimestamp(device_time_epoch, tz=timezone.utc).isoformat(),
+            "manufacturer_model": str(device_dict.get("manufacturer_model") or ""),
+            "semantic_version": str(device_dict.get("semantic_version") or ""),
+            "firmware_build_date": str(device_dict.get("firmware_build_date") or ""),
+            "max_contacts": int(device_dict.get("max_contacts") or 0),
+            "max_channels": int(device_dict.get("max_channels") or 0),
+        },
+        "routing": {
+            "multi_acks": int(self_dict.get("multi_acks") or 0),
+            "manual_add_contacts_raw": int(self_dict.get("manual_add_contacts") or 0),
+            "manual_add_only": bool(int(self_dict.get("manual_add_contacts") or 0) & 1),
+            "telemetry_modes": telemetry_modes,
+            "rx_delay_base": float(getattr(tuning_params, "rx_delay_base", 0.0) or 0.0),
+            "airtime_factor": float(getattr(tuning_params, "airtime_factor", 0.0) or 0.0),
+            "path_hash_mode": int(device_dict.get("path_hash_mode") or 0),
+            "autoadd_config": autoadd_flags,
+            "autoadd_max_hops": autoadd_max_hops,
+            "autoadd_overwrite_oldest": bool(autoadd_flags & MESHCORE_AUTOADD_OVERWRITE_OLDEST),
+            "autoadd_chat": bool(autoadd_flags & MESHCORE_AUTOADD_CHAT),
+            "autoadd_repeater": bool(autoadd_flags & MESHCORE_AUTOADD_REPEATER),
+            "autoadd_room_server": bool(autoadd_flags & MESHCORE_AUTOADD_ROOM_SERVER),
+            "autoadd_sensor": bool(autoadd_flags & MESHCORE_AUTOADD_SENSOR),
+        },
+        "security": {
+            "ble_pin": int(device_dict.get("ble_pin") or 0),
+        },
+        "region_gps": {
+            "gps_enabled": gps_enabled,
+            "gps_interval": gps_interval,
+            "advert_loc_policy": int(self_dict.get("advert_loc_policy") or 0),
+        },
+        "bridge_hardware": {
+            "manufacturer_model": str(device_dict.get("manufacturer_model") or ""),
+            "semantic_version": str(device_dict.get("semantic_version") or ""),
+            "firmware_build_date": str(device_dict.get("firmware_build_date") or ""),
+            "core_stats": core_stats,
+            "radio_stats": dict(radio_stats or {}) if radio_stats else None,
+            "packet_stats": packet_stats,
+            "self_telemetry": dict(self_telemetry or {}) if self_telemetry else None,
+            "battery_info": dict(battery_info or {}) if battery_info else None,
+        },
+        "persisted_prefs": {
+            "manual_add_contacts_raw": int(self_dict.get("manual_add_contacts") or 0),
+            "telemetry_modes": telemetry_modes,
+            "ble_pin": int(device_dict.get("ble_pin") or 0),
+            "gps_enabled": gps_enabled,
+            "gps_interval": gps_interval,
+            "client_repeat": bool(device_dict.get("client_repeat")),
+            "path_hash_mode": int(device_dict.get("path_hash_mode") or 0),
+            "autoadd_config": autoadd_flags,
+            "autoadd_max_hops": autoadd_max_hops,
+            "rx_delay_base": float(getattr(tuning_params, "rx_delay_base", 0.0) or 0.0),
+            "airtime_factor": float(getattr(tuning_params, "airtime_factor", 0.0) or 0.0),
+        },
+        "raw_custom_vars": dict(custom_vars),
+        "capabilities": {
+            "direct_radio_params": True,
+            "direct_tx_power": True,
+            "direct_tuning_params": True,
+            "direct_other_params": True,
+            "direct_device_pin": True,
+            "direct_custom_vars": True,
+            "direct_autoadd": True,
+            "direct_path_hash_mode": True,
+            "direct_device_time": True,
+            "direct_send_advert": True,
+            "remote_cli_bridge": False,
+            "companion_cli_rescue_physical_only": True,
+            "cli_only_owner_info": True,
+            "cli_only_passwords": True,
+            "cli_only_regions": True,
+            "cli_only_bridge": True,
+            "cli_only_acl": True,
+        },
+        "constraints": {
+            "radio": {
+                "freq_mhz_min": 300.0,
+                "freq_mhz_max": 2500.0,
+                "bw_khz_min": 7.0,
+                "bw_khz_max": 500.0,
+                "sf_min": 5,
+                "sf_max": 12,
+                "cr_min": 5,
+                "cr_max": 8,
+                "tx_power_dbm_min": -9,
+                "tx_power_dbm_max": int(self_dict.get("max_tx_power") or 0),
+                "client_repeat_requires_allowed_range": True,
+                "client_repeat_allowed": client_repeat_allowed,
+            },
+            "identity": {
+                "name_max_utf8_bytes": 32,
+                "lat_min": -90.0,
+                "lat_max": 90.0,
+                "lon_min": -180.0,
+                "lon_max": 180.0,
+            },
+            "routing": {
+                "multi_acks_min": 0,
+                "multi_acks_max": 1,
+                "rx_delay_base_min": 0.0,
+                "rx_delay_base_max": 20.0,
+                "airtime_factor_min": 0.0,
+                "airtime_factor_max": 9.0,
+                "path_hash_mode_min": 0,
+                "path_hash_mode_max": 2,
+                "autoadd_max_hops_min": 0,
+                "autoadd_max_hops_max": 64,
+            },
+            "security": {
+                "ble_pin_zero_allowed": True,
+                "ble_pin_min": 100000,
+                "ble_pin_max": 999999,
+            },
+            "region_gps": {
+                "gps_interval_min": 0,
+                "gps_interval_max": 86400,
+                "advert_loc_policy_min": 0,
+                "advert_loc_policy_max": 2,
+            },
+        },
+    }
+
+
+def _apply_meshcore_params_with_client(
+    client: MeshCoreSerialClient,
+    *,
+    protocol_version: int,
+    app_version: int,
+    app_name: str,
+    group: str,
+    patch: dict,
+) -> dict:
+    normalized_group = str(group or "").strip().lower()
+    if not isinstance(patch, dict):
+        raise ValueError("patch must be an object")
+    current_snapshot = _collect_node_snapshot_with_client(
+        client,
+        protocol_version=protocol_version,
+        app_version=app_version,
+        app_name=app_name,
+        include_channels=False,
+    )
+    current_params = dict(current_snapshot.get("meshcore_params") or {})
+    if normalized_group == "radio":
+        current_radio = dict(current_params.get("radio") or {})
+        radio_needs_update = any(
+            key in patch
+            for key in ("freq_mhz", "bw_khz", "sf", "cr", "client_repeat")
+        )
+        if radio_needs_update:
+            next_freq_mhz = _require_float_range(
+                "freq_mhz",
+                _parse_float_or_default(patch.get("freq_mhz"), default=float(current_radio.get("freq_mhz") or 0.0)),
+                minimum=300.0,
+                maximum=2500.0,
+            )
+            next_bw_khz = _require_float_range(
+                "bw_khz",
+                _parse_float_or_default(patch.get("bw_khz"), default=float(current_radio.get("bw_khz") or 0.0)),
+                minimum=7.0,
+                maximum=500.0,
+            )
+            next_sf = _require_int_range(
+                "sf",
+                _parse_int_or_default(patch.get("sf"), default=int(current_radio.get("sf") or 0)),
+                minimum=5,
+                maximum=12,
+            )
+            next_cr = _require_int_range(
+                "cr",
+                _parse_int_or_default(patch.get("cr"), default=int(current_radio.get("cr") or 0)),
+                minimum=5,
+                maximum=8,
+            )
+            next_client_repeat = _parse_boolish(patch.get("client_repeat"), default=bool(current_radio.get("client_repeat")))
+            allowed_repeat_ranges = list(current_radio.get("allowed_repeat_ranges") or [])
+            if next_client_repeat and allowed_repeat_ranges:
+                freq_khz = int(round(next_freq_mhz * 1000.0))
+                if not any(
+                    int(item.get("lower_freq_khz") or 0) <= freq_khz <= int(item.get("upper_freq_khz") or 0)
+                    for item in allowed_repeat_ranges
+                    if isinstance(item, dict)
+                ):
+                    raise ValueError("client_repeat is not allowed for the selected frequency")
+            client.set_radio_params(
+                freq_mhz=next_freq_mhz,
+                bw_khz=next_bw_khz,
+                sf=next_sf,
+                cr=next_cr,
+                client_repeat=1 if next_client_repeat else 0,
+            )
+        if "tx_power_dbm" in patch:
+            client.set_radio_tx_power(
+                _require_int_range(
+                    "tx_power_dbm",
+                    _parse_int_or_default(patch.get("tx_power_dbm"), default=int(current_radio.get("tx_power_dbm") or 0)),
+                    minimum=-9,
+                    maximum=int(current_radio.get("max_tx_power") or 30),
+                )
+            )
+    elif normalized_group == "identity":
+        next_name = str(patch.get("name") or "").strip()
+        if "name" in patch and next_name:
+            client.set_advert_name(_validate_meshcore_name(next_name))
+        if "lat" in patch or "lon" in patch:
+            current_identity = dict(current_params.get("identity") or {})
+            lat = _parse_float_or_default(patch.get("lat"), default=float(current_identity.get("lat") or 0.0))
+            lon = _parse_float_or_default(patch.get("lon"), default=float(current_identity.get("lon") or 0.0))
+            client.set_advert_coords(lat, lon)
+    elif normalized_group == "routing":
+        current_routing = dict(current_params.get("routing") or {})
+        if any(
+            key in patch
+            for key in ("manual_add_only", "multi_acks", "telemetry_mode_base", "telemetry_mode_loc", "telemetry_mode_env")
+        ):
+            current_manual_add_raw = int(current_routing.get("manual_add_contacts_raw") or 0)
+            manual_add_only = _parse_boolish(patch.get("manual_add_only"), default=bool(current_routing.get("manual_add_only")))
+            next_manual_add_raw = (current_manual_add_raw & ~1) | (1 if manual_add_only else 0)
+            current_telemetry = dict(current_routing.get("telemetry_modes") or {})
+            telemetry_modes = _encode_meshcore_telemetry_modes(
+                base=_parse_int_or_default(patch.get("telemetry_mode_base"), default=int(current_telemetry.get("base") or 0)),
+                location=_parse_int_or_default(patch.get("telemetry_mode_loc"), default=int(current_telemetry.get("location") or 0)),
+                environment=_parse_int_or_default(patch.get("telemetry_mode_env"), default=int(current_telemetry.get("environment") or 0)),
+            )
+            current_region_gps = dict(current_params.get("region_gps") or {})
+            client.set_other_params(
+                manual_add_contacts=next_manual_add_raw,
+                telemetry_modes=telemetry_modes,
+                advert_loc_policy=_parse_int_or_default(current_region_gps.get("advert_loc_policy"), default=0),
+                multi_acks=_require_int_range(
+                    "multi_acks",
+                    _parse_int_or_default(patch.get("multi_acks"), default=int(current_routing.get("multi_acks") or 0)),
+                    minimum=0,
+                    maximum=1,
+                ),
+            )
+        if "rx_delay_base" in patch or "airtime_factor" in patch:
+            client.set_tuning_params(
+                rx_delay_base=_require_float_range(
+                    "rx_delay_base",
+                    _parse_float_or_default(patch.get("rx_delay_base"), default=float(current_routing.get("rx_delay_base") or 0.0)),
+                    minimum=0.0,
+                    maximum=20.0,
+                ),
+                airtime_factor=_require_float_range(
+                    "airtime_factor",
+                    _parse_float_or_default(patch.get("airtime_factor"), default=float(current_routing.get("airtime_factor") or 0.0)),
+                    minimum=0.0,
+                    maximum=9.0,
+                ),
+            )
+        if "path_hash_mode" in patch:
+            client.set_path_hash_mode(
+                _require_int_range(
+                    "path_hash_mode",
+                    _parse_int_or_default(patch.get("path_hash_mode"), default=int(current_routing.get("path_hash_mode") or 0)),
+                    minimum=0,
+                    maximum=2,
+                )
+            )
+        if any(
+            key in patch
+            for key in ("autoadd_overwrite_oldest", "autoadd_chat", "autoadd_repeater", "autoadd_room_server", "autoadd_sensor", "autoadd_max_hops")
+        ):
+            next_autoadd = 0
+            if _parse_boolish(patch.get("autoadd_overwrite_oldest"), default=bool(current_routing.get("autoadd_overwrite_oldest"))):
+                next_autoadd |= MESHCORE_AUTOADD_OVERWRITE_OLDEST
+            if _parse_boolish(patch.get("autoadd_chat"), default=bool(current_routing.get("autoadd_chat"))):
+                next_autoadd |= MESHCORE_AUTOADD_CHAT
+            if _parse_boolish(patch.get("autoadd_repeater"), default=bool(current_routing.get("autoadd_repeater"))):
+                next_autoadd |= MESHCORE_AUTOADD_REPEATER
+            if _parse_boolish(patch.get("autoadd_room_server"), default=bool(current_routing.get("autoadd_room_server"))):
+                next_autoadd |= MESHCORE_AUTOADD_ROOM_SERVER
+            if _parse_boolish(patch.get("autoadd_sensor"), default=bool(current_routing.get("autoadd_sensor"))):
+                next_autoadd |= MESHCORE_AUTOADD_SENSOR
+            client.set_autoadd_config(
+                next_autoadd,
+                max_hops=_require_int_range(
+                    "autoadd_max_hops",
+                    _parse_int_or_default(patch.get("autoadd_max_hops"), default=int(current_routing.get("autoadd_max_hops") or 0)),
+                    minimum=0,
+                    maximum=64,
+                ),
+            )
+    elif normalized_group == "security":
+        if "ble_pin" in patch:
+            next_ble_pin = _parse_int_or_default(patch.get("ble_pin"), default=0)
+            if next_ble_pin != 0 and not (100000 <= next_ble_pin <= 999999):
+                raise ValueError("ble_pin must be 0 or a 6-digit PIN")
+            client.set_device_pin(next_ble_pin)
+    elif normalized_group in {"region-gps", "region_gps"}:
+        current_region_gps = dict(current_params.get("region_gps") or {})
+        if "gps_enabled" in patch:
+            client.set_custom_var("gps", "1" if _parse_boolish(patch.get("gps_enabled"), default=bool(current_region_gps.get("gps_enabled"))) else "0")
+        if "gps_interval" in patch:
+            client.set_custom_var(
+                "gps_interval",
+                str(
+                    _require_int_range(
+                        "gps_interval",
+                        _parse_int_or_default(patch.get("gps_interval"), default=int(current_region_gps.get("gps_interval") or 0)),
+                        minimum=0,
+                        maximum=86400,
+                    )
+                ),
+            )
+        if "advert_loc_policy" in patch:
+            current_routing = dict(current_params.get("routing") or {})
+            current_telemetry = dict(current_routing.get("telemetry_modes") or {})
+            client.set_other_params(
+                manual_add_contacts=int(current_routing.get("manual_add_contacts_raw") or 0),
+                telemetry_modes=_encode_meshcore_telemetry_modes(
+                    base=int(current_telemetry.get("base") or 0),
+                    location=int(current_telemetry.get("location") or 0),
+                    environment=int(current_telemetry.get("environment") or 0),
+                ),
+                advert_loc_policy=_require_int_range(
+                    "advert_loc_policy",
+                    _parse_int_or_default(patch.get("advert_loc_policy"), default=int(current_region_gps.get("advert_loc_policy") or 0)),
+                    minimum=0,
+                    maximum=2,
+                ),
+                multi_acks=int(current_routing.get("multi_acks") or 0),
+            )
+    else:
+        raise ValueError(f"unsupported meshcore params group: {group}")
+    return _collect_node_snapshot_with_client(
+        client,
+        protocol_version=protocol_version,
+        app_version=app_version,
+        app_name=app_name,
+        include_channels=False,
+    )
+
+
 def _collect_node_snapshot_with_client(
     client: MeshCoreSerialClient,
     *,
     protocol_version: int,
     app_version: int,
     app_name: str,
+    include_channels: bool = True,
 ) -> dict:
     device = client.query_device(protocol_version)
     self_info = client.app_start(app_name, app_version)
@@ -4025,15 +4525,25 @@ def _collect_node_snapshot_with_client(
         battery_info = _battery_info_to_dict(client.get_battery_info())
     except (MeshCoreError, SerialException, ValueError):
         battery_info = None
-    try:
-        channels = _channels_to_dict(
-            [client.get_channel(index) for index in range(device.max_channels)],
-            device_dict,
-            owner_id=owner_id,
-            access_all=False,
-        )
-    except (MeshCoreError, SerialException, ValueError):
-        channels = []
+    meshcore_params = _collect_meshcore_params_with_client(
+        client,
+        device=device,
+        self_info=self_info,
+        radio_stats=radio_stats,
+        self_telemetry=self_telemetry,
+        battery_info=battery_info,
+    )
+    channels: list[dict] = []
+    if include_channels:
+        try:
+            channels = _channels_to_dict(
+                [client.get_channel(index) for index in range(device.max_channels)],
+                device_dict,
+                owner_id=owner_id,
+                access_all=False,
+            )
+        except (MeshCoreError, SerialException, ValueError):
+            channels = []
     return {
         "device": device_dict,
         "self": _self_info_to_dict(self_info),
@@ -4041,6 +4551,7 @@ def _collect_node_snapshot_with_client(
         "radio_stats": radio_stats,
         "self_telemetry": self_telemetry,
         "battery_info": battery_info,
+        "meshcore_params": meshcore_params,
     }
 
 
@@ -5203,7 +5714,6 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                 _adopt_unowned_message_records(owner_id)
                 _normalize_self_contact_message_records(owner_id)
                 _record_successful_connection(session.config, self_dict, device_dict)
-                session.ready_event.set()
                 radio_stats = _get_merged_radio_stats_with_client(client)
                 try:
                     self_telemetry = _self_telemetry_to_dict(client.get_self_telemetry())
@@ -5251,6 +5761,7 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                     session.self_telemetry = self_telemetry
                     session.battery_info = battery_info
                     _bootstrap_repeater_tracker_from_contacts_locked(session, contacts_dict)
+                session.ready_event.set()
                 _freeze_self_contact_if_cached(self_dict)
                 _record_signal_metrics_sample(radio_stats, repeaters=_get_recent_repeater_count(session), owner_id=owner_id)
                 recent_repeaters_count = _get_recent_repeater_count(session)
@@ -5584,6 +6095,55 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                                     "battery_info": snapshot.get("battery_info"),
                                 })
                                 continue
+                            if kind == "meshcore_params_snapshot":
+                                snapshot = _collect_node_snapshot_with_client(
+                                    client,
+                                    protocol_version=protocol_version,
+                                    app_version=app_version,
+                                    app_name=app_name,
+                                    include_channels=False,
+                                )
+                                with session.snapshot_lock:
+                                    session.device = dict(snapshot.get("device") or {})
+                                    session.self_info = dict(snapshot.get("self") or {})
+                                    session.radio_stats = snapshot.get("radio_stats")
+                                    session.self_telemetry = snapshot.get("self_telemetry")
+                                    session.battery_info = snapshot.get("battery_info")
+                                _log_delivery_debug("bg_command_response_put", port=port, kind=kind, sequence=command_sequence, ok=True)
+                                response_queue.put({
+                                    "ok": True,
+                                    **snapshot,
+                                })
+                                continue
+                            if kind == "apply_meshcore_params":
+                                snapshot = _apply_meshcore_params_with_client(
+                                    client,
+                                    protocol_version=protocol_version,
+                                    app_version=app_version,
+                                    app_name=app_name,
+                                    group=str(command.get("group") or ""),
+                                    patch=dict(command.get("patch") or {}),
+                                )
+                                self_dict = dict(snapshot.get("self") or {})
+                                device_dict = dict(snapshot.get("device") or {})
+                                owner_id = _normalize_owner_id(self_dict.get("public_key"))
+                                with session.snapshot_lock:
+                                    session.device = device_dict
+                                    session.self_info = self_dict
+                                    session.radio_stats = snapshot.get("radio_stats")
+                                    session.self_telemetry = snapshot.get("self_telemetry")
+                                    session.battery_info = snapshot.get("battery_info")
+                                _freeze_self_contact_if_cached(self_dict)
+                                _adopt_unowned_contact_records(owner_id)
+                                _adopt_unowned_message_records(owner_id)
+                                _normalize_self_contact_message_records(owner_id)
+                                _record_successful_connection(session.config, self_dict, device_dict)
+                                _log_delivery_debug("bg_command_response_put", port=port, kind=kind, sequence=command_sequence, ok=True)
+                                response_queue.put({
+                                    "ok": True,
+                                    **snapshot,
+                                })
+                                continue
                             raise MeshCoreError(f"unsupported background command: {kind}")
                         except Exception as exc:
                             _log_delivery_debug(
@@ -5914,6 +6474,10 @@ def _run_command_via_background_session(port: str, command: dict, timeout_secs: 
     session = _get_background_session(port)
     if session is None or not session.thread or not session.thread.is_alive() or session.stop_event.is_set():
         raise MeshCoreError("background companion session is not active")
+    with session.snapshot_lock:
+        bootstrap_pending = bool(session.device and session.self_info and not session.collections_ready)
+    if bootstrap_pending:
+        raise MeshCoreError("background companion session is still initializing")
     response_queue: queue.Queue = queue.Queue(maxsize=1)
     payload = dict(command)
     payload["response_queue"] = response_queue
@@ -8208,6 +8772,8 @@ def _device_info_to_dict(device):
         "firmware_build_date": device.firmware_build_date,
         "manufacturer_model": device.manufacturer_model,
         "semantic_version": device.semantic_version,
+        "client_repeat": int(getattr(device, "client_repeat", 0) or 0),
+        "path_hash_mode": int(getattr(device, "path_hash_mode", 0) or 0),
     }
 
 
@@ -8249,6 +8815,15 @@ def _battery_info_to_dict(info):
     }
 
 
+def _core_stats_to_dict(stats) -> dict:
+    return {
+        "battery_mv": stats.battery_mv,
+        "uptime_secs": stats.uptime_secs,
+        "errors": stats.errors,
+        "queue_len": stats.queue_len,
+    }
+
+
 def _freeze_self_contact_if_cached(self_info: dict | None) -> None:
     public_key = str((self_info or {}).get("public_key") or "").strip().lower()
     if len(public_key) != 64:
@@ -8264,6 +8839,18 @@ def _radio_stats_to_dict(stats) -> dict:
         "last_snr": stats.last_snr,
         "tx_air_secs": stats.tx_air_secs,
         "rx_air_secs": stats.rx_air_secs,
+    }
+
+
+def _packet_stats_to_dict(stats) -> dict:
+    return {
+        "received": stats.received,
+        "sent": stats.sent,
+        "sent_flood": stats.sent_flood,
+        "sent_direct": stats.sent_direct,
+        "recv_flood": stats.recv_flood,
+        "recv_direct": stats.recv_direct,
+        "recv_errors": stats.recv_errors,
     }
 
 
@@ -8957,6 +9544,116 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                     }
                 )
                 return
+            if parsed.path == "/api/node/meshcore-params":
+                session_kwargs = self._session_kwargs(body)
+                logging.info(
+                    "api node/meshcore-params requested transport=%s connection=%s baudrate=%s",
+                    conn["transport_type"],
+                    conn["transport_id"],
+                    conn["baudrate"],
+                )
+                session = _get_background_session(session_kwargs["port"])
+                if session and session.thread and session.thread.is_alive() and not session.stop_event.is_set():
+                    response = _run_command_via_background_session(
+                        session_kwargs["port"],
+                        {
+                            "kind": "meshcore_params_snapshot",
+                        },
+                        timeout_secs=15.0,
+                    )
+                    self._send_json({
+                        "ok": True,
+                        "device": response.get("device"),
+                        "self": response.get("self"),
+                        "radio_stats": response.get("radio_stats"),
+                        "self_telemetry": response.get("self_telemetry"),
+                        "battery_info": response.get("battery_info"),
+                        "meshcore_params": response.get("meshcore_params") or {},
+                    })
+                    return
+                with _paused_background_session(session_kwargs["port"]):
+                    with _connection_access_from_kwargs(session_kwargs):
+                        with _open_meshcore_client(session_kwargs) as client:
+                            snapshot = _collect_node_snapshot_with_client(
+                                client,
+                                protocol_version=session_kwargs["protocol_version"],
+                                app_version=session_kwargs["app_version"],
+                                app_name=session_kwargs["app_name"],
+                                include_channels=False,
+                            )
+                self._send_json({
+                    "ok": True,
+                    "device": snapshot.get("device"),
+                    "self": snapshot.get("self"),
+                    "radio_stats": snapshot.get("radio_stats"),
+                    "self_telemetry": snapshot.get("self_telemetry"),
+                    "battery_info": snapshot.get("battery_info"),
+                    "meshcore_params": snapshot.get("meshcore_params") or {},
+                })
+                return
+            if parsed.path == "/api/node/meshcore-params/apply":
+                session_kwargs = self._session_kwargs(body)
+                group = str(body.get("group") or "").strip()
+                if not group:
+                    raise ValueError("group is required")
+                patch = body.get("patch") if isinstance(body.get("patch"), dict) else {}
+                logging.info(
+                    "api node/meshcore-params/apply requested transport=%s connection=%s baudrate=%s group=%s",
+                    conn["transport_type"],
+                    conn["transport_id"],
+                    conn["baudrate"],
+                    group,
+                )
+                session = _get_background_session(session_kwargs["port"])
+                if session and session.thread and session.thread.is_alive() and not session.stop_event.is_set():
+                    response = _run_command_via_background_session(
+                        session_kwargs["port"],
+                        {
+                            "kind": "apply_meshcore_params",
+                            "group": group,
+                            "patch": patch,
+                        },
+                        timeout_secs=18.0,
+                    )
+                    self._send_json({
+                        "ok": True,
+                        "device": response.get("device"),
+                        "self": response.get("self"),
+                        "radio_stats": response.get("radio_stats"),
+                        "self_telemetry": response.get("self_telemetry"),
+                        "battery_info": response.get("battery_info"),
+                        "meshcore_params": response.get("meshcore_params") or {},
+                    })
+                    return
+                with _paused_background_session(session_kwargs["port"]):
+                    with _connection_access_from_kwargs(session_kwargs):
+                        with _open_meshcore_client(session_kwargs) as client:
+                            snapshot = _apply_meshcore_params_with_client(
+                                client,
+                                protocol_version=session_kwargs["protocol_version"],
+                                app_version=session_kwargs["app_version"],
+                                app_name=session_kwargs["app_name"],
+                                group=group,
+                                patch=patch,
+                            )
+                device_dict = dict(snapshot.get("device") or {})
+                self_dict = dict(snapshot.get("self") or {})
+                owner_id = _normalize_owner_id(self_dict.get("public_key"))
+                _adopt_unowned_contact_records(owner_id)
+                _adopt_unowned_message_records(owner_id)
+                _normalize_self_contact_message_records(owner_id)
+                _freeze_self_contact_if_cached(self_dict)
+                _record_successful_connection(session_kwargs, self_dict, device_dict)
+                self._send_json({
+                    "ok": True,
+                    "device": device_dict,
+                    "self": self_dict,
+                    "radio_stats": snapshot.get("radio_stats"),
+                    "self_telemetry": snapshot.get("self_telemetry"),
+                    "battery_info": snapshot.get("battery_info"),
+                    "meshcore_params": snapshot.get("meshcore_params") or {},
+                })
+                return
             if parsed.path == "/api/connect":
                 session_kwargs = self._session_kwargs(body)
                 light = bool(body.get("light"))
@@ -9120,7 +9817,25 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                 if session:
                     snapshot = _build_session_snapshot(session, include_contacts=False)
                     if snapshot["active"]:
-                        self._send_json({"channels": snapshot["channels"]})
+                        if not bool(snapshot.get("collections_ready")):
+                            self._send_json(
+                                {
+                                    "channels": snapshot.get("channels") or [],
+                                    "channels_count": snapshot.get("channels_count"),
+                                    "collections_ready": False,
+                                    "pending": True,
+                                    "source": "startup-pending",
+                                }
+                            )
+                            return
+                        self._send_json(
+                            {
+                                "channels": snapshot["channels"],
+                                "channels_count": snapshot.get("channels_count"),
+                                "collections_ready": True,
+                                "source": "live-session",
+                            }
+                        )
                         return
                 session_kwargs = self._session_kwargs(body)
                 with _paused_background_session(session_kwargs["port"]):
@@ -9242,11 +9957,24 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                 if session and not refresh:
                     snapshot = _build_session_snapshot(session, include_channels=False)
                     if snapshot["active"]:
+                        if not bool(snapshot.get("collections_ready")):
+                            with _contact_owner_scope(port=conn["port"]):
+                                cached_contacts = CONTACT_BACKEND.list_cached_contacts(body.get("limit"))
+                            self._send_json({
+                                "next_since": None,
+                                "contacts": _compact_contacts_for_client(cached_contacts),
+                                "contact_summary": _build_contact_count_summary(cached_contacts),
+                                "source": "cache+startup-pending",
+                                "collections_ready": False,
+                                "pending": True,
+                            })
+                            return
                         self._send_json({
                             "next_since": None,
                             "contacts": snapshot["contacts"],
                             "contact_summary": snapshot.get("contact_summary") or {},
                             "source": "cache+live-session",
+                            "collections_ready": True,
                         })
                         return
                 if not refresh:

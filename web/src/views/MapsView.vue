@@ -1320,7 +1320,7 @@ function applyViewport({ animate = false, force = false } = {}) {
 }
 
 async function ensureContactsLoaded() {
-  if (!session.connected || contactsLoading.value) {
+  if (!session.connected || !session.collectionsReady || contactsLoading.value) {
     return
   }
   const loadedContacts = Array.isArray(session.contacts) ? session.contacts.length : 0

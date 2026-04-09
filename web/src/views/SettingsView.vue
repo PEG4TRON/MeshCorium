@@ -24,6 +24,47 @@ const refreshing = ref(false)
 const activeSettingsSectionId = useStorage('meshcorium_settings_root_section', 'meshcorium')
 const activeDebugSectionId = useStorage('meshcorium_settings_debug_section', 'debug')
 const activeNodeCompanionSectionId = useStorage('meshcorium_settings_node_section', 'general')
+const activeMeshcoreParamsSectionId = useStorage('meshcorium_settings_meshcore_params_section', 'radio')
+const meshcoreParamsPayload = ref(null)
+const meshcoreParamsLoading = ref(false)
+const meshcoreParamsBusyMode = ref('')
+const meshcoreParamsRadioDraft = ref({
+  freq_mhz: '',
+  bw_khz: '',
+  sf: 7,
+  cr: 5,
+  tx_power_dbm: '',
+  client_repeat: false,
+})
+const meshcoreParamsIdentityDraft = ref({
+  name: '',
+  lat: '',
+  lon: '',
+})
+const meshcoreParamsRoutingDraft = ref({
+  multi_acks: '',
+  manual_add_only: false,
+  telemetry_mode_base: 0,
+  telemetry_mode_loc: 0,
+  telemetry_mode_env: 0,
+  rx_delay_base: '',
+  airtime_factor: '',
+  path_hash_mode: 0,
+  autoadd_overwrite_oldest: false,
+  autoadd_chat: false,
+  autoadd_repeater: false,
+  autoadd_room_server: false,
+  autoadd_sensor: false,
+  autoadd_max_hops: '',
+})
+const meshcoreParamsSecurityDraft = ref({
+  ble_pin: '',
+})
+const meshcoreParamsRegionGpsDraft = ref({
+  gps_enabled: false,
+  gps_interval: '',
+  advert_loc_policy: 0,
+})
 const settingsWorkspaceRef = ref(null)
 const wallpaperFileInput = ref(null)
 const uploadingWallpaper = ref(false)
@@ -148,6 +189,20 @@ function formatDurationCompact(totalSeconds) {
   return parts.join(' ')
 }
 
+function resolveSettingsOptionLabel(options, value) {
+  const numericValue = Number(value)
+  const match = Array.isArray(options)
+    ? options.find((option) => Number(option?.value) === numericValue)
+    : null
+  return match?.label || String(value ?? t('common.na'))
+}
+
+function formatMeshcoreStateLabel(value) {
+  return value
+    ? t('settings.nodeCompanion.meshcoreParams.fields.stateOn')
+    : t('settings.nodeCompanion.meshcoreParams.fields.stateOff')
+}
+
 async function refreshSettingsState({ includePorts = false, suppressStatus = false } = {}) {
   if (refreshing.value) {
     return
@@ -192,6 +247,9 @@ const serviceStatusCopy = computed(() => {
 
 const isDebugSettingsMode = computed(() => activeSettingsSectionId.value === 'debug')
 const isNodeCompanionSettingsMode = computed(() => activeSettingsSectionId.value === 'node')
+const isMeshcoreParamsSettingsMode = computed(() => (
+  isNodeCompanionSettingsMode.value && activeNodeCompanionSectionId.value === 'meshcore-params'
+))
 
 const debugSettingsSections = computed(() => {
   return [
@@ -221,12 +279,66 @@ const nodeCompanionSections = computed(() => {
       subtitle: t('settings.nodeCompanion.sections.connection.subtitle'),
     },
     {
+      id: 'meshcore-params',
+      title: t('settings.nodeCompanion.sections.meshcoreParams.title'),
+      subtitle: t('settings.nodeCompanion.sections.meshcoreParams.subtitle'),
+    },
+    {
       id: 'signal-metrics',
       title: t('settings.nodeCompanion.sections.signalMetrics.title'),
       subtitle: t('settings.nodeCompanion.sections.signalMetrics.subtitle'),
     },
   ]
 })
+
+const meshcoreParamsSections = computed(() => {
+  return [
+    {
+      id: 'radio',
+      title: t('settings.nodeCompanion.meshcoreParams.groups.radio.title'),
+      subtitle: t('settings.nodeCompanion.meshcoreParams.groups.radio.subtitle'),
+    },
+    {
+      id: 'identity',
+      title: t('settings.nodeCompanion.meshcoreParams.groups.identity.title'),
+      subtitle: t('settings.nodeCompanion.meshcoreParams.groups.identity.subtitle'),
+    },
+    {
+      id: 'routing',
+      title: t('settings.nodeCompanion.meshcoreParams.groups.routing.title'),
+      subtitle: t('settings.nodeCompanion.meshcoreParams.groups.routing.subtitle'),
+    },
+    {
+      id: 'security',
+      title: t('settings.nodeCompanion.meshcoreParams.groups.security.title'),
+      subtitle: t('settings.nodeCompanion.meshcoreParams.groups.security.subtitle'),
+    },
+    {
+      id: 'region-gps',
+      title: t('settings.nodeCompanion.meshcoreParams.groups.regionGps.title'),
+      subtitle: t('settings.nodeCompanion.meshcoreParams.groups.regionGps.subtitle'),
+    },
+    {
+      id: 'bridge-hardware',
+      title: t('settings.nodeCompanion.meshcoreParams.groups.bridgeHardware.title'),
+      subtitle: t('settings.nodeCompanion.meshcoreParams.groups.bridgeHardware.subtitle'),
+    },
+    {
+      id: 'persisted-prefs',
+      title: t('settings.nodeCompanion.meshcoreParams.groups.persistedPrefs.title'),
+      subtitle: t('settings.nodeCompanion.meshcoreParams.groups.persistedPrefs.subtitle'),
+    },
+  ]
+})
+
+const activeMeshcoreParamsSection = computed(() => {
+  const normalizedId = normalizeMeshcoreParamsSectionId(activeMeshcoreParamsSectionId.value)
+  if (normalizedId !== activeMeshcoreParamsSectionId.value) {
+    activeMeshcoreParamsSectionId.value = normalizedId
+  }
+  return meshcoreParamsSections.value.find((section) => section.id === normalizedId) || meshcoreParamsSections.value[0]
+})
+const meshcoreParamsGroupKey = computed(() => meshcoreParamsTranslationGroupId(activeMeshcoreParamsSection.value?.id))
 
 const activeDebugSectionTitle = computed(() => {
   return activeDebugSectionId.value === 'messages'
@@ -241,6 +353,9 @@ const activeDebugSectionSubtitle = computed(() => {
 })
 
 const activeNodeCompanionSectionTitle = computed(() => {
+  if (activeNodeCompanionSectionId.value === 'meshcore-params') {
+    return activeMeshcoreParamsSection.value.title
+  }
   if (activeNodeCompanionSectionId.value === 'connection') {
     return t('settings.nodeCompanion.sections.connection.title')
   }
@@ -250,6 +365,9 @@ const activeNodeCompanionSectionTitle = computed(() => {
 })
 
 const activeNodeCompanionSectionSubtitle = computed(() => {
+  if (activeNodeCompanionSectionId.value === 'meshcore-params') {
+    return activeMeshcoreParamsSection.value.subtitle
+  }
   if (activeNodeCompanionSectionId.value === 'connection') {
     return t('settings.nodeCompanion.sections.connection.subtitle')
   }
@@ -257,6 +375,30 @@ const activeNodeCompanionSectionSubtitle = computed(() => {
     ? t('settings.nodeCompanion.sections.signalMetrics.subtitle')
     : t('settings.nodeCompanion.sections.general.subtitle')
 })
+
+function normalizeMeshcoreParamsSectionId(value) {
+  const normalized = String(value || '').trim()
+  return normalized === 'identity'
+    ? 'identity'
+    : (normalized === 'routing'
+        ? 'routing'
+        : (normalized === 'security'
+            ? 'security'
+            : (normalized === 'region-gps'
+                ? 'region-gps'
+                : (normalized === 'bridge-hardware'
+                    ? 'bridge-hardware'
+                    : (normalized === 'persisted-prefs' ? 'persisted-prefs' : 'radio')))))
+}
+
+function meshcoreParamsTranslationGroupId(sectionId) {
+  const normalized = normalizeMeshcoreParamsSectionId(sectionId)
+  return normalized === 'region-gps'
+    ? 'regionGps'
+    : (normalized === 'bridge-hardware'
+        ? 'bridgeHardware'
+        : (normalized === 'persisted-prefs' ? 'persistedPrefs' : normalized))
+}
 
 const batteryDebugPayload = computed(() => {
   const telemetry = session.selfTelemetry || {}
@@ -343,6 +485,7 @@ const messageDebugSummaryCards = computed(() => {
 })
 
 const nodeCompanionAvailable = computed(() => Boolean(String(session.selectedPort || '').trim()))
+const meshcoreParamsAvailable = computed(() => Boolean(session.connected && session.selectedConnection?.transport_id))
 
 const nodeCompanionListenerActive = computed(() => Boolean(nodeCompanionListenerSource.value))
 
@@ -700,6 +843,58 @@ const nodeCompanionConnectionNote = computed(() => {
   }
 })
 
+const meshcoreParamsRadio = computed(() => meshcoreParamsPayload.value?.radio || {})
+const meshcoreParamsIdentity = computed(() => meshcoreParamsPayload.value?.identity || {})
+const meshcoreParamsRouting = computed(() => meshcoreParamsPayload.value?.routing || {})
+const meshcoreParamsSecurity = computed(() => meshcoreParamsPayload.value?.security || {})
+const meshcoreParamsRegionGps = computed(() => meshcoreParamsPayload.value?.region_gps || {})
+const meshcoreParamsBridgeHardware = computed(() => meshcoreParamsPayload.value?.bridge_hardware || {})
+const meshcoreParamsPersistedPrefs = computed(() => meshcoreParamsPayload.value?.persisted_prefs || {})
+const meshcoreParamsRawCustomVars = computed(() => meshcoreParamsPayload.value?.raw_custom_vars || {})
+const meshcoreParamsCapabilities = computed(() => meshcoreParamsPayload.value?.capabilities || {})
+const meshcoreParamsCompanionCliRescueOnly = computed(() => Boolean(meshcoreParamsCapabilities.value?.companion_cli_rescue_physical_only))
+const meshcoreParamsConstraints = computed(() => meshcoreParamsPayload.value?.constraints || {})
+const meshcoreParamsRadioConstraints = computed(() => meshcoreParamsConstraints.value?.radio || {})
+const meshcoreParamsIdentityConstraints = computed(() => meshcoreParamsConstraints.value?.identity || {})
+const meshcoreParamsRoutingConstraints = computed(() => meshcoreParamsConstraints.value?.routing || {})
+const meshcoreParamsSecurityConstraints = computed(() => meshcoreParamsConstraints.value?.security || {})
+const meshcoreParamsRegionGpsConstraints = computed(() => meshcoreParamsConstraints.value?.region_gps || {})
+const meshcoreTelemetryModeOptions = computed(() => [
+  { value: 0, label: t('settings.nodeCompanion.meshcoreParams.fields.telemetryModeOptions.deny') },
+  { value: 1, label: t('settings.nodeCompanion.meshcoreParams.fields.telemetryModeOptions.flags') },
+  { value: 2, label: t('settings.nodeCompanion.meshcoreParams.fields.telemetryModeOptions.allowAll') },
+])
+const meshcoreAdvertLocPolicyOptions = computed(() => [
+  { value: 0, label: t('settings.nodeCompanion.meshcoreParams.fields.advertPolicyOptions.none') },
+  { value: 1, label: t('settings.nodeCompanion.meshcoreParams.fields.advertPolicyOptions.share') },
+  { value: 2, label: t('settings.nodeCompanion.meshcoreParams.fields.advertPolicyOptions.prefs') },
+])
+const meshcorePathHashModeOptions = computed(() => [
+  { value: 0, label: t('settings.nodeCompanion.meshcoreParams.fields.pathHashModeOptions.byte1') },
+  { value: 1, label: t('settings.nodeCompanion.meshcoreParams.fields.pathHashModeOptions.byte2') },
+  { value: 2, label: t('settings.nodeCompanion.meshcoreParams.fields.pathHashModeOptions.byte3') },
+])
+const meshcorePersistedAutoaddLabels = computed(() => {
+  const prefs = meshcoreParamsPersistedPrefs.value || {}
+  const labels = []
+  if (prefs.autoadd_overwrite_oldest) {
+    labels.push(t('settings.nodeCompanion.meshcoreParams.fields.autoaddOverwriteOldest'))
+  }
+  if (prefs.autoadd_chat) {
+    labels.push(t('settings.nodeCompanion.meshcoreParams.fields.autoaddChat'))
+  }
+  if (prefs.autoadd_repeater) {
+    labels.push(t('settings.nodeCompanion.meshcoreParams.fields.autoaddRepeater'))
+  }
+  if (prefs.autoadd_room_server) {
+    labels.push(t('settings.nodeCompanion.meshcoreParams.fields.autoaddRoomServer'))
+  }
+  if (prefs.autoadd_sensor) {
+    labels.push(t('settings.nodeCompanion.meshcoreParams.fields.autoaddSensor'))
+  }
+  return labels
+})
+
 function captureNodeConnectionRenderField(field, fallback, resolver) {
   try {
     return resolver()
@@ -748,11 +943,240 @@ const nodeConnectionRenderModel = computed(() => {
 
 function buildNodeCompanionConfig(extra = {}) {
   const config = session.configBody(extra)
-  if (!config.port) {
-    session.setStatus(t('settings.nodeCompanion.status.portRequired'), true)
+  const connection = session.selectedConnection
+  const transportType = String(connection?.transport_type || config?.transport_type || '').trim().toLowerCase()
+  const transportId = String(connection?.transport_id || config?.transport_id || config?.port || '').trim()
+  if (!transportId || transportType === 'wifi') {
+    session.setStatus(t('settings.nodeCompanion.status.connectionRequired'), true)
     return null
   }
   return config
+}
+
+function setOptionalNumberField(target, key, value, { integer = false } = {}) {
+  if (value == null) {
+    return
+  }
+  const normalized = typeof value === 'string' ? value.trim() : value
+  if (normalized === '') {
+    return
+  }
+  const parsed = integer ? Number.parseInt(normalized, 10) : Number(normalized)
+  if (!Number.isFinite(parsed)) {
+    return
+  }
+  target[key] = parsed
+}
+
+function resetMeshcoreParamsDrafts() {
+  meshcoreParamsRadioDraft.value = {
+    freq_mhz: '',
+    bw_khz: '',
+    sf: 7,
+    cr: 5,
+    tx_power_dbm: '',
+    client_repeat: false,
+  }
+  meshcoreParamsIdentityDraft.value = {
+    name: '',
+    lat: '',
+    lon: '',
+  }
+  meshcoreParamsRoutingDraft.value = {
+    multi_acks: '',
+    manual_add_only: false,
+    telemetry_mode_base: 0,
+    telemetry_mode_loc: 0,
+    telemetry_mode_env: 0,
+    rx_delay_base: '',
+    airtime_factor: '',
+    path_hash_mode: 0,
+    autoadd_overwrite_oldest: false,
+    autoadd_chat: false,
+    autoadd_repeater: false,
+    autoadd_room_server: false,
+    autoadd_sensor: false,
+    autoadd_max_hops: '',
+  }
+  meshcoreParamsSecurityDraft.value = {
+    ble_pin: '',
+  }
+  meshcoreParamsRegionGpsDraft.value = {
+    gps_enabled: false,
+    gps_interval: '',
+    advert_loc_policy: 0,
+  }
+}
+
+function populateMeshcoreParamsDrafts(payload) {
+  const radio = payload?.radio || {}
+  const identity = payload?.identity || {}
+  const routing = payload?.routing || {}
+  const telemetryModes = routing?.telemetry_modes || {}
+  const security = payload?.security || {}
+  const regionGps = payload?.region_gps || {}
+  meshcoreParamsRadioDraft.value = {
+    freq_mhz: radio?.freq_mhz ?? '',
+    bw_khz: radio?.bw_khz ?? '',
+    sf: Number(radio?.sf || 7) || 7,
+    cr: Number(radio?.cr || 5) || 5,
+    tx_power_dbm: radio?.tx_power_dbm ?? '',
+    client_repeat: Boolean(radio?.client_repeat),
+  }
+  meshcoreParamsIdentityDraft.value = {
+    name: String(identity?.name || ''),
+    lat: identity?.lat ?? '',
+    lon: identity?.lon ?? '',
+  }
+  meshcoreParamsRoutingDraft.value = {
+    multi_acks: routing?.multi_acks ?? '',
+    manual_add_only: Boolean(routing?.manual_add_only),
+    telemetry_mode_base: Number(telemetryModes?.base || 0),
+    telemetry_mode_loc: Number(telemetryModes?.location || 0),
+    telemetry_mode_env: Number(telemetryModes?.environment || 0),
+    rx_delay_base: routing?.rx_delay_base ?? '',
+    airtime_factor: routing?.airtime_factor ?? '',
+    path_hash_mode: Number(routing?.path_hash_mode || 0),
+    autoadd_overwrite_oldest: Boolean(routing?.autoadd_overwrite_oldest),
+    autoadd_chat: Boolean(routing?.autoadd_chat),
+    autoadd_repeater: Boolean(routing?.autoadd_repeater),
+    autoadd_room_server: Boolean(routing?.autoadd_room_server),
+    autoadd_sensor: Boolean(routing?.autoadd_sensor),
+    autoadd_max_hops: routing?.autoadd_max_hops ?? '',
+  }
+  meshcoreParamsSecurityDraft.value = {
+    ble_pin: security?.ble_pin ?? '',
+  }
+  meshcoreParamsRegionGpsDraft.value = {
+    gps_enabled: Boolean(regionGps?.gps_enabled),
+    gps_interval: regionGps?.gps_interval ?? '',
+    advert_loc_policy: Number(regionGps?.advert_loc_policy || 0),
+  }
+}
+
+async function loadMeshcoreParams({ silent = false } = {}) {
+  const config = buildNodeCompanionConfig()
+  if (!config) {
+    meshcoreParamsPayload.value = null
+    resetMeshcoreParamsDrafts()
+    return null
+  }
+  if (session.connected && !session.collectionsReady) {
+    if (!silent) {
+      session.setStatus(t('settings.nodeCompanion.meshcoreParams.status.initializingCollections'))
+    }
+    return null
+  }
+  if (meshcoreParamsLoading.value) {
+    return meshcoreParamsPayload.value
+  }
+  meshcoreParamsLoading.value = true
+  try {
+    const data = await session.api('/api/node/meshcore-params', {
+      method: 'POST',
+      body: JSON.stringify(config),
+    })
+    session.applySessionSnapshot(data || {})
+    meshcoreParamsPayload.value = data?.meshcore_params || null
+    populateMeshcoreParamsDrafts(meshcoreParamsPayload.value)
+    if (!silent) {
+      session.setStatus(t('settings.nodeCompanion.meshcoreParams.status.refreshed'))
+    }
+    return meshcoreParamsPayload.value
+  } catch (error) {
+    meshcoreParamsPayload.value = null
+    resetMeshcoreParamsDrafts()
+    session.setStatus(error instanceof Error ? error.message : String(error || t('settings.status.loadFailed')), true)
+    return null
+  } finally {
+    meshcoreParamsLoading.value = false
+  }
+}
+
+async function applyMeshcoreParamsGroup(group, patch) {
+  const config = buildNodeCompanionConfig()
+  if (!config || meshcoreParamsBusyMode.value) {
+    return null
+  }
+  meshcoreParamsBusyMode.value = String(group || '')
+  try {
+    const data = await session.api('/api/node/meshcore-params/apply', {
+      method: 'POST',
+      body: JSON.stringify({
+        ...config,
+        group,
+        patch,
+      }),
+    })
+    session.applySessionSnapshot(data || {})
+    meshcoreParamsPayload.value = data?.meshcore_params || null
+    populateMeshcoreParamsDrafts(meshcoreParamsPayload.value)
+    session.setStatus(t('settings.nodeCompanion.meshcoreParams.status.groupApplied', {
+      group: activeMeshcoreParamsSection.value?.title || group,
+    }))
+    return data
+  } catch (error) {
+    session.setStatus(error instanceof Error ? error.message : String(error || t('settings.status.saveFailed')), true)
+    return null
+  } finally {
+    meshcoreParamsBusyMode.value = ''
+  }
+}
+
+async function applyMeshcoreRadioParams() {
+  const patch = {
+    client_repeat: Boolean(meshcoreParamsRadioDraft.value.client_repeat),
+    sf: Number(meshcoreParamsRadioDraft.value.sf),
+    cr: Number(meshcoreParamsRadioDraft.value.cr),
+  }
+  setOptionalNumberField(patch, 'freq_mhz', meshcoreParamsRadioDraft.value.freq_mhz)
+  setOptionalNumberField(patch, 'bw_khz', meshcoreParamsRadioDraft.value.bw_khz)
+  setOptionalNumberField(patch, 'tx_power_dbm', meshcoreParamsRadioDraft.value.tx_power_dbm, { integer: true })
+  await applyMeshcoreParamsGroup('radio', patch)
+}
+
+async function applyMeshcoreIdentityParams() {
+  const patch = {
+    name: String(meshcoreParamsIdentityDraft.value.name || '').trim(),
+  }
+  setOptionalNumberField(patch, 'lat', meshcoreParamsIdentityDraft.value.lat)
+  setOptionalNumberField(patch, 'lon', meshcoreParamsIdentityDraft.value.lon)
+  await applyMeshcoreParamsGroup('identity', patch)
+}
+
+async function applyMeshcoreRoutingParams() {
+  const patch = {
+    multi_acks: Number(meshcoreParamsRoutingDraft.value.multi_acks),
+    manual_add_only: Boolean(meshcoreParamsRoutingDraft.value.manual_add_only),
+    telemetry_mode_base: Number(meshcoreParamsRoutingDraft.value.telemetry_mode_base),
+    telemetry_mode_loc: Number(meshcoreParamsRoutingDraft.value.telemetry_mode_loc),
+    telemetry_mode_env: Number(meshcoreParamsRoutingDraft.value.telemetry_mode_env),
+    path_hash_mode: Number(meshcoreParamsRoutingDraft.value.path_hash_mode),
+    autoadd_overwrite_oldest: Boolean(meshcoreParamsRoutingDraft.value.autoadd_overwrite_oldest),
+    autoadd_chat: Boolean(meshcoreParamsRoutingDraft.value.autoadd_chat),
+    autoadd_repeater: Boolean(meshcoreParamsRoutingDraft.value.autoadd_repeater),
+    autoadd_room_server: Boolean(meshcoreParamsRoutingDraft.value.autoadd_room_server),
+    autoadd_sensor: Boolean(meshcoreParamsRoutingDraft.value.autoadd_sensor),
+  }
+  setOptionalNumberField(patch, 'rx_delay_base', meshcoreParamsRoutingDraft.value.rx_delay_base)
+  setOptionalNumberField(patch, 'airtime_factor', meshcoreParamsRoutingDraft.value.airtime_factor)
+  setOptionalNumberField(patch, 'autoadd_max_hops', meshcoreParamsRoutingDraft.value.autoadd_max_hops, { integer: true })
+  await applyMeshcoreParamsGroup('routing', patch)
+}
+
+async function applyMeshcoreSecurityParams() {
+  const patch = {}
+  setOptionalNumberField(patch, 'ble_pin', meshcoreParamsSecurityDraft.value.ble_pin, { integer: true })
+  await applyMeshcoreParamsGroup('security', patch)
+}
+
+async function applyMeshcoreRegionGpsParams() {
+  const patch = {
+    gps_enabled: Boolean(meshcoreParamsRegionGpsDraft.value.gps_enabled),
+    advert_loc_policy: Number(meshcoreParamsRegionGpsDraft.value.advert_loc_policy || 0),
+  }
+  setOptionalNumberField(patch, 'gps_interval', meshcoreParamsRegionGpsDraft.value.gps_interval, { integer: true })
+  await applyMeshcoreParamsGroup('region-gps', patch)
 }
 
 function resolveSavedConnectionDisplayName(profile) {
@@ -1116,6 +1540,10 @@ async function saveNodeCompanionName() {
   if (!config || nodeCompanionSaving.value) {
     return
   }
+  if (session.connected && !session.collectionsReady) {
+    session.setStatus(t('settings.nodeCompanion.meshcoreParams.status.initializingCollections'))
+    return
+  }
   const nextName = String(nodeCompanionNameDraft.value || '').trim()
   if (!nextName) {
     session.setStatus(t('settings.nodeCompanion.status.nameRequired'), true)
@@ -1151,6 +1579,10 @@ async function syncNodeCompanionTime() {
   if (!config || nodeCompanionSyncingTime.value) {
     return
   }
+  if (session.connected && !session.collectionsReady) {
+    session.setStatus(t('settings.nodeCompanion.meshcoreParams.status.initializingCollections'))
+    return
+  }
   nodeCompanionSyncingTime.value = true
   try {
     const data = await session.api('/api/time/sync', {
@@ -1170,17 +1602,32 @@ async function syncNodeCompanionTime() {
 }
 
 async function sendNodeCompanionAdvert() {
+  return sendNodeCompanionAdvertWithMode(false)
+}
+
+async function sendNodeCompanionFloodAdvert() {
+  return sendNodeCompanionAdvertWithMode(true)
+}
+
+async function sendNodeCompanionAdvertWithMode(flood = false) {
   const config = buildNodeCompanionConfig()
   if (!config || nodeCompanionSendingAdvert.value) {
+    return
+  }
+  if (session.connected && !session.collectionsReady) {
+    session.setStatus(t('settings.nodeCompanion.meshcoreParams.status.initializingCollections'))
     return
   }
   nodeCompanionSendingAdvert.value = true
   try {
     await session.api('/api/advert', {
       method: 'POST',
-      body: JSON.stringify(config),
+      body: JSON.stringify({
+        ...config,
+        flood: Boolean(flood),
+      }),
     })
-    session.setStatus(t('advert.status.directSent'))
+    session.setStatus(t(flood ? 'advert.status.floodSent' : 'advert.status.directSent'))
   } catch (error) {
     session.setStatus(error instanceof Error ? error.message : String(error || t('advert.status.failed')), true)
   } finally {
@@ -1191,6 +1638,10 @@ async function sendNodeCompanionAdvert() {
 async function refreshNodeCompanionContacts() {
   const config = buildNodeCompanionConfig()
   if (!config || nodeCompanionRefreshingContacts.value) {
+    return
+  }
+  if (session.connected && !session.collectionsReady) {
+    session.setStatus(t('settings.nodeCompanion.meshcoreParams.status.initializingCollections'))
     return
   }
   nodeCompanionRefreshingContacts.value = true
@@ -2256,7 +2707,9 @@ function normalizeNodeCompanionSettingsSectionId(value) {
   const normalized = String(value || '').trim()
   return normalized === 'signal-metrics'
     ? 'signal-metrics'
-    : (normalized === 'connection' ? 'connection' : 'general')
+    : (normalized === 'meshcore-params'
+        ? 'meshcore-params'
+        : (normalized === 'connection' ? 'connection' : 'general'))
 }
 
 function normalizeRootSettingsSectionId(value) {
@@ -2408,6 +2861,14 @@ function selectNodeCompanionSection(sectionId) {
 
 function leaveNodeCompanionSettingsMode() {
   void navigateToSettingsSection(lastRootSettingsSectionId.value || 'meshcorium')
+}
+
+function selectMeshcoreParamsSection(sectionId) {
+  activeMeshcoreParamsSectionId.value = normalizeMeshcoreParamsSectionId(sectionId)
+}
+
+function leaveMeshcoreParamsMode() {
+  void navigateToSettingsSection('node')
 }
 
 function nowPerformanceMs() {
@@ -2601,6 +3062,29 @@ watch(
 )
 
 watch(
+  () => [isMeshcoreParamsSettingsMode.value, session.selfPublicKey, session.connected],
+  ([enabled, publicKey, connected], [prevEnabled, prevPublicKey, prevConnected] = []) => {
+    if (!enabled) {
+      return
+    }
+    if (!connected) {
+      meshcoreParamsPayload.value = null
+      resetMeshcoreParamsDrafts()
+      return
+    }
+    if (
+      enabled !== prevEnabled
+      || String(publicKey || '') !== String(prevPublicKey || '')
+      || Boolean(connected) !== Boolean(prevConnected)
+      || !meshcoreParamsPayload.value
+    ) {
+      void loadMeshcoreParams({ silent: true })
+    }
+  },
+  { immediate: true },
+)
+
+watch(
   () => [
     activeSettingsSectionId.value,
     activeNodeCompanionSectionId.value,
@@ -2695,7 +3179,13 @@ onBeforeUnmount(() => {
     </template>
 
     <template #scroller-header>
-      <div v-if="isDebugSettingsMode" class="mc-scroller-copy mc-scroller-copy--settings-debug">
+      <div v-if="isMeshcoreParamsSettingsMode" class="mc-scroller-copy mc-scroller-copy--settings-debug">
+        <button class="mc-settings-debug-back" type="button" @click="leaveMeshcoreParamsMode">
+          {{ t('settings.nodeCompanion.meshcoreParams.backToNode') }}
+        </button>
+        <h1 class="mc-scroller-title mc-scroller-title--shell-top">{{ t('settings.nodeCompanion.sections.meshcoreParams.title') }}</h1>
+      </div>
+      <div v-else-if="isDebugSettingsMode" class="mc-scroller-copy mc-scroller-copy--settings-debug">
         <button class="mc-settings-debug-back" type="button" @click="leaveDebugSettingsMode">
           {{ t('settings.debug.backToSettings') }}
         </button>
@@ -2714,7 +3204,24 @@ onBeforeUnmount(() => {
 
     <template #scroller-body>
       <div class="mc-list-scroll mc-list-scroll--settings">
-        <template v-if="isDebugSettingsMode">
+        <template v-if="isMeshcoreParamsSettingsMode">
+          <button
+            v-for="section in meshcoreParamsSections"
+            :key="section.id"
+            class="mc-settings-nav-item"
+            :class="{ active: section.id === activeMeshcoreParamsSectionId }"
+            type="button"
+            @click="selectMeshcoreParamsSection(section.id)"
+          >
+            <div class="mc-settings-nav-copy">
+              <div class="mc-settings-nav-title-row">
+                <p class="mc-settings-nav-title">{{ section.title }}</p>
+              </div>
+              <p class="mc-settings-nav-subtitle">{{ section.subtitle }}</p>
+            </div>
+          </button>
+        </template>
+        <template v-else-if="isDebugSettingsMode">
           <button
             v-for="section in debugSettingsSections"
             :key="section.id"
@@ -3368,6 +3875,630 @@ onBeforeUnmount(() => {
             <div class="mc-settings-panel-copy">
               <h3>{{ t('settings.nodeCompanion.connection.note.title') }}</h3>
               <p>{{ nodeConnectionRenderModel.connectionNote }}</p>
+            </div>
+          </section>
+        </div>
+
+        <div
+          v-else-if="activeNodeCompanionSectionId === 'meshcore-params'"
+          key="node-meshcore-params"
+          class="mc-settings-section-stack"
+          data-node-companion-section="meshcore-params"
+        >
+          <section class="mc-settings-panel">
+            <div class="mc-settings-panel-copy">
+              <h3>{{ activeMeshcoreParamsSection.title }}</h3>
+              <p>{{ activeMeshcoreParamsSection.subtitle }}</p>
+            </div>
+
+            <div class="mc-settings-rows">
+              <div class="mc-settings-row">
+                <div class="mc-settings-row-label">
+                  <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.snapshot') }}</strong>
+                  <span>{{ t(`settings.nodeCompanion.meshcoreParams.groups.${meshcoreParamsGroupKey}.previewBody`) }}</span>
+                </div>
+                <div class="mc-settings-row-control">
+                  <button class="mc-secondary-button" type="button" :disabled="meshcoreParamsLoading || !meshcoreParamsAvailable" @click="loadMeshcoreParams()">
+                    {{ meshcoreParamsLoading ? t('settings.nodeCompanion.meshcoreParams.loading') : t('settings.nodeCompanion.meshcoreParams.refresh') }}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section v-if="!meshcoreParamsAvailable" class="mc-settings-panel mc-settings-panel--note">
+            <div class="mc-settings-panel-copy">
+              <h3>{{ t('settings.nodeCompanion.meshcoreParams.unavailableTitle') }}</h3>
+              <p>{{ t('settings.nodeCompanion.meshcoreParams.unavailableBody') }}</p>
+            </div>
+          </section>
+
+          <template v-else-if="meshcoreParamsPayload">
+            <section v-if="activeMeshcoreParamsSection.id === 'radio'" class="mc-settings-panel">
+              <div class="mc-settings-panel-copy">
+                <h3>{{ t('settings.nodeCompanion.meshcoreParams.cards.radio.title') }}</h3>
+                <p>{{ t('settings.nodeCompanion.meshcoreParams.cards.radio.body') }}</p>
+              </div>
+              <div class="mc-settings-rows">
+                <label class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.frequency') }}</strong>
+                    <span>
+                      {{ t('settings.nodeCompanion.meshcoreParams.fields.maxTxPower') }}: {{ meshcoreParamsRadio.max_tx_power ?? t('common.na') }}
+                      · {{ t('settings.nodeCompanion.meshcoreParams.fields.frequencyRange') }}
+                    </span>
+                  </div>
+                  <div class="mc-settings-row-control">
+                    <input
+                      v-model="meshcoreParamsRadioDraft.freq_mhz"
+                      class="mc-settings-native-select"
+                      type="number"
+                      :min="meshcoreParamsRadioConstraints.freq_mhz_min ?? 300"
+                      :max="meshcoreParamsRadioConstraints.freq_mhz_max ?? 2500"
+                      step="0.001"
+                    />
+                  </div>
+                </label>
+                <label class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.bandwidth') }}</strong>
+                    <span>
+                      {{ t('settings.nodeCompanion.meshcoreParams.fields.allowedRepeatRanges') }}
+                      <template v-if="Array.isArray(meshcoreParamsRadio.allowed_repeat_ranges) && meshcoreParamsRadio.allowed_repeat_ranges.length">
+                        : {{ meshcoreParamsRadio.allowed_repeat_ranges.map((item) => `${item.lower_freq_mhz}-${item.upper_freq_mhz} MHz`).join(', ') }}
+                      </template>
+                    </span>
+                  </div>
+                  <div class="mc-settings-row-control">
+                    <input
+                      v-model="meshcoreParamsRadioDraft.bw_khz"
+                      class="mc-settings-native-select"
+                      type="number"
+                      :min="meshcoreParamsRadioConstraints.bw_khz_min ?? 7"
+                      :max="meshcoreParamsRadioConstraints.bw_khz_max ?? 500"
+                      step="0.1"
+                    />
+                  </div>
+                </label>
+                <label class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.sf') }}</strong>
+                    <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.cr') }}</span>
+                  </div>
+                  <div class="mc-settings-row-control">
+                    <div class="mc-settings-inline-controls">
+                      <select v-model="meshcoreParamsRadioDraft.sf" class="mc-settings-native-select">
+                        <option v-for="value in [5, 6, 7, 8, 9, 10, 11, 12]" :key="`sf-${value}`" :value="value">{{ value }}</option>
+                      </select>
+                      <select v-model="meshcoreParamsRadioDraft.cr" class="mc-settings-native-select">
+                        <option v-for="value in [5, 6, 7, 8]" :key="`cr-${value}`" :value="value">{{ value }}</option>
+                      </select>
+                    </div>
+                  </div>
+                </label>
+                <label class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.txPower') }}</strong>
+                    <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.clientRepeat') }}</span>
+                  </div>
+                  <div class="mc-settings-row-control mc-settings-row-control--stack">
+                    <input
+                      v-model="meshcoreParamsRadioDraft.tx_power_dbm"
+                      class="mc-settings-native-select"
+                      type="number"
+                      :min="meshcoreParamsRadioConstraints.tx_power_dbm_min ?? -9"
+                      :max="meshcoreParamsRadioConstraints.tx_power_dbm_max ?? meshcoreParamsRadio.max_tx_power ?? 30"
+                      step="1"
+                    />
+                    <label class="mc-settings-inline-toggle">
+                      <input
+                        v-model="meshcoreParamsRadioDraft.client_repeat"
+                        type="checkbox"
+                        :disabled="meshcoreParamsRadioConstraints.client_repeat_requires_allowed_range && !meshcoreParamsRadio.client_repeat_allowed"
+                      />
+                      <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.clientRepeat') }}</span>
+                    </label>
+                    <span
+                      v-if="meshcoreParamsRadioConstraints.client_repeat_requires_allowed_range && !meshcoreParamsRadio.client_repeat_allowed"
+                      class="mc-settings-inline-hint"
+                    >
+                      {{ t('settings.nodeCompanion.meshcoreParams.notes.clientRepeatUnavailable') }}
+                    </span>
+                  </div>
+                </label>
+              </div>
+              <div class="mc-settings-card-actions">
+                <button class="mc-primary-button" type="button" :disabled="meshcoreParamsBusyMode === 'radio'" @click="applyMeshcoreRadioParams">
+                  {{ meshcoreParamsBusyMode === 'radio' ? t('settings.nodeCompanion.actions.applying') : t('settings.nodeCompanion.actions.apply') }}
+                </button>
+              </div>
+            </section>
+
+            <section v-else-if="activeMeshcoreParamsSection.id === 'identity'" class="mc-settings-panel">
+              <div class="mc-settings-panel-copy">
+                <h3>{{ t('settings.nodeCompanion.meshcoreParams.cards.identity.title') }}</h3>
+                <p>{{ t('settings.nodeCompanion.meshcoreParams.cards.identity.body') }}</p>
+              </div>
+              <div class="mc-settings-rows">
+                <label class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.name') }}</strong>
+                    <span>
+                      {{ t('settings.nodeCompanion.meshcoreParams.fields.publicKey') }}: {{ meshcoreParamsIdentity.public_key || t('common.na') }}
+                      <template v-if="meshcoreParamsIdentityConstraints.name_max_utf8_bytes">
+                        · {{ t('settings.nodeCompanion.meshcoreParams.fields.nameMaxBytes', { count: meshcoreParamsIdentityConstraints.name_max_utf8_bytes }) }}
+                      </template>
+                    </span>
+                  </div>
+                  <div class="mc-settings-row-control">
+                      <input v-model="meshcoreParamsIdentityDraft.name" class="mc-settings-native-select" type="text" />
+                  </div>
+                </label>
+                <label class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.latitude') }}</strong>
+                    <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.longitude') }}</span>
+                  </div>
+                  <div class="mc-settings-row-control">
+                    <div class="mc-settings-inline-controls">
+                      <input
+                        v-model="meshcoreParamsIdentityDraft.lat"
+                        class="mc-settings-native-select"
+                        type="number"
+                        :min="meshcoreParamsIdentityConstraints.lat_min ?? -90"
+                        :max="meshcoreParamsIdentityConstraints.lat_max ?? 90"
+                        step="0.000001"
+                      />
+                      <input
+                        v-model="meshcoreParamsIdentityDraft.lon"
+                        class="mc-settings-native-select"
+                        type="number"
+                        :min="meshcoreParamsIdentityConstraints.lon_min ?? -180"
+                        :max="meshcoreParamsIdentityConstraints.lon_max ?? 180"
+                        step="0.000001"
+                      />
+                    </div>
+                  </div>
+                </label>
+                <div class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.deviceModel') }}</strong>
+                    <span>{{ meshcoreParamsIdentity.manufacturer_model || t('common.na') }}</span>
+                  </div>
+                </div>
+                <div class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.deviceTime') }}</strong>
+                    <span>{{ meshcoreParamsIdentity.device_time_utc || t('common.na') }}</span>
+                  </div>
+                </div>
+                <div class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.firmware') }}</strong>
+                    <span>{{ meshcoreParamsIdentity.semantic_version || t('common.na') }}</span>
+                  </div>
+                </div>
+              </div>
+              <div class="mc-settings-card-actions">
+                <button class="mc-primary-button" type="button" :disabled="meshcoreParamsBusyMode === 'identity'" @click="applyMeshcoreIdentityParams">
+                  {{ meshcoreParamsBusyMode === 'identity' ? t('settings.nodeCompanion.actions.applying') : t('settings.nodeCompanion.actions.apply') }}
+                </button>
+                <button
+                  class="mc-button mc-button--ghost"
+                  type="button"
+                  :disabled="!meshcoreParamsAvailable || nodeCompanionSyncingTime"
+                  @click="syncNodeCompanionTime"
+                >
+                  {{ nodeCompanionSyncingTime ? t('settings.nodeCompanion.actions.syncingTime') : t('settings.nodeCompanion.actions.syncTime') }}
+                </button>
+                <button
+                  class="mc-button mc-button--ghost"
+                  type="button"
+                  :disabled="!meshcoreParamsAvailable || nodeCompanionSendingAdvert"
+                  @click="sendNodeCompanionAdvert"
+                >
+                  {{ nodeCompanionSendingAdvert ? t('settings.nodeCompanion.actions.sendingAdvert') : t('advert.actions.direct') }}
+                </button>
+                <button
+                  class="mc-button mc-button--ghost"
+                  type="button"
+                  :disabled="!meshcoreParamsAvailable || nodeCompanionSendingAdvert"
+                  @click="sendNodeCompanionFloodAdvert"
+                >
+                  {{ nodeCompanionSendingAdvert ? t('settings.nodeCompanion.actions.sendingAdvert') : t('advert.actions.flood') }}
+                </button>
+              </div>
+            </section>
+
+            <section v-else-if="activeMeshcoreParamsSection.id === 'routing'" class="mc-settings-panel">
+              <div class="mc-settings-panel-copy">
+                <h3>{{ t('settings.nodeCompanion.meshcoreParams.cards.routing.title') }}</h3>
+                <p>{{ t('settings.nodeCompanion.meshcoreParams.cards.routing.body') }}</p>
+              </div>
+              <div class="mc-settings-rows">
+                <label class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.multiAcks') }}</strong>
+                    <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.manualAddOnly') }}</span>
+                  </div>
+                  <div class="mc-settings-row-control mc-settings-row-control--stack">
+                    <input
+                      v-model="meshcoreParamsRoutingDraft.multi_acks"
+                      class="mc-settings-native-select"
+                      type="number"
+                      :min="meshcoreParamsRoutingConstraints.multi_acks_min ?? 0"
+                      :max="meshcoreParamsRoutingConstraints.multi_acks_max ?? 1"
+                      step="1"
+                    />
+                    <label class="mc-settings-inline-toggle">
+                      <input v-model="meshcoreParamsRoutingDraft.manual_add_only" type="checkbox" />
+                      <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.manualAddOnly') }}</span>
+                    </label>
+                  </div>
+                </label>
+                <label class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.telemetryBase') }}</strong>
+                    <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.telemetryLocation') }} / {{ t('settings.nodeCompanion.meshcoreParams.fields.telemetryEnvironment') }}</span>
+                  </div>
+                  <div class="mc-settings-row-control">
+                    <div class="mc-settings-inline-controls">
+                      <select v-model="meshcoreParamsRoutingDraft.telemetry_mode_base" class="mc-settings-native-select">
+                        <option v-for="option in meshcoreTelemetryModeOptions" :key="`tele-base-${option.value}`" :value="option.value">{{ option.label }}</option>
+                      </select>
+                      <select v-model="meshcoreParamsRoutingDraft.telemetry_mode_loc" class="mc-settings-native-select">
+                        <option v-for="option in meshcoreTelemetryModeOptions" :key="`tele-loc-${option.value}`" :value="option.value">{{ option.label }}</option>
+                      </select>
+                      <select v-model="meshcoreParamsRoutingDraft.telemetry_mode_env" class="mc-settings-native-select">
+                        <option v-for="option in meshcoreTelemetryModeOptions" :key="`tele-env-${option.value}`" :value="option.value">{{ option.label }}</option>
+                      </select>
+                    </div>
+                  </div>
+                </label>
+                <label class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.rxDelayBase') }}</strong>
+                    <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.airtimeFactor') }}</span>
+                  </div>
+                  <div class="mc-settings-row-control">
+                    <div class="mc-settings-inline-controls">
+                      <input
+                        v-model="meshcoreParamsRoutingDraft.rx_delay_base"
+                        class="mc-settings-native-select"
+                        type="number"
+                        :min="meshcoreParamsRoutingConstraints.rx_delay_base_min ?? 0"
+                        :max="meshcoreParamsRoutingConstraints.rx_delay_base_max ?? 20"
+                        step="0.001"
+                      />
+                      <input
+                        v-model="meshcoreParamsRoutingDraft.airtime_factor"
+                        class="mc-settings-native-select"
+                        type="number"
+                        :min="meshcoreParamsRoutingConstraints.airtime_factor_min ?? 0"
+                        :max="meshcoreParamsRoutingConstraints.airtime_factor_max ?? 9"
+                        step="0.001"
+                      />
+                    </div>
+                  </div>
+                </label>
+                <label class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.pathHashMode') }}</strong>
+                    <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.autoaddMaxHops') }}</span>
+                  </div>
+                  <div class="mc-settings-row-control">
+                    <div class="mc-settings-inline-controls">
+                      <select v-model="meshcoreParamsRoutingDraft.path_hash_mode" class="mc-settings-native-select">
+                        <option v-for="option in meshcorePathHashModeOptions" :key="`path-${option.value}`" :value="option.value">{{ option.label }}</option>
+                      </select>
+                      <input
+                        v-model="meshcoreParamsRoutingDraft.autoadd_max_hops"
+                        class="mc-settings-native-select"
+                        type="number"
+                        :min="meshcoreParamsRoutingConstraints.autoadd_max_hops_min ?? 0"
+                        :max="meshcoreParamsRoutingConstraints.autoadd_max_hops_max ?? 64"
+                        step="1"
+                      />
+                    </div>
+                  </div>
+                </label>
+                <div class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.autoaddFlags') }}</strong>
+                    <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.autoaddBody') }}</span>
+                  </div>
+                  <div class="mc-settings-row-control mc-settings-row-control--stack">
+                    <label class="mc-settings-inline-toggle"><input v-model="meshcoreParamsRoutingDraft.autoadd_overwrite_oldest" type="checkbox" /><span>{{ t('settings.nodeCompanion.meshcoreParams.fields.autoaddOverwriteOldest') }}</span></label>
+                    <label class="mc-settings-inline-toggle"><input v-model="meshcoreParamsRoutingDraft.autoadd_chat" type="checkbox" /><span>{{ t('settings.nodeCompanion.meshcoreParams.fields.autoaddChat') }}</span></label>
+                    <label class="mc-settings-inline-toggle"><input v-model="meshcoreParamsRoutingDraft.autoadd_repeater" type="checkbox" /><span>{{ t('settings.nodeCompanion.meshcoreParams.fields.autoaddRepeater') }}</span></label>
+                    <label class="mc-settings-inline-toggle"><input v-model="meshcoreParamsRoutingDraft.autoadd_room_server" type="checkbox" /><span>{{ t('settings.nodeCompanion.meshcoreParams.fields.autoaddRoomServer') }}</span></label>
+                    <label class="mc-settings-inline-toggle"><input v-model="meshcoreParamsRoutingDraft.autoadd_sensor" type="checkbox" /><span>{{ t('settings.nodeCompanion.meshcoreParams.fields.autoaddSensor') }}</span></label>
+                  </div>
+                </div>
+              </div>
+              <div class="mc-settings-card-actions">
+                <button class="mc-primary-button" type="button" :disabled="meshcoreParamsBusyMode === 'routing'" @click="applyMeshcoreRoutingParams">
+                  {{ meshcoreParamsBusyMode === 'routing' ? t('settings.nodeCompanion.actions.applying') : t('settings.nodeCompanion.actions.apply') }}
+                </button>
+              </div>
+            </section>
+
+            <section v-else-if="activeMeshcoreParamsSection.id === 'security'" class="mc-settings-panel">
+              <div class="mc-settings-panel-copy">
+                <h3>{{ t('settings.nodeCompanion.meshcoreParams.cards.security.title') }}</h3>
+                <p>{{ t('settings.nodeCompanion.meshcoreParams.cards.security.body') }}</p>
+              </div>
+              <div class="mc-settings-rows">
+                <label class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.blePin') }}</strong>
+                    <span>{{ t('settings.nodeCompanion.meshcoreParams.notes.securityUnsupported') }}</span>
+                  </div>
+                  <div class="mc-settings-row-control">
+                    <input
+                      v-model="meshcoreParamsSecurityDraft.ble_pin"
+                      class="mc-settings-native-select"
+                      type="number"
+                      :min="meshcoreParamsSecurityConstraints.ble_pin_zero_allowed ? 0 : (meshcoreParamsSecurityConstraints.ble_pin_min ?? 100000)"
+                      :max="meshcoreParamsSecurityConstraints.ble_pin_max ?? 999999"
+                      step="1"
+                    />
+                  </div>
+                </label>
+              </div>
+              <div class="mc-settings-card-actions">
+                <button class="mc-primary-button" type="button" :disabled="meshcoreParamsBusyMode === 'security'" @click="applyMeshcoreSecurityParams">
+                  {{ meshcoreParamsBusyMode === 'security' ? t('settings.nodeCompanion.actions.applying') : t('settings.nodeCompanion.actions.apply') }}
+                </button>
+              </div>
+            </section>
+
+            <section v-else-if="activeMeshcoreParamsSection.id === 'region-gps'" class="mc-settings-panel">
+              <div class="mc-settings-panel-copy">
+                <h3>{{ t('settings.nodeCompanion.meshcoreParams.cards.regionGps.title') }}</h3>
+                <p>{{ t('settings.nodeCompanion.meshcoreParams.cards.regionGps.body') }}</p>
+              </div>
+              <div class="mc-settings-rows">
+                <div class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.gpsEnabled') }}</strong>
+                    <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.gpsInterval') }}</span>
+                  </div>
+                  <div class="mc-settings-row-control mc-settings-row-control--stack">
+                    <label class="mc-settings-inline-toggle">
+                      <input v-model="meshcoreParamsRegionGpsDraft.gps_enabled" type="checkbox" />
+                      <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.gpsEnabled') }}</span>
+                    </label>
+                    <input
+                      v-model="meshcoreParamsRegionGpsDraft.gps_interval"
+                      class="mc-settings-native-select"
+                      type="number"
+                      :min="meshcoreParamsRegionGpsConstraints.gps_interval_min ?? 0"
+                      :max="meshcoreParamsRegionGpsConstraints.gps_interval_max ?? 86400"
+                      step="1"
+                    />
+                  </div>
+                </div>
+                <label class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.advertPolicy') }}</strong>
+                    <span>{{ t('settings.nodeCompanion.meshcoreParams.notes.regionUnsupported') }}</span>
+                  </div>
+                  <div class="mc-settings-row-control">
+                    <select v-model="meshcoreParamsRegionGpsDraft.advert_loc_policy" class="mc-settings-native-select">
+                      <option v-for="option in meshcoreAdvertLocPolicyOptions" :key="`advert-${option.value}`" :value="option.value">{{ option.label }}</option>
+                    </select>
+                  </div>
+                </label>
+              </div>
+              <div class="mc-settings-card-actions">
+                <button class="mc-primary-button" type="button" :disabled="meshcoreParamsBusyMode === 'region-gps'" @click="applyMeshcoreRegionGpsParams">
+                  {{ meshcoreParamsBusyMode === 'region-gps' ? t('settings.nodeCompanion.actions.applying') : t('settings.nodeCompanion.actions.apply') }}
+                </button>
+              </div>
+            </section>
+
+            <section v-else-if="activeMeshcoreParamsSection.id === 'bridge-hardware'" class="mc-settings-panel mc-settings-panel--note">
+              <div class="mc-settings-panel-copy">
+                <h3>{{ t('settings.nodeCompanion.meshcoreParams.cards.bridgeHardware.title') }}</h3>
+                <p>{{ t('settings.nodeCompanion.meshcoreParams.notes.bridgeReadonly') }}</p>
+              </div>
+              <div class="mc-settings-rows">
+                <div class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.deviceModel') }}</strong>
+                    <span>{{ meshcoreParamsBridgeHardware.manufacturer_model || t('common.na') }}</span>
+                  </div>
+                </div>
+                <div class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.firmware') }}</strong>
+                    <span>{{ meshcoreParamsBridgeHardware.semantic_version || t('common.na') }}</span>
+                  </div>
+                </div>
+                <div class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.uptime') }}</strong>
+                    <span>{{ formatDurationCompact(meshcoreParamsBridgeHardware.core_stats?.uptime_secs) }}</span>
+                  </div>
+                </div>
+                <div class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.coreQueue') }}</strong>
+                    <span>{{ meshcoreParamsBridgeHardware.core_stats?.queue_len ?? t('common.na') }}</span>
+                  </div>
+                </div>
+                <div class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.coreErrors') }}</strong>
+                    <span>{{ meshcoreParamsBridgeHardware.core_stats?.errors ?? t('common.na') }}</span>
+                  </div>
+                </div>
+                <div class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.batteryMillivolts') }}</strong>
+                    <span>{{ meshcoreParamsBridgeHardware.core_stats?.battery_mv ?? t('common.na') }}</span>
+                  </div>
+                </div>
+                <div class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.packetsReceived') }}</strong>
+                    <span>{{ meshcoreParamsBridgeHardware.packet_stats?.received ?? t('common.na') }}</span>
+                  </div>
+                </div>
+                <div class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.packetsSent') }}</strong>
+                    <span>{{ meshcoreParamsBridgeHardware.packet_stats?.sent ?? t('common.na') }}</span>
+                  </div>
+                </div>
+              </div>
+              <div class="mc-settings-panel-copy">
+                <pre class="mc-settings-json-block">{{ formatJsonPayload(meshcoreParamsBridgeHardware) }}</pre>
+              </div>
+            </section>
+
+            <section v-else-if="activeMeshcoreParamsSection.id === 'persisted-prefs'" class="mc-settings-panel mc-settings-panel--note">
+              <div class="mc-settings-panel-copy">
+                <h3>{{ t('settings.nodeCompanion.meshcoreParams.cards.persistedPrefs.title') }}</h3>
+                <p>{{ t('settings.nodeCompanion.meshcoreParams.notes.persistedReadonly') }}</p>
+              </div>
+              <div class="mc-settings-rows">
+                <div class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.manualAddRaw') }}</strong>
+                    <span>{{ formatMeshcoreStateLabel(meshcoreParamsPersistedPrefs.manual_add_contacts_raw & 1) }}</span>
+                  </div>
+                </div>
+                <div class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.telemetryBase') }}</strong>
+                    <span>{{ resolveSettingsOptionLabel(meshcoreTelemetryModeOptions, meshcoreParamsPersistedPrefs.telemetry_modes?.base ?? 0) }}</span>
+                  </div>
+                </div>
+                <div class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.telemetryLocation') }}</strong>
+                    <span>{{ resolveSettingsOptionLabel(meshcoreTelemetryModeOptions, meshcoreParamsPersistedPrefs.telemetry_modes?.location ?? 0) }}</span>
+                  </div>
+                </div>
+                <div class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.telemetryEnvironment') }}</strong>
+                    <span>{{ resolveSettingsOptionLabel(meshcoreTelemetryModeOptions, meshcoreParamsPersistedPrefs.telemetry_modes?.environment ?? 0) }}</span>
+                  </div>
+                </div>
+                <div class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.clientRepeat') }}</strong>
+                    <span>{{ formatMeshcoreStateLabel(meshcoreParamsPersistedPrefs.client_repeat) }}</span>
+                  </div>
+                </div>
+                <div class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.blePin') }}</strong>
+                    <span>{{ meshcoreParamsPersistedPrefs.ble_pin || t('settings.values.notConfigured') }}</span>
+                  </div>
+                </div>
+                <div class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.gpsEnabled') }}</strong>
+                    <span>{{ formatMeshcoreStateLabel(meshcoreParamsPersistedPrefs.gps_enabled) }}</span>
+                  </div>
+                </div>
+                <div class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.gpsInterval') }}</strong>
+                    <span>{{ meshcoreParamsPersistedPrefs.gps_interval ?? t('common.na') }}</span>
+                  </div>
+                </div>
+                <div class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.advertPolicy') }}</strong>
+                    <span>{{ resolveSettingsOptionLabel(meshcoreAdvertPolicyOptions, meshcoreParamsPersistedPrefs.advert_loc_policy ?? 0) }}</span>
+                  </div>
+                </div>
+                <div class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.pathHashMode') }}</strong>
+                    <span>{{ resolveSettingsOptionLabel(meshcorePathHashModeOptions, meshcoreParamsPersistedPrefs.path_hash_mode ?? 0) }}</span>
+                  </div>
+                </div>
+                <div class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.rxDelayBase') }}</strong>
+                    <span>{{ meshcoreParamsPersistedPrefs.rx_delay_base ?? t('common.na') }}</span>
+                  </div>
+                </div>
+                <div class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.airtimeFactor') }}</strong>
+                    <span>{{ meshcoreParamsPersistedPrefs.airtime_factor ?? t('common.na') }}</span>
+                  </div>
+                </div>
+                <div class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.autoaddConfigRaw') }}</strong>
+                    <span>{{ meshcoreParamsPersistedPrefs.autoadd_config ?? 0 }}</span>
+                  </div>
+                </div>
+                <div class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.autoaddMaxHops') }}</strong>
+                    <span>{{ meshcoreParamsPersistedPrefs.autoadd_max_hops ?? t('common.na') }}</span>
+                  </div>
+                </div>
+                <div class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.autoaddFlagsEnabled') }}</strong>
+                    <span>{{ meshcorePersistedAutoaddLabels.length ? meshcorePersistedAutoaddLabels.join(', ') : t('settings.nodeCompanion.meshcoreParams.fields.noneEnabled') }}</span>
+                  </div>
+                </div>
+                <div class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.customVars') }}</strong>
+                    <span>{{ Object.keys(meshcoreParamsRawCustomVars).length }}</span>
+                  </div>
+                </div>
+                <div class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.capabilities') }}</strong>
+                    <span>{{ Object.keys(meshcoreParamsCapabilities).length }}</span>
+                  </div>
+                </div>
+              </div>
+              <div class="mc-settings-panel-copy">
+                <h3>{{ t('settings.nodeCompanion.meshcoreParams.fields.snapshot') }}</h3>
+                <pre class="mc-settings-json-block">{{ formatJsonPayload(meshcoreParamsPersistedPrefs) }}</pre>
+              </div>
+              <div class="mc-settings-panel-copy">
+                <h3>{{ t('settings.nodeCompanion.meshcoreParams.fields.customVars') }}</h3>
+                <pre class="mc-settings-json-block">{{ formatJsonPayload(meshcoreParamsRawCustomVars) }}</pre>
+              </div>
+              <div class="mc-settings-panel-copy">
+                <h3>{{ t('settings.nodeCompanion.meshcoreParams.fields.capabilities') }}</h3>
+                <pre class="mc-settings-json-block">{{ formatJsonPayload(meshcoreParamsCapabilities) }}</pre>
+              </div>
+            </section>
+          </template>
+
+          <section v-else class="mc-settings-panel mc-settings-panel--note">
+            <div class="mc-settings-panel-copy">
+              <h3>{{ t('settings.nodeCompanion.meshcoreParams.loading') }}</h3>
+              <p>{{ t('settings.nodeCompanion.meshcoreParams.note.body') }}</p>
+            </div>
+          </section>
+
+          <section class="mc-settings-panel mc-settings-panel--note">
+            <div class="mc-settings-panel-copy">
+              <h3>{{ t('settings.nodeCompanion.meshcoreParams.note.title') }}</h3>
+              <p>{{ t('settings.nodeCompanion.meshcoreParams.note.body') }}</p>
+            </div>
+          </section>
+          <section v-if="meshcoreParamsCompanionCliRescueOnly" class="mc-settings-panel mc-settings-panel--note">
+            <div class="mc-settings-panel-copy">
+              <h3>{{ t('settings.nodeCompanion.meshcoreParams.note.cliLimitTitle') }}</h3>
+              <p>{{ t('settings.nodeCompanion.meshcoreParams.note.cliLimitBody') }}</p>
             </div>
           </section>
         </div>

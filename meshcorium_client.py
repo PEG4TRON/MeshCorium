@@ -74,16 +74,27 @@ CMD_IMPORT_CONTACT = 18
 CMD_GET_DEVICE_TIME = 5
 CMD_SET_DEVICE_TIME = 6
 CMD_SYNC_NEXT_MESSAGE = 10
+CMD_SET_RADIO_PARAMS = 11
+CMD_SET_RADIO_TX_POWER = 12
 CMD_DEVICE_QUERY = 22
+CMD_SET_TUNING_PARAMS = 21
 CMD_SEND_LOGIN = 26
 CMD_SEND_STATUS_REQ = 27
 CMD_GET_CONTACT_BY_KEY = 30
 CMD_SET_OTHER_PARAMS = 38
+CMD_SET_DEVICE_PIN = 37
 CMD_GET_SELF_TELEMETRY = 39
+CMD_GET_CUSTOM_VARS = 40
+CMD_SET_CUSTOM_VAR = 41
+CMD_GET_TUNING_PARAMS = 43
 CMD_SEND_BINARY_REQ = 50
 CMD_GET_CHANNEL = 31
 CMD_SET_CHANNEL = 32
 CMD_SEND_TRACE_PATH = 36
+CMD_SET_AUTOADD_CONFIG = 58
+CMD_GET_AUTOADD_CONFIG = 59
+CMD_GET_ALLOWED_REPEAT_FREQ = 60
+CMD_SET_PATH_HASH_MODE = 61
 
 RESP_OK = 0
 RESP_ERR = 1
@@ -102,7 +113,11 @@ RESP_DEVICE_INFO = 13
 RESP_CONTACT_MSG_RECV_V3 = 16
 RESP_CHANNEL_MSG_RECV_V3 = 17
 RESP_CHANNEL_INFO = 18
+RESP_CUSTOM_VARS = 21
+RESP_TUNING_PARAMS = 23
 RESP_STATS = 24
+RESP_AUTOADD_CONFIG = 25
+RESP_ALLOWED_REPEAT_FREQ = 26
 
 PUSH_ADVERT = 0x80
 PUSH_PATH_UPDATED = 0x81
@@ -156,6 +171,8 @@ class DeviceInfo:
     firmware_build_date: str
     manufacturer_model: str
     semantic_version: str
+    client_repeat: int
+    path_hash_mode: int
 
 
 @dataclasses.dataclass(slots=True)
@@ -220,6 +237,17 @@ class CoreStats:
 
 
 @dataclasses.dataclass(slots=True)
+class PacketStats:
+    received: int
+    sent: int
+    sent_flood: int
+    sent_direct: int
+    recv_flood: int
+    recv_direct: int
+    recv_errors: int
+
+
+@dataclasses.dataclass(slots=True)
 class SelfTelemetry:
     public_key_prefix: str
     battery_mv: int | None
@@ -233,6 +261,24 @@ class BatteryInfo:
     level: int
     used_kb: int | None
     total_kb: int | None
+
+
+@dataclasses.dataclass(slots=True)
+class TuningParams:
+    rx_delay_base: float
+    airtime_factor: float
+
+
+@dataclasses.dataclass(slots=True)
+class AutoAddConfig:
+    config: int
+    max_hops: int
+
+
+@dataclasses.dataclass(slots=True)
+class RepeatFrequencyRange:
+    lower_freq_khz: int
+    upper_freq_khz: int
 
 
 @dataclasses.dataclass(slots=True)
@@ -974,6 +1020,8 @@ def parse_device_info(payload: bytes) -> DeviceInfo:
     build_date = decode_c_string(payload[8:20])
     manufacturer_model = decode_c_string(payload[20:60])
     semantic_version = decode_c_string(payload[60:80])
+    client_repeat = payload[80] if len(payload) > 80 else 0
+    path_hash_mode = payload[81] if len(payload) > 81 else 0
     return DeviceInfo(
         firmware_ver=firmware_ver,
         max_contacts_div_2=max_contacts_div_2,
@@ -982,6 +1030,8 @@ def parse_device_info(payload: bytes) -> DeviceInfo:
         firmware_build_date=build_date,
         manufacturer_model=manufacturer_model,
         semantic_version=semantic_version,
+        client_repeat=client_repeat,
+        path_hash_mode=path_hash_mode,
     )
 
 
@@ -1006,6 +1056,65 @@ def parse_self_info(payload: bytes) -> SelfInfo:
         radio_cr=payload[57],
         name=decode_c_string(payload[58:]),
     )
+
+
+def parse_tuning_params(payload: bytes) -> TuningParams:
+    if len(payload) < 9:
+        raise MeshCoreError(f"short TUNING_PARAMS frame: {len(payload)} bytes")
+    rx_delay_base = struct.unpack_from("<I", payload, 1)[0] / 1000.0
+    airtime_factor = struct.unpack_from("<I", payload, 5)[0] / 1000.0
+    return TuningParams(
+        rx_delay_base=rx_delay_base,
+        airtime_factor=airtime_factor,
+    )
+
+
+def parse_custom_vars(payload: bytes) -> dict[str, str]:
+    if not payload or payload[0] != RESP_CUSTOM_VARS:
+        raise MeshCoreError(f"expected CUSTOM_VARS, got code {payload[:1].hex() if payload else 'empty'}")
+    text = decode_c_string(payload[1:])
+    parsed: dict[str, str] = {}
+    if not text:
+        return parsed
+    for item in text.split(","):
+        entry = str(item or "").strip()
+        if not entry:
+            continue
+        key, separator, value = entry.partition(":")
+        if not separator:
+            continue
+        normalized_key = str(key or "").strip()
+        if not normalized_key:
+            continue
+        parsed[normalized_key] = str(value or "").strip()
+    return parsed
+
+
+def parse_autoadd_config(payload: bytes) -> AutoAddConfig:
+    if len(payload) < 3:
+        raise MeshCoreError(f"short AUTOADD_CONFIG frame: {len(payload)} bytes")
+    return AutoAddConfig(
+        config=int(payload[1]),
+        max_hops=int(payload[2]),
+    )
+
+
+def parse_allowed_repeat_freq_ranges(payload: bytes) -> list[RepeatFrequencyRange]:
+    if not payload or payload[0] != RESP_ALLOWED_REPEAT_FREQ:
+        raise MeshCoreError(f"expected ALLOWED_REPEAT_FREQ, got code {payload[:1].hex() if payload else 'empty'}")
+    ranges: list[RepeatFrequencyRange] = []
+    offset = 1
+    while offset + 8 <= len(payload):
+        lower_freq_khz = struct.unpack_from("<I", payload, offset)[0]
+        upper_freq_khz = struct.unpack_from("<I", payload, offset + 4)[0]
+        ranges.append(
+            RepeatFrequencyRange(
+                lower_freq_khz=lower_freq_khz,
+                upper_freq_khz=upper_freq_khz,
+            )
+        )
+        offset += 8
+    return ranges
 
 
 def parse_contact(payload: bytes) -> Contact:
@@ -1099,6 +1208,32 @@ def parse_core_stats(payload: bytes) -> CoreStats:
         uptime_secs=uptime_secs,
         errors=errors,
         queue_len=queue_len,
+    )
+
+
+def parse_packet_stats(payload: bytes) -> PacketStats:
+    min_len = 1 + 1 + (4 * 7)
+    if len(payload) < min_len:
+        raise MeshCoreError(f"short STATS_PACKETS frame: {len(payload)} bytes")
+    if payload[1] != 2:
+        raise MeshCoreError(f"unexpected STATS subtype for packet stats: {payload[1]}")
+    (
+        received,
+        sent,
+        sent_flood,
+        sent_direct,
+        recv_flood,
+        recv_direct,
+        recv_errors,
+    ) = struct.unpack_from("<IIIIIII", payload, 2)
+    return PacketStats(
+        received=received,
+        sent=sent,
+        sent_flood=sent_flood,
+        sent_direct=sent_direct,
+        recv_flood=recv_flood,
+        recv_direct=recv_direct,
+        recv_errors=recv_errors,
     )
 
 
@@ -1526,6 +1661,73 @@ class MeshCoreClient:
             unexpected_error=lambda frame: f"unexpected response code for SET_DEVICE_TIME: {frame[0]}",
         )
 
+    def set_radio_params(
+        self,
+        *,
+        freq_mhz: float,
+        bw_khz: float,
+        sf: int,
+        cr: int,
+        client_repeat: int = 0,
+    ) -> None:
+        freq_khz = int(round(float(freq_mhz) * 1000.0))
+        bw_hz = int(round(float(bw_khz) * 1000.0))
+        payload = (
+            bytes([CMD_SET_RADIO_PARAMS])
+            + struct.pack("<I", freq_khz)
+            + struct.pack("<I", bw_hz)
+            + bytes([int(sf) & 0xFF, int(cr) & 0xFF, int(client_repeat) & 0xFF])
+        )
+        self.request_expect_frame(
+            payload,
+            expected_codes=RESP_OK,
+            empty_error="empty response to SET_RADIO_PARAMS",
+            err_error="device returned ERR for SET_RADIO_PARAMS",
+            unexpected_error=lambda frame: f"unexpected response code for SET_RADIO_PARAMS: {frame[0]}",
+        )
+
+    def set_radio_tx_power(self, power_dbm: int) -> None:
+        self.request_expect_frame(
+            bytes([CMD_SET_RADIO_TX_POWER]) + int(power_dbm).to_bytes(1, "little", signed=True),
+            expected_codes=RESP_OK,
+            empty_error="empty response to SET_RADIO_TX_POWER",
+            err_error="device returned ERR for SET_RADIO_TX_POWER",
+            unexpected_error=lambda frame: f"unexpected response code for SET_RADIO_TX_POWER: {frame[0]}",
+        )
+
+    def get_tuning_params(self) -> TuningParams:
+        frame = self.request_expect_frame(
+            bytes([CMD_GET_TUNING_PARAMS]),
+            expected_codes=RESP_TUNING_PARAMS,
+            empty_error="empty response to GET_TUNING_PARAMS",
+            err_error="device returned ERR for GET_TUNING_PARAMS",
+            unexpected_error=lambda next_frame: f"expected TUNING_PARAMS, got code {next_frame[0]}",
+        )
+        return parse_tuning_params(frame)
+
+    def set_tuning_params(self, *, rx_delay_base: float, airtime_factor: float) -> None:
+        payload = (
+            bytes([CMD_SET_TUNING_PARAMS])
+            + struct.pack("<I", int(round(float(rx_delay_base) * 1000.0)))
+            + struct.pack("<I", int(round(float(airtime_factor) * 1000.0)))
+        )
+        self.request_expect_frame(
+            payload,
+            expected_codes=RESP_OK,
+            empty_error="empty response to SET_TUNING_PARAMS",
+            err_error="device returned ERR for SET_TUNING_PARAMS",
+            unexpected_error=lambda frame: f"unexpected response code for SET_TUNING_PARAMS: {frame[0]}",
+        )
+
+    def set_device_pin(self, pin: int) -> None:
+        self.request_expect_frame(
+            bytes([CMD_SET_DEVICE_PIN]) + struct.pack("<I", int(pin)),
+            expected_codes=RESP_OK,
+            empty_error="empty response to SET_DEVICE_PIN",
+            err_error="device returned ERR for SET_DEVICE_PIN",
+            unexpected_error=lambda frame: f"unexpected response code for SET_DEVICE_PIN: {frame[0]}",
+        )
+
     def send_contact_text_message(
         self,
         destination_public_key: bytes,
@@ -1933,6 +2135,70 @@ class MeshCoreClient:
             ),
         )
 
+    def get_custom_vars(self) -> dict[str, str]:
+        frame = self.request_expect_frame(
+            bytes([CMD_GET_CUSTOM_VARS]),
+            expected_codes=RESP_CUSTOM_VARS,
+            empty_error="empty response to GET_CUSTOM_VARS",
+            err_error="device returned ERR for GET_CUSTOM_VARS",
+            unexpected_error=lambda next_frame: f"expected CUSTOM_VARS, got code {next_frame[0]}",
+        )
+        return parse_custom_vars(frame)
+
+    def set_custom_var(self, key: str, value: str) -> None:
+        normalized_key = str(key or "").strip()
+        if not normalized_key:
+            raise MeshCoreError("custom var key is required")
+        payload = bytes([CMD_SET_CUSTOM_VAR]) + f"{normalized_key}:{value}".encode("utf-8")
+        self.request_expect_frame(
+            payload,
+            expected_codes=RESP_OK,
+            empty_error="empty response to SET_CUSTOM_VAR",
+            err_error="device returned ERR for SET_CUSTOM_VAR",
+            unexpected_error=lambda frame: f"unexpected response code for SET_CUSTOM_VAR: {frame[0]}",
+        )
+
+    def set_path_hash_mode(self, mode: int) -> None:
+        self.request_expect_frame(
+            bytes([CMD_SET_PATH_HASH_MODE, 0, int(mode) & 0xFF]),
+            expected_codes=RESP_OK,
+            empty_error="empty response to SET_PATH_HASH_MODE",
+            err_error="device returned ERR for SET_PATH_HASH_MODE",
+            unexpected_error=lambda frame: f"unexpected response code for SET_PATH_HASH_MODE: {frame[0]}",
+        )
+
+    def set_autoadd_config(self, config: int, *, max_hops: int | None = None) -> None:
+        payload = bytes([CMD_SET_AUTOADD_CONFIG, int(config) & 0xFF])
+        if max_hops is not None:
+            payload += bytes([int(max_hops) & 0xFF])
+        self.request_expect_frame(
+            payload,
+            expected_codes=RESP_OK,
+            empty_error="empty response to SET_AUTOADD_CONFIG",
+            err_error="device returned ERR for SET_AUTOADD_CONFIG",
+            unexpected_error=lambda frame: f"unexpected response code for SET_AUTOADD_CONFIG: {frame[0]}",
+        )
+
+    def get_autoadd_config(self) -> AutoAddConfig:
+        frame = self.request_expect_frame(
+            bytes([CMD_GET_AUTOADD_CONFIG]),
+            expected_codes=RESP_AUTOADD_CONFIG,
+            empty_error="empty response to GET_AUTOADD_CONFIG",
+            err_error="device returned ERR for GET_AUTOADD_CONFIG",
+            unexpected_error=lambda next_frame: f"expected AUTOADD_CONFIG, got code {next_frame[0]}",
+        )
+        return parse_autoadd_config(frame)
+
+    def get_allowed_repeat_freq_ranges(self) -> list[RepeatFrequencyRange]:
+        frame = self.request_expect_frame(
+            bytes([CMD_GET_ALLOWED_REPEAT_FREQ]),
+            expected_codes=RESP_ALLOWED_REPEAT_FREQ,
+            empty_error="empty response to GET_ALLOWED_REPEAT_FREQ",
+            err_error="device returned ERR for GET_ALLOWED_REPEAT_FREQ",
+            unexpected_error=lambda next_frame: f"expected ALLOWED_REPEAT_FREQ, got code {next_frame[0]}",
+        )
+        return parse_allowed_repeat_freq_ranges(frame)
+
     def get_contacts(self, since: int | None = None) -> tuple[int, list[Contact]]:
         payload = bytes([CMD_GET_CONTACTS])
         if since is not None:
@@ -2163,6 +2429,16 @@ class MeshCoreClient:
             unexpected_error=lambda next_frame: f"expected STATS response, got code {next_frame[0]}",
         )
         return parse_core_stats(frame)
+
+    def get_packet_stats(self) -> PacketStats:
+        frame = self.request_expect_frame(
+            bytes([56, 2]),
+            expected_codes=RESP_STATS,
+            empty_error="empty response to GET_STATS packets",
+            err_error="device returned ERR for GET_STATS packets",
+            unexpected_error=lambda next_frame: f"expected STATS response, got code {next_frame[0]}",
+        )
+        return parse_packet_stats(frame)
 
     def get_self_telemetry(self) -> SelfTelemetry:
         self.send_frame(bytes([CMD_GET_SELF_TELEMETRY, 0, 0, 0]))
