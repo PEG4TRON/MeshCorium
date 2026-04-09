@@ -9,6 +9,7 @@ from serial.tools import list_ports
 SerialException = serial.SerialException
 USB_INBOUND_PREFIX = b"<"
 USB_OUTBOUND_PREFIX = b">"
+TRANSPORT_FRAME_TIMEOUT_ERROR = "transport timeout while reading frame"
 
 
 class SerialFrameError(RuntimeError):
@@ -87,7 +88,7 @@ class UsbSerialFrameTransport:
     def read_exact(self, size: int) -> bytes:
         data = self.byte_transport.read(size)
         if len(data) != size:
-            raise self._error(f"serial timeout while reading {size} bytes, got {len(data)}")
+            raise self._error(TRANSPORT_FRAME_TIMEOUT_ERROR)
         return data
 
     def read_prefixed_byte(self, expected_prefix: bytes, *, max_discard: int = 256) -> bytes:
@@ -98,16 +99,16 @@ class UsbSerialFrameTransport:
                 if discarded:
                     preview = discarded[:16].hex().upper()
                     raise self._error(
-                        f"serial timeout while resyncing frame prefix after discarding {len(discarded)} bytes ({preview})"
+                        f"transport timeout while resyncing frame prefix after discarding {len(discarded)} bytes ({preview})"
                     )
-                raise self._error("serial timeout while reading 1 bytes, got 0")
+                raise self._error(TRANSPORT_FRAME_TIMEOUT_ERROR)
             if prefix == expected_prefix:
                 return prefix
             discarded.extend(prefix)
             if len(discarded) >= max_discard:
                 preview = bytes(discarded[:16]).hex().upper()
                 raise self._error(
-                    f"serial lost framing after discarding {len(discarded)} bytes "
+                    f"transport lost framing after discarding {len(discarded)} bytes "
                     f"while waiting for {expected_prefix!r} ({preview})"
                 )
 
@@ -164,3 +165,16 @@ def discover_serial_ports() -> list[dict[str, str]]:
             }
         )
     return result
+
+
+def open_serial_runtime(*, port: str, baudrate: int, timeout: float, frame_error=SerialFrameError):
+    byte_transport = SerialPortTransport(
+        port=port,
+        baudrate=baudrate,
+        timeout=timeout,
+    )
+    frame_transport = UsbSerialFrameTransport(
+        byte_transport,
+        frame_error=frame_error,
+    )
+    return byte_transport, frame_transport

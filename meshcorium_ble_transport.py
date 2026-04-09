@@ -11,6 +11,8 @@ from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
 from typing import Any
 
+from meshcorium_serial_transport import TRANSPORT_FRAME_TIMEOUT_ERROR
+
 
 BLE_TRANSPORT_TYPE = "ble"
 NUS_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
@@ -184,7 +186,7 @@ class BleFrameTransport:
             try:
                 frame = self._frames.get(timeout=self.timeout)
             except queue.Empty as exc:
-                raise self._frame_error("ble timeout while reading frame") from exc
+                raise self._frame_error(TRANSPORT_FRAME_TIMEOUT_ERROR) from exc
             if frame:
                 return frame
             if self._closed.is_set():

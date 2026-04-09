@@ -10,7 +10,7 @@ from meshcorium_client import (
     MeshCoreClient,
 )
 from meshcorium_ble_transport import BLE_TRANSPORT_TYPE, BleFrameTransport, discover_ble_devices
-from meshcorium_serial_transport import SerialPortTransport, discover_serial_ports
+from meshcorium_serial_transport import discover_serial_ports, open_serial_runtime
 
 
 SERIAL_TRANSPORT_TYPE = "serial"
@@ -142,16 +142,18 @@ class SerialTransportAdapter:
     def open_client(self, descriptor: ConnectionDescriptor) -> MeshCoreClient:
         if descriptor.transport_type != self.transport_type:
             raise ValueError(f"serial adapter cannot open {descriptor.transport_type}")
-        transport = SerialPortTransport(
+        transport, frame_transport = open_serial_runtime(
             port=descriptor.port,
             baudrate=descriptor.baudrate,
             timeout=descriptor.timeout,
+            frame_error=MeshCoreError,
         )
         return MeshCoreClient(
             port=descriptor.port,
             baudrate=descriptor.baudrate,
             timeout=descriptor.timeout,
             transport=transport,
+            frame_transport=frame_transport,
         )
 
 

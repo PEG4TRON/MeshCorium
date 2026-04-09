@@ -56,6 +56,8 @@ from meshcorium_client import (
     PUSH_SEND_CONFIRMED,
     RESP_CHANNEL_MSG_RECV_V3,
     RESP_CONTACT_MSG_RECV_V3,
+    TRANSPORT_CLIENT_CLOSED_ERROR,
+    TRANSPORT_READ_TIMEOUT_ERROR,
     derive_meshcore_channel_secret,
     format_hex,
     format_latlon,
@@ -1026,7 +1028,7 @@ def _cancel_pending_reconnect(port: str) -> None:
 def _classify_background_session_exception(exc: Exception, *, queue_drain_active: bool = False) -> dict:
     message = str(exc or "").strip()
     lowered = message.lower()
-    if message == "serial client closed":
+    if message == TRANSPORT_CLIENT_CLOSED_ERROR:
         return {
             "failure_kind": "client-closed",
             "stop_kind": "reader-closed",
@@ -1034,7 +1036,7 @@ def _classify_background_session_exception(exc: Exception, *, queue_drain_active
             "auto_reconnect": False,
             "error_event": False,
         }
-    if message == "serial timeout while reading 1 bytes, got 0":
+    if message == TRANSPORT_READ_TIMEOUT_ERROR:
         if queue_drain_active:
             return {
                 "failure_kind": "queue-drain-timeout",
@@ -1045,12 +1047,12 @@ def _classify_background_session_exception(exc: Exception, *, queue_drain_active
             }
         return {
             "failure_kind": "read-timeout",
-            "stop_kind": "serial-read-timeout",
+            "stop_kind": "transport-read-timeout",
             "reason": message,
             "auto_reconnect": True,
             "error_event": False,
         }
-    if "serial timeout while reading" in lowered:
+    if "transport timeout while reading" in lowered:
         if queue_drain_active:
             return {
                 "failure_kind": "queue-drain-timeout",
@@ -1060,8 +1062,8 @@ def _classify_background_session_exception(exc: Exception, *, queue_drain_active
                 "error_event": False,
             }
         return {
-            "failure_kind": "serial-timeout-burst",
-            "stop_kind": "serial-read-timeout",
+            "failure_kind": "transport-timeout-burst",
+            "stop_kind": "transport-read-timeout",
             "reason": message,
             "auto_reconnect": True,
             "error_event": False,
@@ -1069,15 +1071,15 @@ def _classify_background_session_exception(exc: Exception, *, queue_drain_active
     if message == "empty response to SYNC_NEXT_MESSAGE":
         return {
             "failure_kind": "queue-drain-timeout" if queue_drain_active else "read-timeout",
-            "stop_kind": "queue-drain-timeout" if queue_drain_active else "serial-read-timeout",
+            "stop_kind": "queue-drain-timeout" if queue_drain_active else "transport-read-timeout",
             "reason": message,
             "auto_reconnect": True,
             "error_event": False,
         }
     if isinstance(exc, SerialException):
         return {
-            "failure_kind": "serial-port-failure",
-            "stop_kind": "serial-failure",
+            "failure_kind": "transport-port-failure",
+            "stop_kind": "transport-failure",
             "reason": message or exc.__class__.__name__,
             "auto_reconnect": True,
             "error_event": True,
@@ -1108,7 +1110,7 @@ def _classify_background_session_exception(exc: Exception, *, queue_drain_active
         }
     return {
         "failure_kind": "session-failure",
-        "stop_kind": "serial-failure",
+        "stop_kind": "transport-failure",
         "reason": message or exc.__class__.__name__,
         "auto_reconnect": True,
         "error_event": True,
@@ -1188,11 +1190,11 @@ def _compute_background_reconnect_delay(failure_kind: str | None, reconnect_atte
     kind = str(failure_kind or "").strip().lower()
     if kind == "queue-drain-timeout":
         return max(0.5, min(0.5 * (2 ** max(0, attempts - 1)), 4.0))
-    if kind in {"read-timeout", "serial-timeout-burst"}:
+    if kind in {"read-timeout", "transport-timeout-burst"}:
         return max(0.75, min(0.75 * (2 ** max(0, attempts - 1)), 6.0))
     if kind == "protocol-frame-error":
         return max(1.5, min(1.5 * (2 ** max(0, attempts - 1)), 12.0))
-    if kind == "serial-port-failure":
+    if kind == "transport-port-failure":
         return max(float(SERVICE_RECONNECT_DELAY_SECS), min(float(SERVICE_RECONNECT_DELAY_SECS) * (2 ** max(0, attempts - 1)), 30.0))
     return max(float(SERVICE_RECONNECT_DELAY_SECS), min(float(SERVICE_RECONNECT_DELAY_SECS) * (2 ** max(0, attempts - 1)), 20.0))
 
@@ -1997,8 +1999,11 @@ def _log_frontend_diagnostic(kind: str, **fields) -> None:
     }
     line = json.dumps(payload, ensure_ascii=False, sort_keys=True)
     with FRONTEND_DIAGNOSTIC_LOCK:
-        with open(FRONTEND_DIAGNOSTIC_LOG_PATH, "a", encoding="utf-8") as fh:
-            fh.write(line + "\n")
+        try:
+            with open(FRONTEND_DIAGNOSTIC_LOG_PATH, "a", encoding="utf-8") as fh:
+                fh.write(line + "\n")
+        except OSError:
+            return
 
 
 def _read_json_log_tail(path: str, limit: int = 50) -> list[dict]:
@@ -3357,7 +3362,7 @@ def _background_should_defer_queue_drain(
 
 def _background_serial_has_pending_input(client: MeshCoreSerialClient) -> bool:
     try:
-        return int(getattr(client.serial, "in_waiting", 0) or 0) > 0
+        return client.pending_input_count() > 0
     except (AttributeError, OSError, ValueError, SerialException):
         return False
 
@@ -3634,7 +3639,7 @@ def _drain_background_message_queue(
             )
             _replay_buffered_push_frames(client, session, port)
             if result.queue_empty_via_timeout:
-                queue_empty_error = str(result.queue_empty_error or "serial timeout while reading 1 bytes, got 0")
+                queue_empty_error = str(result.queue_empty_error or TRANSPORT_READ_TIMEOUT_ERROR)
                 with session.snapshot_lock:
                     session.queue_last_empty_at = utc_now_epoch()
                     session.queue_last_sync_attempts = int(result.sync_attempts or 0)
@@ -5773,7 +5778,7 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                     len(channels_dict),
                 )
                 live_poll_timeout = min(float(timeout), 0.25) if timeout > 0 else 0.25
-                if not client.set_serial_timeout(live_poll_timeout, suppress_errors=True):
+                if not client.set_transport_timeout(live_poll_timeout, suppress_errors=True):
                     logging.warning(
                         "background session post-start timeout reconfigure failed port=%s baudrate=%s timeout=%s",
                         port,
@@ -6250,13 +6255,13 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                         next_radio_stats_poll_at = now_monotonic + _normalize_signal_metrics_poll_seconds(_get_client_settings().get("signal_metrics_poll_seconds"))
                     _replay_buffered_push_frames(client, session, port)
                     try:
-                        with client.temporary_serial_timeout(BACKGROUND_FRAME_POLL_TIMEOUT_SECS):
+                        with client.temporary_transport_timeout(BACKGROUND_FRAME_POLL_TIMEOUT_SECS):
                             frame = client.wait_for_frame(
                                 timeout_secs=BACKGROUND_FRAME_POLL_TIMEOUT_SECS,
-                                empty_error="serial timeout while reading 1 bytes, got 0",
+                                empty_error=TRANSPORT_READ_TIMEOUT_ERROR,
                             )
                     except MeshCoreError as exc:
-                        if str(exc) == "serial timeout while reading 1 bytes, got 0":
+                        if str(exc) == TRANSPORT_READ_TIMEOUT_ERROR:
                             continue
                         raise
                     _handle_background_frame(client, session, port, frame, source="live")
@@ -6273,9 +6278,9 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
         with session.snapshot_lock:
             intentional_stop = bool(session.intentional_stop or session.stop_event.is_set())
             queue_drain_active = bool(session.queue_drain_in_progress or session.queue_drain_requested)
-            if str(exc) == "serial client closed" and session.stop_event.is_set():
+            if str(exc) == TRANSPORT_CLIENT_CLOSED_ERROR and session.stop_event.is_set():
                 intentional_stop = True
-            if intentional_stop and str(exc) == "serial client closed":
+            if intentional_stop and str(exc) == TRANSPORT_CLIENT_CLOSED_ERROR:
                 stop_kind = "reader-closed"
             elif not intentional_stop:
                 classification = _classify_background_session_exception(exc, queue_drain_active=queue_drain_active)
@@ -8626,8 +8631,9 @@ def _run_route_probe_with_client(
         publish("progress")
         started = time.monotonic()
         try:
-            send_timeout_secs = max(3.0, min(6.0, float(getattr(client.serial, "timeout", 0.0) or 0.0) * 12.0))
-            with client.temporary_serial_timeout(send_timeout_secs):
+            current_timeout = float(client.get_transport_timeout() or 0.0)
+            send_timeout_secs = max(3.0, min(6.0, current_timeout * 12.0))
+            with client.temporary_transport_timeout(send_timeout_secs):
                 sent, trace_info = client.send_trace_path_probe(
                     path_bytes,
                     path_hash_len=route_path_hash_len,

@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import argparse
 import dataclasses
 import hashlib
+import logging
 import struct
-import sys
 import threading
 import time
 from collections import deque
@@ -13,12 +12,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Iterable
 
-from meshcorium_serial_transport import (
-    SerialException,
-    SerialPortTransport,
-    UsbSerialFrameTransport,
-    discover_serial_ports,
-)
+from meshcorium_serial_transport import SerialException
 
 DEFAULT_BAUDRATE = 115200
 DEFAULT_TIMEOUT = 4.0
@@ -118,6 +112,12 @@ RESP_TUNING_PARAMS = 23
 RESP_STATS = 24
 RESP_AUTOADD_CONFIG = 25
 RESP_ALLOWED_REPEAT_FREQ = 26
+CONTACT_SEQUENCE_RESPONSE_CODES = (
+    RESP_CONTACTS_START,
+    RESP_CONTACT,
+    RESP_END_OF_CONTACTS,
+    RESP_CHANNEL_INFO,
+)
 
 PUSH_ADVERT = 0x80
 PUSH_PATH_UPDATED = 0x81
@@ -136,6 +136,8 @@ PUSH_CONTROL_DATA = 0x8E
 
 CONTACT_SEND_RESPONSE_TIMEOUT_SECS = 12.0
 CHANNEL_SEND_RESPONSE_TIMEOUT_SECS = 15.0
+TRANSPORT_READ_TIMEOUT_ERROR = "transport timeout while reading frame"
+TRANSPORT_CLIENT_CLOSED_ERROR = "transport client closed"
 
 
 class MeshCoreError(RuntimeError):
@@ -583,10 +585,7 @@ class _ReaderOwnedFrameHub:
 
     @staticmethod
     def _is_transient_read_timeout(exc: Exception | None) -> bool:
-        return isinstance(exc, MeshCoreError) and str(exc) in {
-            "serial timeout while reading 1 bytes, got 0",
-            "ble timeout while reading frame",
-        }
+        return isinstance(exc, MeshCoreError) and str(exc) == TRANSPORT_READ_TIMEOUT_ERROR
 
     def close(self) -> None:
         thread: threading.Thread | None = None
@@ -595,7 +594,7 @@ class _ReaderOwnedFrameHub:
                 return
             self._closed = True
             if self._reader_error is None:
-                self._reader_error = MeshCoreError("serial client closed")
+                self._reader_error = MeshCoreError(TRANSPORT_CLIENT_CLOSED_ERROR)
             thread = self._reader_thread
             self._condition.notify_all()
         cancel_read = getattr(self._frame_transport, "cancel_read", None)
@@ -610,7 +609,7 @@ class _ReaderOwnedFrameHub:
 
     def ensure_send_allowed(self) -> None:
         if self._closed:
-            raise MeshCoreError("serial client closed")
+            raise MeshCoreError(TRANSPORT_CLIENT_CLOSED_ERROR)
 
     def response_waiter_count(self) -> int:
         return self._response_wait_registry.waiter_count()
@@ -627,7 +626,7 @@ class _ReaderOwnedFrameHub:
 
     def _ensure_reader_loop_locked(self) -> None:
         if self._closed:
-            raise MeshCoreError("serial client closed")
+            raise MeshCoreError(TRANSPORT_CLIENT_CLOSED_ERROR)
         thread = self._reader_thread
         if thread is not None and thread.is_alive():
             return
@@ -675,7 +674,7 @@ class _ReaderOwnedFrameHub:
         empty_error: str,
     ) -> None:
         if self._closed:
-            raise MeshCoreError("serial client closed")
+            raise MeshCoreError(TRANSPORT_CLIENT_CLOSED_ERROR)
         if self._reader_error is not None:
             if self._is_transient_read_timeout(self._reader_error):
                 self._reader_error = None
@@ -806,6 +805,43 @@ class _ReaderOwnedFrameHub:
                 return None
             return self._unclaimed_response_frames.popleft()
 
+    def discard_unclaimed_response_frames(
+        self,
+        *,
+        codes: Iterable[int] | int,
+        frame_logger=None,
+        max_frames: int | None = None,
+    ) -> int:
+        code_set = (
+            frozenset([int(codes)])
+            if isinstance(codes, int)
+            else frozenset(int(code) for code in codes)
+        )
+        discarded = 0
+        with self._condition:
+            if not self._unclaimed_response_frames or not code_set:
+                return 0
+            remaining: deque[bytes] = deque()
+            while self._unclaimed_response_frames:
+                frame = self._unclaimed_response_frames.popleft()
+                should_discard = (
+                    bool(frame)
+                    and int(frame[0]) in code_set
+                    and (max_frames is None or discarded < int(max_frames))
+                )
+                if should_discard:
+                    discarded += 1
+                    if frame_logger is not None:
+                        try:
+                            frame_logger(frame)
+                        except Exception:
+                            pass
+                    continue
+                remaining.append(frame)
+            self._unclaimed_response_frames = remaining
+            self._condition.notify_all()
+        return discarded
+
     def await_push_or_response_frame(
         self,
         *,
@@ -929,6 +965,31 @@ class _ReaderOwnedFrameHub:
                         break
                     self._wait_for_reader_activity_locked(deadline_monotonic, empty_error=matcher.empty_error)
             finally:
+                self._response_wait_registry.unregister(waiter)
+                self._condition.notify_all()
+        return matcher.validate(frame)
+
+    def send_and_await_matching_response(
+        self,
+        send_frame,
+        matcher: _ResponseFrameMatcher,
+        *,
+        deadline_monotonic: float | None = None,
+    ) -> bytes:
+        with self._condition:
+            waiter = self._response_wait_registry.register(matcher)
+            self._ensure_reader_loop_locked()
+        try:
+            send_frame()
+            with self._condition:
+                while True:
+                    matched_frame = waiter.take_frame()
+                    if matched_frame is not None:
+                        frame = matched_frame
+                        break
+                    self._wait_for_reader_activity_locked(deadline_monotonic, empty_error=matcher.empty_error)
+        finally:
+            with self._condition:
                 self._response_wait_registry.unregister(waiter)
                 self._condition.notify_all()
         return matcher.validate(frame)
@@ -1464,6 +1525,7 @@ class MeshCoreClient:
     def __init__(
         self,
         port: str,
+        *,
         baudrate: int = DEFAULT_BAUDRATE,
         timeout: float = DEFAULT_TIMEOUT,
         open_settle: float = DEFAULT_OPEN_SETTLE,
@@ -1471,20 +1533,26 @@ class MeshCoreClient:
         frame_transport=None,
     ):
         self.port = port
-        self.serial = transport or SerialPortTransport(port=port, baudrate=baudrate, timeout=timeout)
-        self._frame_transport = frame_transport or UsbSerialFrameTransport(self.serial, frame_error=MeshCoreError)
+        if transport is None:
+            transport = frame_transport
+        elif frame_transport is None and hasattr(transport, "read_frame") and hasattr(transport, "write_frame"):
+            frame_transport = transport
+        if transport is None or frame_transport is None:
+            raise MeshCoreError("transport and frame transport must be available")
+        self.transport = transport
+        self.frame_transport = frame_transport
         self._push_buffer = _PendingPushFrameBuffer()
         self._response_wait_registry = _ResponseWaitRegistry()
         self._frame_hub = _ReaderOwnedFrameHub(
             port=port,
-            frame_transport=self._frame_transport,
+            frame_transport=self.frame_transport,
             push_buffer=self._push_buffer,
             response_wait_registry=self._response_wait_registry,
         )
         if open_settle > 0:
             time.sleep(open_settle)
-        self.serial.reset_input_buffer()
-        self.serial.reset_output_buffer()
+        self.clear_transport_input_buffer()
+        self.clear_transport_output_buffer()
 
     def close(self) -> None:
         self._frame_hub.close()
@@ -1495,14 +1563,30 @@ class MeshCoreClient:
     def __exit__(self, exc_type, exc, tb) -> None:
         self.close()
 
-    def clear_input(self) -> None:
-        self.serial.reset_input_buffer()
+    def clear_transport_input_buffer(self) -> None:
+        self.transport.reset_input_buffer()
 
-    def set_serial_timeout(self, timeout: float | None, *, suppress_errors: bool = False) -> bool:
+    def clear_transport_output_buffer(self) -> None:
+        self.transport.reset_output_buffer()
+
+    def pending_input_count(self) -> int:
+        try:
+            return int(getattr(self.transport, "in_waiting", 0) or 0)
+        except (AttributeError, OSError, ValueError, SerialException):
+            return 0
+
+    def get_transport_timeout(self) -> float | None:
+        try:
+            value = getattr(self.transport, "timeout", None)
+        except (AttributeError, OSError, ValueError, SerialException):
+            return None
+        return None if value is None else float(value)
+
+    def set_transport_timeout(self, timeout: float | None, *, suppress_errors: bool = False) -> bool:
         if timeout is None:
             return True
         try:
-            self.serial.timeout = max(0.0, float(timeout))
+            self.transport.timeout = max(0.0, float(timeout))
             return True
         except (AttributeError, OSError, ValueError, SerialException):
             if suppress_errors:
@@ -1510,20 +1594,20 @@ class MeshCoreClient:
             raise
 
     @contextmanager
-    def temporary_serial_timeout(self, timeout: float | None):
+    def temporary_transport_timeout(self, timeout: float | None):
         if timeout is None:
             yield
             return
-        previous_timeout = getattr(self.serial, "timeout", None)
-        self.set_serial_timeout(timeout)
+        previous_timeout = getattr(self.transport, "timeout", None)
+        self.set_transport_timeout(timeout)
         try:
             yield
         finally:
-            self.set_serial_timeout(previous_timeout, suppress_errors=True)
+            self.set_transport_timeout(previous_timeout, suppress_errors=True)
 
     def send_frame(self, payload: bytes) -> None:
         self._frame_hub.ensure_send_allowed()
-        self._frame_transport.write_frame(payload)
+        self.frame_transport.write_frame(payload)
 
     def send_command(self, payload: bytes) -> None:
         self.send_frame(payload)
@@ -1565,16 +1649,16 @@ class MeshCoreClient:
         )
 
     def _default_response_timeout_secs(self) -> float:
-        serial_timeout = float(getattr(self.serial, "timeout", 0.0) or 0.0)
-        if serial_timeout <= 0:
+        transport_timeout = float(self.get_transport_timeout() or 0.0)
+        if transport_timeout <= 0:
             return 2.0
-        return max(2.0, min(serial_timeout * 4.0, 30.0))
+        return max(2.0, min(transport_timeout * 4.0, 30.0))
 
     def read_exact(self, size: int) -> bytes:
-        return self._frame_transport.read_exact(size)
+        return self.frame_transport.read_exact(size)
 
     def read_frame(self) -> bytes:
-        return self._frame_transport.read_frame()
+        return self.frame_transport.read_frame()
 
     def read_response_frame(self) -> bytes:
         return self.await_response_frame()
@@ -1599,10 +1683,10 @@ class MeshCoreClient:
             err_error=err_error,
             unexpected_error=unexpected_error,
         )
-        self.send_command(payload)
         timeout_budget = self._default_response_timeout_secs() if timeout_secs is None else max(0.0, float(timeout_secs))
         deadline_monotonic = time.monotonic() + timeout_budget if timeout_budget > 0 else None
-        return self.await_matching_response(
+        return self._frame_hub.send_and_await_matching_response(
+            lambda: self.send_command(payload),
             matcher,
             deadline_monotonic=deadline_monotonic,
         )
@@ -2199,13 +2283,60 @@ class MeshCoreClient:
         )
         return parse_allowed_repeat_freq_ranges(frame)
 
+    def _discard_contact_sequence_frames(self, *, reason: str, max_frames: int | None = None) -> int:
+        return self._frame_hub.discard_unclaimed_response_frames(
+            codes=CONTACT_SEQUENCE_RESPONSE_CODES,
+            max_frames=max_frames,
+            frame_logger=lambda frame: logging.warning(
+                "discarding contact-sequence frame during GET_CONTACTS resync reason=%s code=%s hex=%s",
+                reason,
+                int(frame[0]) if frame else None,
+                frame.hex() if frame else "",
+            ),
+        )
+
     def get_contacts(self, since: int | None = None) -> tuple[int, list[Contact]]:
         payload = bytes([CMD_GET_CONTACTS])
         if since is not None:
             payload += struct.pack("<I", since)
-        self.send_frame(payload)
-        cursor, contact_frames = self._frame_hub.collect_contacts_sequence()
-        return cursor, [parse_contact(frame) for frame in contact_frames]
+        attempts = 3 if since is None else 2
+        last_error: MeshCoreError | None = None
+        for attempt_idx in range(attempts):
+            if attempt_idx > 0:
+                # Let any in-flight burst finish, then resync before retrying GET_CONTACTS.
+                time.sleep(min(0.15 * attempt_idx, 0.35))
+                drained_before = self._discard_contact_sequence_frames(
+                    reason=f"before-retry-{attempt_idx + 1}",
+                )
+                logging.warning(
+                    "retrying GET_CONTACTS since=%s attempt=%s/%s drained_before=%s previous_error=%s",
+                    since,
+                    attempt_idx + 1,
+                    attempts,
+                    drained_before,
+                    last_error,
+                )
+            self.send_frame(payload)
+            try:
+                cursor, contact_frames = self._frame_hub.collect_contacts_sequence()
+                return cursor, [parse_contact(frame) for frame in contact_frames]
+            except MeshCoreError as exc:
+                last_error = exc
+                drained_after = self._discard_contact_sequence_frames(
+                    reason=f"after-error-{attempt_idx + 1}",
+                )
+                if attempt_idx + 1 >= attempts:
+                    raise
+                logging.warning(
+                    "GET_CONTACTS resync requested since=%s attempt=%s/%s drained_after=%s error=%s",
+                    since,
+                    attempt_idx + 1,
+                    attempts,
+                    drained_after,
+                    exc,
+                )
+        assert last_error is not None
+        raise last_error
 
     def remove_contact(self, public_key: bytes) -> None:
         if len(public_key) != 32:
@@ -2355,7 +2486,7 @@ class MeshCoreClient:
             except MeshCoreError as exc:
                 error_message = str(exc)
                 if treat_timeout_as_empty and error_message in (
-                    "serial timeout while reading 1 bytes, got 0",
+                    TRANSPORT_READ_TIMEOUT_ERROR,
                     "empty response to SYNC_NEXT_MESSAGE",
                 ):
                     return QueueDrainResult(
@@ -2478,480 +2609,56 @@ class MeshCoreClient:
 
 MeshCoreSerialClient = MeshCoreClient
 
-
-def discover_ports() -> list[dict[str, str]]:
-    return discover_serial_ports()
-
-
-def auto_pick_port() -> str:
-    ports = discover_ports()
-    if not ports:
-        raise MeshCoreError("no serial ports found; pass --port explicitly")
-    for port in ports:
-        text = " ".join(port.values()).lower()
-        if "heltec" in text or "cp210" in text or "usb serial" in text or "ch340" in text:
-            return port["device"]
-    return ports[0]["device"]
-
-
-def open_client(args: argparse.Namespace) -> MeshCoreClient:
-    port = args.port or auto_pick_port()
-    return MeshCoreClient(port=port, baudrate=args.baudrate, timeout=args.timeout)
-
-
-def print_device_info(device_info: DeviceInfo) -> None:
-    print(f"firmware_ver: {device_info.firmware_ver}")
-    print(f"semantic_version: {device_info.semantic_version}")
-    print(f"build_date: {device_info.firmware_build_date}")
-    print(f"model: {device_info.manufacturer_model}")
-    print(f"max_contacts: {device_info.max_contacts_div_2 * 2}")
-    print(f"max_channels: {device_info.max_channels}")
-    print(f"ble_pin: {device_info.ble_pin}")
-
-
-def print_self_info(self_info: SelfInfo) -> None:
-    print(f"name: {self_info.name}")
-    print(f"public_key: {format_hex(self_info.public_key)}")
-    print(f"adv_type: {self_info.adv_type}")
-    print(f"tx_power_dbm: {self_info.tx_power_dbm}")
-    print(f"max_tx_power: {self_info.max_tx_power}")
-    print(f"radio_freq_hz_x1000: {self_info.radio_freq}")
-    print(f"radio_bw_hz_x1000: {self_info.radio_bw}")
-    print(f"radio_sf: {self_info.radio_sf}")
-    print(f"radio_cr: {self_info.radio_cr}")
-    print(f"lat: {format_latlon(self_info.adv_lat):.6f}")
-    print(f"lon: {format_latlon(self_info.adv_lon):.6f}")
-    print(f"multi_acks: {self_info.multi_acks}")
-    print(f"advert_loc_policy: {self_info.advert_loc_policy}")
-    print(f"telemetry_modes: {self_info.telemetry_modes}")
-    print(f"manual_add_contacts: {self_info.manual_add_contacts}")
-
-
-def print_contact(contact: Contact) -> None:
-    print(f"pubkey={format_hex(contact.public_key)} name={contact.adv_name!r} type={contact.adv_type} flags={contact.flags} lastmod={contact.lastmod} lat={format_latlon(contact.adv_lat):.6f} lon={format_latlon(contact.adv_lon):.6f}")
-
-
-def print_message(event: MessageEvent) -> None:
-    print(f"message_code={event.code} payload_hex={event.payload.hex()}")
-
-
-def cmd_ports(_args: argparse.Namespace) -> int:
-    ports = discover_ports()
-    if not ports:
-        print("No serial ports found.")
-        return 1
-    for port in ports:
-        print(f"{port['device']}: {port['description']} | {port['manufacturer']} | {port['product']} | {port['hwid']}")
-    return 0
-
-
-def cmd_probe(args: argparse.Namespace) -> int:
-    with open_client(args) as client:
-        device_info = client.query_device(args.protocol_version)
-        print_device_info(device_info)
-    return 0
-
-
-def cmd_info(args: argparse.Namespace) -> int:
-    with open_client(args) as client:
-        device_info = client.query_device(args.protocol_version)
-        self_info = client.app_start(args.app_name, args.app_version)
-        print("[device]")
-        print_device_info(device_info)
-        print()
-        print("[self]")
-        print_self_info(self_info)
-    return 0
-
-
-def cmd_time_get(args: argparse.Namespace) -> int:
-    with open_client(args) as client:
-        client.query_device(args.protocol_version)
-        client.app_start(args.app_name, args.app_version)
-        epoch = client.get_device_time()
-        print(f"epoch: {epoch}")
-        print(f"utc: {datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat()}")
-    return 0
-
-
-def cmd_time_set(args: argparse.Namespace) -> int:
-    epoch = args.epoch if args.epoch is not None else utc_now_epoch()
-    with open_client(args) as client:
-        client.query_device(args.protocol_version)
-        client.app_start(args.app_name, args.app_version)
-        client.set_device_time(epoch)
-        print(f"set epoch: {epoch}")
-        print(f"utc: {datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat()}")
-    return 0
-
-
-def cmd_time_sync(args: argparse.Namespace) -> int:
-    epoch = utc_now_epoch()
-    with open_client(args) as client:
-        client.query_device(args.protocol_version)
-        client.app_start(args.app_name, args.app_version)
-        before = client.get_device_time()
-        client.set_device_time(epoch)
-        after = client.get_device_time()
-        print(f"before: {before} ({datetime.fromtimestamp(before, tz=timezone.utc).isoformat()})")
-        print(f"after: {after} ({datetime.fromtimestamp(after, tz=timezone.utc).isoformat()})")
-    return 0
-
-
-def cmd_contacts(args: argparse.Namespace) -> int:
-    with open_client(args) as client:
-        client.query_device(args.protocol_version)
-        client.app_start(args.app_name, args.app_version)
-        cursor, contacts = client.get_contacts(args.since)
-        print(f"contacts: {len(contacts)}")
-        print(f"next_since: {cursor}")
-        for contact in contacts:
-            print_contact(contact)
-    return 0
-
-
-def handle_push(client: MeshCoreSerialClient, frame: bytes, auto_sync_messages: bool) -> None:
-    code = frame[0]
-    if code == PUSH_MSG_WAITING and auto_sync_messages:
-        result = client.drain_queued_messages()
-        for event in result.messages:
-            print_message(event)
-        print("queue empty")
-        return
-    else:
-        print(f"push_code={code} payload_hex={frame[1:].hex()}")
-
-
-def cmd_listen(args: argparse.Namespace) -> int:
-    with open_client(args) as client:
-        client.query_device(args.protocol_version)
-        self_info = client.app_start(args.app_name, args.app_version)
-        print(f"connected: {self_info.name} {client.port}")
-        if args.sync_time:
-            client.set_device_time(utc_now_epoch())
-            print("time synced")
-        print("listening...")
-        while True:
-            frame = client.wait_for_frame()
-            handle_push(client, frame, auto_sync_messages=not args.no_message_sync)
-
-
-def cmd_advert(args: argparse.Namespace) -> int:
-    with open_client(args) as client:
-        client.query_device(args.protocol_version)
-        client.app_start(args.app_name, args.app_version)
-        if args.name:
-            client.set_advert_name(args.name)
-            print(f"advert name updated: {args.name}")
-        client.send_self_advert(flood=args.flood)
-        print("advert sent")
-    return 0
-
-
-def fetch_probe(port: str, baudrate: int = DEFAULT_BAUDRATE, timeout: float = DEFAULT_TIMEOUT, protocol_version: int = DEFAULT_PROTOCOL_VERSION) -> DeviceInfo:
-    with MeshCoreSerialClient(port=port, baudrate=baudrate, timeout=timeout) as client:
-        return client.query_device(protocol_version)
-
-
-def fetch_info(
-    port: str,
-    baudrate: int = DEFAULT_BAUDRATE,
-    timeout: float = DEFAULT_TIMEOUT,
-    protocol_version: int = DEFAULT_PROTOCOL_VERSION,
-    app_version: int = DEFAULT_APP_VERSION,
-    app_name: str = DEFAULT_APP_NAME,
-) -> tuple[DeviceInfo, SelfInfo]:
-    with MeshCoreSerialClient(port=port, baudrate=baudrate, timeout=timeout) as client:
-        return client.query_device(protocol_version), client.app_start(app_name, app_version)
-
-
-def fetch_time(
-    port: str,
-    baudrate: int = DEFAULT_BAUDRATE,
-    timeout: float = DEFAULT_TIMEOUT,
-    protocol_version: int = DEFAULT_PROTOCOL_VERSION,
-    app_version: int = DEFAULT_APP_VERSION,
-    app_name: str = DEFAULT_APP_NAME,
-) -> int:
-    with MeshCoreSerialClient(port=port, baudrate=baudrate, timeout=timeout) as client:
-        client.query_device(protocol_version)
-        client.app_start(app_name, app_version)
-        return client.get_device_time()
-
-
-def sync_time(
-    port: str,
-    epoch: int | None = None,
-    baudrate: int = DEFAULT_BAUDRATE,
-    timeout: float = DEFAULT_TIMEOUT,
-    protocol_version: int = DEFAULT_PROTOCOL_VERSION,
-    app_version: int = DEFAULT_APP_VERSION,
-    app_name: str = DEFAULT_APP_NAME,
-) -> tuple[int, int]:
-    target = epoch if epoch is not None else utc_now_epoch()
-    with MeshCoreSerialClient(port=port, baudrate=baudrate, timeout=timeout) as client:
-        client.query_device(protocol_version)
-        client.app_start(app_name, app_version)
-        before = client.get_device_time()
-        client.set_device_time(target)
-        after = client.get_device_time()
-        return before, after
-
-
-def fetch_contacts(
-    port: str,
-    since: int | None = None,
-    baudrate: int = DEFAULT_BAUDRATE,
-    timeout: float = DEFAULT_TIMEOUT,
-    protocol_version: int = DEFAULT_PROTOCOL_VERSION,
-    app_version: int = DEFAULT_APP_VERSION,
-    app_name: str = DEFAULT_APP_NAME,
-) -> tuple[int, list[Contact]]:
-    with MeshCoreSerialClient(port=port, baudrate=baudrate, timeout=timeout) as client:
-        client.query_device(protocol_version)
-        client.app_start(app_name, app_version)
-        return client.get_contacts(since)
-
-
-def fetch_channels(
-    port: str,
-    max_channels: int | None = None,
-    baudrate: int = DEFAULT_BAUDRATE,
-    timeout: float = DEFAULT_TIMEOUT,
-    protocol_version: int = DEFAULT_PROTOCOL_VERSION,
-    app_version: int = DEFAULT_APP_VERSION,
-    app_name: str = DEFAULT_APP_NAME,
-) -> list[ChannelInfo]:
-    with MeshCoreSerialClient(port=port, baudrate=baudrate, timeout=timeout) as client:
-        device = client.query_device(protocol_version)
-        client.app_start(app_name, app_version)
-        count = max_channels if max_channels is not None else device.max_channels
-        return [client.get_channel(index) for index in range(max(0, count))]
-
-
-def set_channel_config(
-    *,
-    port: str,
-    channel_idx: int,
-    channel_name: str,
-    channel_secret: bytes | None = None,
-    baudrate: int = DEFAULT_BAUDRATE,
-    timeout: float = DEFAULT_TIMEOUT,
-) -> ChannelInfo:
-    with MeshCoreSerialClient(port=port, baudrate=baudrate, timeout=timeout) as client:
-        client.set_channel(channel_idx, channel_name, channel_secret)
-        return client.get_channel(channel_idx)
-
-
-def fetch_radio_stats(
-    port: str,
-    baudrate: int = DEFAULT_BAUDRATE,
-    timeout: float = DEFAULT_TIMEOUT,
-    protocol_version: int = DEFAULT_PROTOCOL_VERSION,
-    app_version: int = DEFAULT_APP_VERSION,
-    app_name: str = DEFAULT_APP_NAME,
-) -> RadioStats:
-    with MeshCoreSerialClient(port=port, baudrate=baudrate, timeout=timeout) as client:
-        client.query_device(protocol_version)
-        client.app_start(app_name, app_version)
-        return client.get_radio_stats()
-
-
-def fetch_core_stats(
-    port: str,
-    baudrate: int = DEFAULT_BAUDRATE,
-    timeout: float = DEFAULT_TIMEOUT,
-    protocol_version: int = DEFAULT_PROTOCOL_VERSION,
-    app_version: int = DEFAULT_APP_VERSION,
-    app_name: str = DEFAULT_APP_NAME,
-) -> CoreStats:
-    with MeshCoreSerialClient(port=port, baudrate=baudrate, timeout=timeout) as client:
-        client.query_device(protocol_version)
-        client.app_start(app_name, app_version)
-        return client.get_core_stats()
-
-
-def fetch_self_telemetry(
-    port: str,
-    baudrate: int = DEFAULT_BAUDRATE,
-    timeout: float = DEFAULT_TIMEOUT,
-    protocol_version: int = DEFAULT_PROTOCOL_VERSION,
-    app_version: int = DEFAULT_APP_VERSION,
-    app_name: str = DEFAULT_APP_NAME,
-) -> SelfTelemetry:
-    with MeshCoreSerialClient(port=port, baudrate=baudrate, timeout=timeout) as client:
-        client.query_device(protocol_version)
-        client.app_start(app_name, app_version)
-        return client.get_self_telemetry()
-
-
-def fetch_battery_info(
-    port: str,
-    baudrate: int = DEFAULT_BAUDRATE,
-    timeout: float = DEFAULT_TIMEOUT,
-    protocol_version: int = DEFAULT_PROTOCOL_VERSION,
-    app_version: int = DEFAULT_APP_VERSION,
-    app_name: str = DEFAULT_APP_NAME,
-) -> BatteryInfo:
-    with MeshCoreSerialClient(port=port, baudrate=baudrate, timeout=timeout) as client:
-        client.query_device(protocol_version)
-        client.app_start(app_name, app_version)
-        return client.get_battery_info()
-
-
-def fetch_connect_snapshot(
-    port: str,
-    since: int | None = None,
-    baudrate: int = DEFAULT_BAUDRATE,
-    timeout: float = DEFAULT_TIMEOUT,
-    protocol_version: int = DEFAULT_PROTOCOL_VERSION,
-    app_version: int = DEFAULT_APP_VERSION,
-    app_name: str = DEFAULT_APP_NAME,
-) -> tuple[DeviceInfo, SelfInfo, int, list[Contact], list[ChannelInfo], RadioStats | None, SelfTelemetry | None]:
-    with MeshCoreSerialClient(port=port, baudrate=baudrate, timeout=timeout) as client:
-        device = client.query_device(protocol_version)
-        self_info = client.app_start(app_name, app_version)
-        cursor, contacts = client.get_contacts(since)
-        channels = [client.get_channel(index) for index in range(device.max_channels)]
-        try:
-            radio_stats = client.get_radio_stats()
-        except MeshCoreError:
-            radio_stats = None
-        try:
-            self_telemetry = client.get_self_telemetry()
-        except MeshCoreError:
-            self_telemetry = None
-        return device, self_info, cursor, contacts, channels, radio_stats, self_telemetry
-
-
-def send_advert(
-    port: str,
-    flood: bool = False,
-    name: str | None = None,
-    baudrate: int = DEFAULT_BAUDRATE,
-    timeout: float = DEFAULT_TIMEOUT,
-    protocol_version: int = DEFAULT_PROTOCOL_VERSION,
-    app_version: int = DEFAULT_APP_VERSION,
-    app_name: str = DEFAULT_APP_NAME,
-) -> None:
-    with MeshCoreSerialClient(port=port, baudrate=baudrate, timeout=timeout) as client:
-        client.query_device(protocol_version)
-        client.app_start(app_name, app_version)
-        if name:
-            client.set_advert_name(name)
-        client.send_self_advert(flood=flood)
-
-
-def send_contact_text(
-    port: str,
-    destination_public_key: bytes,
-    text: str,
-    timestamp: int | None = None,
-    baudrate: int = DEFAULT_BAUDRATE,
-    timeout: float = DEFAULT_TIMEOUT,
-    protocol_version: int = DEFAULT_PROTOCOL_VERSION,
-    app_version: int = DEFAULT_APP_VERSION,
-    app_name: str = DEFAULT_APP_NAME,
-) -> tuple[SentMessageInfo, bool]:
-    with MeshCoreSerialClient(port=port, baudrate=baudrate, timeout=timeout) as client:
-        client.query_device(protocol_version)
-        client.app_start(app_name, app_version)
-        sent = client.send_contact_text_message(destination_public_key, text, timestamp=timestamp)
-        ack_timeout = max(5.0, min((sent.suggested_timeout_ms / 1000.0) * 1.2, 30.0))
-        return sent, client.wait_for_ack(sent.expected_ack, ack_timeout)
-
-
-def send_channel_text(
-    port: str,
-    channel_idx: int,
-    text: str,
-    timestamp: int | None = None,
-    baudrate: int = DEFAULT_BAUDRATE,
-    timeout: float = DEFAULT_TIMEOUT,
-    protocol_version: int = DEFAULT_PROTOCOL_VERSION,
-    app_version: int = DEFAULT_APP_VERSION,
-    app_name: str = DEFAULT_APP_NAME,
-) -> SentMessageInfo:
-    with MeshCoreSerialClient(port=port, baudrate=baudrate, timeout=timeout) as client:
-        client.query_device(protocol_version)
-        client.app_start(app_name, app_version)
-        return client.send_channel_text_message(channel_idx, text, timestamp=timestamp)
-
-
-def add_common_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--port", help="Serial port, e.g. /dev/ttyUSB0")
-    parser.add_argument("--baudrate", type=int, default=DEFAULT_BAUDRATE)
-    parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT)
-    parser.add_argument("--protocol-version", type=int, default=DEFAULT_PROTOCOL_VERSION)
-    parser.add_argument("--app-version", type=int, default=DEFAULT_APP_VERSION)
-    parser.add_argument("--app-name", default=DEFAULT_APP_NAME)
-
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Meshcorium companion USB client")
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    ports_parser = subparsers.add_parser("ports", help="List serial ports")
-    ports_parser.set_defaults(func=cmd_ports)
-
-    probe_parser = subparsers.add_parser("probe", help="Query device info")
-    add_common_arguments(probe_parser)
-    probe_parser.set_defaults(func=cmd_probe)
-
-    info_parser = subparsers.add_parser("info", help="Query device info and self info")
-    add_common_arguments(info_parser)
-    info_parser.set_defaults(func=cmd_info)
-
-    time_parser = subparsers.add_parser("time", help="Get or set device clock")
-    time_subparsers = time_parser.add_subparsers(dest="time_command", required=True)
-
-    time_get = time_subparsers.add_parser("get", help="Read device time")
-    add_common_arguments(time_get)
-    time_get.set_defaults(func=cmd_time_get)
-
-    time_set = time_subparsers.add_parser("set", help="Set device time")
-    add_common_arguments(time_set)
-    time_set.add_argument("--epoch", type=int, help="Epoch seconds in UTC; default is current UTC time")
-    time_set.set_defaults(func=cmd_time_set)
-
-    time_sync = time_subparsers.add_parser("sync", help="Sync device time to current UTC")
-    add_common_arguments(time_sync)
-    time_sync.set_defaults(func=cmd_time_sync)
-
-    contacts_parser = subparsers.add_parser("contacts", help="Download contacts list")
-    add_common_arguments(contacts_parser)
-    contacts_parser.add_argument("--since", type=int)
-    contacts_parser.set_defaults(func=cmd_contacts)
-
-    listen_parser = subparsers.add_parser("listen", help="Listen for push events")
-    add_common_arguments(listen_parser)
-    listen_parser.add_argument("--sync-time", action="store_true", help="Set device time on connect")
-    listen_parser.add_argument("--no-message-sync", action="store_true", help="Do not auto-fetch queued messages on PUSH_MSG_WAITING")
-    listen_parser.set_defaults(func=cmd_listen)
-
-    advert_parser = subparsers.add_parser("advert", help="Send self advert")
-    add_common_arguments(advert_parser)
-    advert_parser.add_argument("--flood", action="store_true", help="Send flood advert instead of zero-hop")
-    advert_parser.add_argument("--name", help="Update advert name before sending")
-    advert_parser.set_defaults(func=cmd_advert)
-
-    return parser
-
-
-def main(argv: Iterable[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(list(argv) if argv is not None else None)
-    try:
-        return args.func(args)
-    except SerialException as exc:
-        print(f"Serial error: {exc}", file=sys.stderr)
-        return 2
-    except KeyboardInterrupt:
-        return 130
-    except MeshCoreError as exc:
-        print(f"Meshcorium error: {exc}", file=sys.stderr)
-        return 1
+_LEGACY_SERIAL_EXPORTS = {
+    "discover_ports",
+    "auto_pick_port",
+    "open_client",
+    "print_device_info",
+    "print_self_info",
+    "print_contact",
+    "print_message",
+    "cmd_ports",
+    "cmd_probe",
+    "cmd_info",
+    "cmd_time_get",
+    "cmd_time_set",
+    "cmd_time_sync",
+    "cmd_contacts",
+    "handle_push",
+    "cmd_listen",
+    "cmd_advert",
+    "fetch_probe",
+    "fetch_info",
+    "fetch_time",
+    "sync_time",
+    "fetch_contacts",
+    "fetch_channels",
+    "set_channel_config",
+    "fetch_radio_stats",
+    "fetch_core_stats",
+    "fetch_self_telemetry",
+    "fetch_battery_info",
+    "fetch_connect_snapshot",
+    "send_advert",
+    "send_contact_text",
+    "send_channel_text",
+    "add_common_arguments",
+    "build_parser",
+    "main",
+}
+
+
+def __getattr__(name: str):
+    if name not in _LEGACY_SERIAL_EXPORTS:
+        raise AttributeError(name)
+    from meshcorium_serial_legacy import __dict__ as _legacy_dict
+
+    value = _legacy_dict[name]
+    globals()[name] = value
+    return value
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    from meshcorium_serial_legacy import main as legacy_main
+
+    raise SystemExit(legacy_main())
