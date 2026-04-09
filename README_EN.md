@@ -10,6 +10,12 @@ Current primary transport:
 
 - `USB serial`
 
+`v0.5.1 -- USB` release status:
+
+- `USB serial` — primary and validated connection path
+- `BLE` — additional experimental path, not a replacement for USB
+- `Wi-Fi` — UI placeholder only, real transport not implemented yet
+
 ## Key Features
 
 - Python backend with a local web UI
@@ -81,6 +87,44 @@ What happens:
 4. It runs:
    - `systemctl daemon-reload`
    - `systemctl enable --now meshcorium.service`
+
+## Updating From `v0.5.0`
+
+Recommended update flow:
+
+1. Stop the currently running MeshCorium instance.
+   If it is installed as a service:
+   - `sudo systemctl stop meshcorium.service`
+
+2. Back up user data from the old installation:
+   - `data/meshcorium_messages.sqlite3`
+   - `data/meshcorium_contacts.sqlite3`
+   - `data/client_settings.json`
+
+3. Extract `v0.5.1 -- USB` into a new directory next to the old installation.
+
+4. Copy the preserved data files from the old `v0.5.0` installation into the new `data/` directory.
+
+5. If the old installation was running as a systemd service, run this from the new directory:
+
+```bash
+./meshcorium-launcher.sh --install
+```
+
+This updates the systemd unit to point at the new installation path.
+
+6. If the old installation was run manually, run this from the new directory:
+
+```bash
+./meshcorium-launcher.sh --run
+```
+
+Update notes:
+
+- If `v0.5.0` was failing on startup with
+  - `expected CONTACTS_START, got code 18`
+  this release includes backend hardening for that startup failure mode.
+- Keep the old `v0.5.0` directory as a rollback copy until `v0.5.1` is confirmed to work correctly.
 
 ## Remove The systemd Service
 
