@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.5.2
+
+Release `v0.5.2 -- USB` is based on post-`v0.5.1` development work and includes the following additional user-visible changes on top of `v0.5.1`.
+
+### Stability and diagnostics
+
+- Background-session startup now emits staged bootstrap telemetry into backend logs, so connect timeouts record the last completed bootstrap phase instead of failing with only a generic ready timeout.
+- The companion client response-matching race was fixed so very fast replies are no longer orphaned and misreported as:
+  - `empty response to APP_START`
+  - `empty response to SEND_CHANNEL_MSG`
+- Transport-boundary cleanup was completed: direct serial runtime construction is now confined to the adapter/discovery layer while active runtime paths stay on `ConnectionRouter -> MeshCoreClient(...)`.
+- Frontend diagnostics logging now tolerates file permission/ownership issues without breaking request handling.
+
+### Frontend and settings
+
+- `/settings/about` now shows a branded sticky header with the MeshCorium logo and the current app version.
+- MeshCore settings work in the Vue settings workspace was extended further on both backend and frontend sides.
+
+### Release notes
+
+- USB/serial remains the validated primary transport.
+- BLE remains experimental groundwork and is not yet considered fully debugged or validated.
+
 ## v0.5.1
 
 Release `v0.5.1 -- USB` is based on post-`v0.5.0` development work and includes the following user-visible changes relative to `v0.5.0`.

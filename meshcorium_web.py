@@ -1892,6 +1892,10 @@ class BackgroundCompanionSession:
     queue_last_hit_batch_limit: bool = False
     queue_last_overflow_risk: bool = False
     last_interactive_command_at: float = 0.0
+    bootstrap_stage: str = "idle"
+    bootstrap_started_at: float = 0.0
+    bootstrap_stage_started_at: float = 0.0
+    bootstrap_last_update_at: int = 0
 
 
 @dataclass
@@ -1938,6 +1942,54 @@ def _log_delivery_debug(event: str, **fields) -> None:
     with DELIVERY_DEBUG_LOCK:
         with open(DELIVERY_DEBUG_LOG_PATH, "a", encoding="utf-8") as fh:
             fh.write(line + "\n")
+
+
+def _set_background_bootstrap_stage(
+    session: BackgroundCompanionSession,
+    stage: str,
+    *,
+    port: str,
+    baudrate: int,
+    **details,
+) -> None:
+    now_monotonic = time.monotonic()
+    now_epoch = utc_now_epoch()
+    with session.snapshot_lock:
+        if session.bootstrap_started_at <= 0.0:
+            session.bootstrap_started_at = now_monotonic
+        previous_stage = str(session.bootstrap_stage or "idle")
+        previous_stage_started_at = float(session.bootstrap_stage_started_at or session.bootstrap_started_at or now_monotonic)
+        session.bootstrap_stage = str(stage)
+        session.bootstrap_stage_started_at = now_monotonic
+        session.bootstrap_last_update_at = now_epoch
+        active = bool(session.active)
+        collections_ready = bool(session.collections_ready)
+    stage_elapsed_ms = int(max(0.0, (now_monotonic - previous_stage_started_at) * 1000.0))
+    total_elapsed_ms = int(max(0.0, (now_monotonic - float(session.bootstrap_started_at or now_monotonic)) * 1000.0))
+    logging.info(
+        "background session bootstrap stage port=%s baudrate=%s stage=%s previous=%s stage_elapsed_ms=%s total_elapsed_ms=%s active=%s collections_ready=%s details=%s",
+        port,
+        baudrate,
+        stage,
+        previous_stage,
+        stage_elapsed_ms,
+        total_elapsed_ms,
+        active,
+        collections_ready,
+        details or {},
+    )
+    _log_delivery_debug(
+        "bg_bootstrap_stage",
+        port=port,
+        baudrate=baudrate,
+        stage=str(stage),
+        previous_stage=previous_stage,
+        stage_elapsed_ms=stage_elapsed_ms,
+        total_elapsed_ms=total_elapsed_ms,
+        active=active,
+        collections_ready=collections_ready,
+        **details,
+    )
 
 
 def _ack_hexes_match(expected_ack_hex: str | None, received_ack_hex: str | None) -> bool:
@@ -3250,6 +3302,12 @@ def _build_session_snapshot(
                 "last_empty_via_timeout": bool(session.queue_last_empty_via_timeout),
                 "last_hit_batch_limit": bool(session.queue_last_hit_batch_limit),
                 "last_overflow_risk": bool(session.queue_last_overflow_risk),
+            },
+            "bootstrap_state": {
+                "stage": str(session.bootstrap_stage or "idle"),
+                "started_at_monotonic": float(session.bootstrap_started_at or 0.0),
+                "stage_started_at_monotonic": float(session.bootstrap_stage_started_at or 0.0),
+                "last_update_at": int(session.bootstrap_last_update_at or 0),
             },
             "port": str(session.config["port"]),
             "baudrate": int(session.config["baudrate"]),
@@ -5685,8 +5743,30 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
     )
     try:
         with _connection_access_from_kwargs(session_kwargs):
+            _set_background_bootstrap_stage(
+                session,
+                "open-client",
+                port=port,
+                baudrate=baudrate,
+                transport_type=session_kwargs["transport_type"],
+                transport_id=session_kwargs["transport_id"],
+            )
             with _open_meshcore_client(session_kwargs) as client:
+                _set_background_bootstrap_stage(
+                    session,
+                    "query-device",
+                    port=port,
+                    baudrate=baudrate,
+                )
                 device = client.query_device(protocol_version)
+                _set_background_bootstrap_stage(
+                    session,
+                    "app-start",
+                    port=port,
+                    baudrate=baudrate,
+                    max_contacts=int(getattr(device, "max_contacts", 0) or 0),
+                    max_channels=int(getattr(device, "max_channels", 0) or 0),
+                )
                 self_info = client.app_start(app_name, app_version)
                 device_dict = _device_info_to_dict(device)
                 self_dict = _self_info_to_dict(self_info)
@@ -5715,10 +5795,24 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                     session.self_telemetry = None
                     session.battery_info = None
                     session.repeater_tracker = RepeaterRuntimeTracker()
+                _set_background_bootstrap_stage(
+                    session,
+                    "post-app-start",
+                    port=port,
+                    baudrate=baudrate,
+                    owner_id=owner_id,
+                    node_name=str(self_dict.get("name") or ""),
+                )
                 _adopt_unowned_contact_records(owner_id)
                 _adopt_unowned_message_records(owner_id)
                 _normalize_self_contact_message_records(owner_id)
                 _record_successful_connection(session.config, self_dict, device_dict)
+                _set_background_bootstrap_stage(
+                    session,
+                    "load-radio-stats",
+                    port=port,
+                    baudrate=baudrate,
+                )
                 radio_stats = _get_merged_radio_stats_with_client(client)
                 try:
                     self_telemetry = _self_telemetry_to_dict(client.get_self_telemetry())
@@ -5729,6 +5823,12 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                 except (MeshCoreError, SerialException, ValueError):
                     battery_info = None
                 try:
+                    _set_background_bootstrap_stage(
+                        session,
+                        "load-contacts",
+                        port=port,
+                        baudrate=baudrate,
+                    )
                     refreshed_contacts = {"next_since": 0, "live_contacts": [], "contacts": []}
                     with _contact_owner_scope(port=port, owner_id=owner_id, access_all=False):
                         refreshed_contacts = CONTACT_BACKEND.refresh_with_client(client, since=None)
@@ -5742,6 +5842,12 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                     with _contact_owner_scope(port=port, owner_id=owner_id, access_all=False):
                         refreshed_contacts = CONTACT_BACKEND.build_live_contacts_result(contacts_dict)
                 except (MeshCoreError, SerialException, ValueError):
+                    _set_background_bootstrap_stage(
+                        session,
+                        "load-contacts-failed",
+                        port=port,
+                        baudrate=baudrate,
+                    )
                     logging.exception(
                         "background session initial contacts load failed port=%s baudrate=%s",
                         port,
@@ -5750,14 +5856,34 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                     contacts_dict = []
                     refreshed_contacts = {"next_since": 0, "live_contacts": [], "contacts": []}
                 try:
+                    _set_background_bootstrap_stage(
+                        session,
+                        "load-channels",
+                        port=port,
+                        baudrate=baudrate,
+                    )
                     channels_dict = _load_channels_in_session(client, device.max_channels, owner_id=owner_id)
                 except (MeshCoreError, SerialException, ValueError):
+                    _set_background_bootstrap_stage(
+                        session,
+                        "load-channels-failed",
+                        port=port,
+                        baudrate=baudrate,
+                    )
                     logging.exception(
                         "background session initial channels load failed port=%s baudrate=%s",
                         port,
                         baudrate,
                     )
                     channels_dict = []
+                _set_background_bootstrap_stage(
+                    session,
+                    "finalize-snapshot",
+                    port=port,
+                    baudrate=baudrate,
+                    contacts_count=len(contacts_dict),
+                    channels_count=len(channels_dict),
+                )
                 with session.snapshot_lock:
                     session.collections_ready = True
                     session.contacts = contacts_dict
@@ -5767,6 +5893,14 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                     session.battery_info = battery_info
                     _bootstrap_repeater_tracker_from_contacts_locked(session, contacts_dict)
                 session.ready_event.set()
+                _set_background_bootstrap_stage(
+                    session,
+                    "ready",
+                    port=port,
+                    baudrate=baudrate,
+                    contacts_count=len(contacts_dict),
+                    channels_count=len(channels_dict),
+                )
                 _freeze_self_contact_if_cached(self_dict)
                 _record_signal_metrics_sample(radio_stats, repeaters=_get_recent_repeater_count(session), owner_id=owner_id)
                 recent_repeaters_count = _get_recent_repeater_count(session)
@@ -6375,6 +6509,37 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
 
 def _wait_for_background_session(session: BackgroundCompanionSession, timeout_secs: float = 15.0) -> dict:
     if not session.ready_event.wait(timeout_secs):
+        snapshot = _build_session_snapshot(session, include_contacts=False, include_channels=False)
+        bootstrap_state = dict(snapshot.get("bootstrap_state") or {})
+        queue_state = dict(snapshot.get("queue_state") or {})
+        _log_delivery_debug(
+            "bg_wait_ready_timeout",
+            port=str(snapshot.get("port") or ""),
+            baudrate=int(snapshot.get("baudrate") or 0),
+            transport_type=str(snapshot.get("transport_type") or ""),
+            transport_id=str(snapshot.get("transport_id") or ""),
+            active=bool(snapshot.get("active")),
+            collections_ready=bool(snapshot.get("collections_ready")),
+            bootstrap_stage=str(bootstrap_state.get("stage") or ""),
+            bootstrap_last_update_at=int(bootstrap_state.get("last_update_at") or 0),
+            queue_drain_in_progress=bool(queue_state.get("drain_in_progress")),
+            queue_drain_requested=bool(queue_state.get("drain_requested")),
+            active_command_kind=str(getattr(session, "active_command_kind", "") or ""),
+        )
+        logging.warning(
+            "background session ready wait timed out port=%s baudrate=%s transport=%s connection=%s active=%s collections_ready=%s bootstrap_stage=%s bootstrap_last_update_at=%s active_command=%s queue_drain_in_progress=%s queue_drain_requested=%s",
+            snapshot.get("port"),
+            snapshot.get("baudrate"),
+            snapshot.get("transport_type"),
+            snapshot.get("transport_id"),
+            bool(snapshot.get("active")),
+            bool(snapshot.get("collections_ready")),
+            bootstrap_state.get("stage"),
+            bootstrap_state.get("last_update_at"),
+            getattr(session, "active_command_kind", "") or "",
+            bool(queue_state.get("drain_in_progress")),
+            bool(queue_state.get("drain_requested")),
+        )
         raise MeshCoreError("background companion session did not become ready in time")
     snapshot = _build_session_snapshot(session)
     if not snapshot["active"]:

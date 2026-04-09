@@ -1700,7 +1700,11 @@ export default {
     },
     about: {
       title: 'О MeshCorium',
-      subtitle: 'Здесь собраны package/docs ссылки и git-репозитории, которые прямо используются проектом. `meshcore-open` намеренно исключён.',
+      subtitle: 'Здесь собраны package/docs ссылки и git-репозитории, которые прямо используются проектом.',
+      brandKicker: 'Клиент MeshCorium',
+      versionLabel: 'Версия',
+      referencesTitle: 'Зависимости и upstream',
+      referencesSubtitle: 'Ссылки на библиотеки, тулчейн и upstream git-репозитории проекта.',
       actions: {
         docs: 'Docs',
         git: 'Git',

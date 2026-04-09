@@ -6132,6 +6132,80 @@ button {
   gap: 10px;
 }
 
+.mc-settings-about-hero {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  backdrop-filter: blur(18px);
+}
+
+.mc-settings-about-hero-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.mc-settings-about-brand {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.mc-settings-about-logo {
+  width: 72px;
+  height: 72px;
+  display: block;
+  object-fit: contain;
+  flex: 0 0 auto;
+  filter: drop-shadow(0 12px 24px rgba(0, 0, 0, 0.28));
+}
+
+.mc-settings-about-kicker {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(169, 213, 255, 0.94);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mc-settings-about-version {
+  min-width: 152px;
+  margin: 0;
+  padding: 14px 16px;
+  display: grid;
+  gap: 8px;
+  align-self: stretch;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(7, 14, 22, 0.34);
+}
+
+.mc-settings-about-version dt {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.mc-settings-about-version dd {
+  margin: 0;
+  color: var(--text);
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
 .mc-settings-about-item {
   margin: 0;
   color: var(--text);
@@ -6532,6 +6606,20 @@ button {
     padding: 14px;
   }
 
+  .mc-settings-about-hero-head,
+  .mc-settings-about-brand {
+    align-items: flex-start;
+  }
+
+  .mc-settings-about-hero-head {
+    flex-direction: column;
+  }
+
+  .mc-settings-about-version {
+    min-width: 0;
+    width: 100%;
+  }
+
   .mc-settings-summary-grid {
     grid-template-columns: 1fr;
   }
@@ -6544,6 +6632,15 @@ button {
   .mc-settings-node-input-wrap {
     width: 100%;
     justify-items: stretch;
+  }
+
+  .mc-settings-about-brand {
+    width: 100%;
+  }
+
+  .mc-settings-about-logo {
+    width: 56px;
+    height: 56px;
   }
 
   .mc-settings-debug-button-grid {

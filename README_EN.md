@@ -10,7 +10,7 @@ Current primary transport:
 
 - `USB serial`
 
-`v0.5.1 -- USB` release status:
+`v0.5.2 -- USB` release status:
 
 - `USB serial` — primary and validated connection path
 - `BLE` — additional experimental path, not a replacement for USB
@@ -88,7 +88,7 @@ What happens:
    - `systemctl daemon-reload`
    - `systemctl enable --now meshcorium.service`
 
-## Updating From `v0.5.0`
+## Updating From `v0.5.0` / `v0.5.1`
 
 Recommended update flow:
 
@@ -101,7 +101,7 @@ Recommended update flow:
    - `data/meshcorium_contacts.sqlite3`
    - `data/client_settings.json`
 
-3. Extract `v0.5.1 -- USB` into a new directory next to the old installation.
+3. Extract `v0.5.2 -- USB` into a new directory next to the old installation.
 
 4. Copy the preserved data files from the old `v0.5.0` installation into the new `data/` directory.
 
@@ -124,7 +124,8 @@ Update notes:
 - If `v0.5.0` was failing on startup with
   - `expected CONTACTS_START, got code 18`
   this release includes backend hardening for that startup failure mode.
-- Keep the old `v0.5.0` directory as a rollback copy until `v0.5.1` is confirmed to work correctly.
+- If `v0.5.1` still showed generic connect/bootstrap timeouts, this release adds deeper backend startup telemetry and transport/runtime hardening for diagnosis and stabilization.
+- Keep the old installation directory as a rollback copy until `v0.5.2` is confirmed to work correctly.
 
 ## Remove The systemd Service
 

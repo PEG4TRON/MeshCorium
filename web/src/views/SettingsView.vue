@@ -120,6 +120,8 @@ const chatBackgroundPresetOptions = [
   { value: 'chat-backplane-blue', labelKey: 'settings.meshcorium.chatBackground.options.blue' },
 ]
 const baudrateOptions = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600]
+const meshcoriumBrandLogoUrl = '/icons/Meshcorium3.png'
+const meshcoriumDisplayVersion = 'v0.5.2'
 
 function getBatteryPercentage(millivolts) {
   const numeric = Number(millivolts)
@@ -4797,10 +4799,32 @@ onBeforeUnmount(() => {
       </template>
 
       <template v-else-if="activeSettingsSection.id === 'about'">
+        <section class="mc-settings-hero-card mc-settings-about-hero">
+          <div class="mc-settings-about-hero-head">
+            <div class="mc-settings-about-brand">
+              <img
+                class="mc-settings-about-logo"
+                :src="meshcoriumBrandLogoUrl"
+                alt="MeshCorium"
+              />
+              <div class="mc-settings-hero-copy">
+                <span class="mc-settings-about-kicker">{{ t('settings.about.brandKicker') }}</span>
+                <h3>{{ t('settings.about.title') }}</h3>
+                <p>{{ t('settings.about.subtitle') }}</p>
+              </div>
+            </div>
+
+            <dl class="mc-settings-about-version">
+              <dt>{{ t('settings.about.versionLabel') }}</dt>
+              <dd>{{ meshcoriumDisplayVersion }}</dd>
+            </dl>
+          </div>
+        </section>
+
         <section class="mc-settings-panel">
           <div class="mc-settings-panel-copy">
-            <h3>{{ t('settings.about.title') }}</h3>
-            <p>{{ t('settings.about.subtitle') }}</p>
+            <h3>{{ t('settings.about.referencesTitle') }}</h3>
+            <p>{{ t('settings.about.referencesSubtitle') }}</p>
           </div>
         </section>
 

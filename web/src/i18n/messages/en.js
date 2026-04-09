@@ -1700,7 +1700,11 @@ export default {
     },
     about: {
       title: 'About MeshCorium',
-      subtitle: 'This section gathers package/docs links and upstream git repositories that are directly used by the project. `meshcore-open` is intentionally excluded.',
+      subtitle: 'This section gathers package/docs links and upstream git repositories that are directly used by the project.',
+      brandKicker: 'MeshCorium client',
+      versionLabel: 'Version',
+      referencesTitle: 'Dependencies and upstream',
+      referencesSubtitle: 'Links to the libraries, tooling, and upstream git repositories used by the project.',
       actions: {
         docs: 'Docs',
         git: 'Git',

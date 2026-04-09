@@ -10,7 +10,7 @@ MeshCorium is a self-hosted MeshCore client with a hybrid contact system and a l
 
 ## Release Status
 
-This `v0.5.1 -- USB` release keeps USB/serial as the validated connection path.
+This `v0.5.2 -- USB` release keeps USB/serial as the validated connection path.
 BLE discovery and connection plumbing are included as experimental groundwork,
 but BLE operation is not yet fully debugged or validated.
 
