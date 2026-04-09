@@ -898,14 +898,35 @@ class _ReaderOwnedFrameHub:
         start_unexpected_error,
         item_unexpected_error,
         end_cursor_offset: int | None = None,
+        ignored_codes: Iterable[int] | int = (),
+        ignored_frame_logger=None,
     ) -> tuple[int, list[bytes]]:
         item_code_set = (
             frozenset([int(item_codes)])
             if isinstance(item_codes, int)
             else frozenset(int(code) for code in item_codes)
         )
-        start_frame = self.await_unclaimed_response_frame(empty_error=start_empty_error)
-        if not start_frame or int(start_frame[0]) != int(start_code):
+        ignored_code_set = (
+            frozenset([int(ignored_codes)])
+            if isinstance(ignored_codes, int)
+            else frozenset(int(code) for code in ignored_codes)
+        )
+
+        def _log_ignored_frame(frame: bytes) -> None:
+            if ignored_frame_logger is None:
+                return
+            try:
+                ignored_frame_logger(frame)
+            except Exception:
+                pass
+
+        while True:
+            start_frame = self.await_unclaimed_response_frame(empty_error=start_empty_error)
+            if start_frame and int(start_frame[0]) == int(start_code):
+                break
+            if start_frame and int(start_frame[0]) in ignored_code_set:
+                _log_ignored_frame(start_frame)
+                continue
             raise MeshCoreError(start_unexpected_error(start_frame))
         item_frames: list[bytes] = []
         cursor = 0
@@ -918,6 +939,9 @@ class _ReaderOwnedFrameHub:
                 if end_cursor_offset is not None and len(frame) >= int(end_cursor_offset) + 4:
                     cursor = struct.unpack_from("<I", frame, int(end_cursor_offset))[0]
                 return cursor, item_frames
+            if frame and int(frame[0]) in ignored_code_set:
+                _log_ignored_frame(frame)
+                continue
             raise MeshCoreError(item_unexpected_error(frame))
 
     def collect_contacts_sequence(self) -> tuple[int, list[bytes]]:
@@ -934,6 +958,12 @@ class _ReaderOwnedFrameHub:
                 f"unexpected frame while reading contacts: code={frame[0]} hex=0x{frame[0]:02x}"
             ),
             end_cursor_offset=1,
+            ignored_codes=(RESP_CHANNEL_INFO,),
+            ignored_frame_logger=lambda frame: logging.warning(
+                "discarding stray CHANNEL_INFO while reading contacts code=%s hex=%s",
+                int(frame[0]) if frame else None,
+                frame.hex() if frame else "",
+            ),
         )
 
 def parse_device_info(payload: bytes) -> DeviceInfo:
