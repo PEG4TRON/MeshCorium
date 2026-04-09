@@ -121,7 +121,7 @@ const chatBackgroundPresetOptions = [
 ]
 const baudrateOptions = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600]
 const meshcoriumBrandLogoUrl = '/icons/Meshcorium3.png'
-const meshcoriumDisplayVersion = 'v0.5.2'
+const meshcoriumDisplayVersion = 'v0.5.3'
 
 function getBatteryPercentage(millivolts) {
   const numeric = Number(millivolts)

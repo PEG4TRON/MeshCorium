@@ -10,11 +10,12 @@ Current primary transport:
 
 - `USB serial`
 
-`v0.5.2 -- USB` release status:
+`v0.5.3 -- Docker + USB` release status:
 
 - `USB serial` — primary and validated connection path
 - `BLE` — additional experimental path, not a replacement for USB
 - `Wi-Fi` — UI placeholder only, real transport not implemented yet
+- `Docker Compose` — included release deployment variant alongside the ordinary launcher/systemd flow
 
 ## Key Features
 
@@ -88,14 +89,14 @@ What happens:
    - `systemctl daemon-reload`
    - `systemctl enable --now meshcorium.service`
 
-## Docker Compose Variant For The Next Release
+## Docker Compose Variant
 
-The development branch also ships a Docker-based runtime variant:
+This release also ships a Docker-based runtime variant:
 
 - `Dockerfile`
 - `docker-compose.yml`
 
-This does not replace the ordinary launcher or systemd flow. It is an additional way to run the next release packaging.
+This does not replace the ordinary launcher or systemd flow. It is an additional way to run the same release.
 
 Default bind mounts in `docker-compose.yml`:
 
@@ -138,7 +139,7 @@ Recommended update flow:
    - `data/meshcorium_contacts.sqlite3`
    - `data/client_settings.json`
 
-3. Extract `v0.5.2 -- USB` into a new directory next to the old installation.
+3. Extract `v0.5.3 -- Docker + USB` into a new directory next to the old installation.
 
 4. Copy the preserved data files from the old `v0.5.0` installation into the new `data/` directory.
 
@@ -162,7 +163,7 @@ Update notes:
   - `expected CONTACTS_START, got code 18`
   this release includes backend hardening for that startup failure mode.
 - If `v0.5.1` still showed generic connect/bootstrap timeouts, this release adds deeper backend startup telemetry and transport/runtime hardening for diagnosis and stabilization.
-- Keep the old installation directory as a rollback copy until `v0.5.2` is confirmed to work correctly.
+- Keep the old installation directory as a rollback copy until `v0.5.3` is confirmed to work correctly.
 
 ## Remove The systemd Service
 

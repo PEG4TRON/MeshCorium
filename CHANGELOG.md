@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.5.3
+
+Release `v0.5.3 -- Docker + USB` is based on post-`v0.5.2` development work and adds the first official Docker packaging variant alongside the ordinary USB release workflow.
+
+### Docker and runtime layout
+
+- The release bundle now includes both:
+  - the ordinary local launcher / systemd runtime
+  - a Docker Compose runtime variant
+- Added:
+  - `Dockerfile`
+  - `docker-compose.yml`
+  - `docker/docker-entrypoint.sh`
+  - `.dockerignore`
+  - `defaults/client_settings.json`
+- Docker runtime layout is now:
+  - `/etc/meshcorium` for config
+  - `/var/lib/meshcorium` for runtime data and SQLite DBs
+  - `/var/log/meshcorium` for logs
+- `meshcorium_web.py` now supports environment-driven runtime paths so the same backend can run in both local and containerized layouts without losing the ordinary `data/` + `logs/` defaults.
+
+### Release notes
+
+- USB/serial remains the validated primary transport.
+- Docker is now an official packaging/deployment variant in the release bundle.
+- BLE remains experimental groundwork and is not yet considered fully debugged or validated.
+
 ## Next release
 
 ### Docker and runtime layout

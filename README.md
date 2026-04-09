@@ -12,9 +12,14 @@ The development tree now also includes a Docker Compose packaging variant for th
 
 ## Release Status
 
-This `v0.5.2 -- USB` release keeps USB/serial as the validated connection path.
+This `v0.5.3 -- Docker + USB` release keeps USB/serial as the validated connection path.
 BLE discovery and connection plumbing are included as experimental groundwork,
 but BLE operation is not yet fully debugged or validated.
+
+The release bundle now includes two supported runtime variants:
+
+- ordinary local launcher / systemd operation
+- Docker Compose operation
 
 Upgrade information from `v0.5.0` is documented in:
 
