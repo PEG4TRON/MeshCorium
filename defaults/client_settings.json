@@ -1,0 +1,21 @@
+{
+  "access_all_meshcorium_contacts": true,
+  "auth_enabled": false,
+  "auto_connect_on_service_start": false,
+  "frontend_diagnostics_enabled": true,
+  "muted_conversations": {},
+  "notification_direct_sound_file": "3.mp3",
+  "notification_mention_sound_file": "2.mp3",
+  "notification_regular_sound_file": "1.mp3",
+  "notifications_sound_enabled": true,
+  "page_background_blur_enabled": true,
+  "page_background_blur_px": 3,
+  "page_background_id": "wallpaper:Cosmic-lasers-1.jpg",
+  "self_location_overrides": {},
+  "signal_metrics_poll_seconds": 15,
+  "signal_metrics_retention_days": 7,
+  "saved_connections": [],
+  "startup_connection_key": "",
+  "startup_use_last_successful": false
+}
+

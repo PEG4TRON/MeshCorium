@@ -88,6 +88,43 @@ What happens:
    - `systemctl daemon-reload`
    - `systemctl enable --now meshcorium.service`
 
+## Docker Compose Variant For The Next Release
+
+The development branch also ships a Docker-based runtime variant:
+
+- `Dockerfile`
+- `docker-compose.yml`
+
+This does not replace the ordinary launcher or systemd flow. It is an additional way to run the next release packaging.
+
+Default bind mounts in `docker-compose.yml`:
+
+- `/etc/meshcorium` -> container config directory `/etc/meshcorium`
+- `/var/lib/meshcorium` -> container runtime data directory `/var/lib/meshcorium`
+- `/var/log/meshcorium` -> container log directory `/var/log/meshcorium`
+
+The compose file also forwards one USB serial device by default:
+
+- `${MESHCORIUM_SERIAL_DEVICE:-/dev/ttyUSB0}`
+
+Typical start:
+
+```bash
+docker compose up -d --build
+```
+
+Typical stop:
+
+```bash
+docker compose down
+```
+
+Notes:
+
+- the container image is built from `alpine:latest`
+- Docker uses the same MeshCorium backend/frontend code as the ordinary release
+- BLE inside Docker is not a validated scenario yet; USB serial remains the primary expected transport
+
 ## Updating From `v0.5.0` / `v0.5.1`
 
 Recommended update flow:
@@ -140,6 +177,10 @@ Update notes:
 - Local runtime data typically lives in:
   - `data/`
   - `logs/`
+- The Docker variant uses:
+  - `/etc/meshcorium`
+  - `/var/lib/meshcorium`
+  - `/var/log/meshcorium`
 
 ## Main Launcher Modes
 

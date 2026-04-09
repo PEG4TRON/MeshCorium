@@ -78,8 +78,17 @@ from meshcorium_transport import (
 from meshcorium_ble_transport import BLE_TRANSPORT_TYPE, BleTransportUnavailable
 from meshcorium_serial_transport import SerialException
 
+def _path_from_env(name: str, default: Path) -> Path:
+    raw_value = str(os.environ.get(name) or "").strip()
+    if not raw_value:
+        return default
+    return Path(raw_value).expanduser()
+
+
 PROJECT_ROOT = Path(__file__).resolve().parent
-LOG_DIR = PROJECT_ROOT / "logs"
+DATA_DIR = _path_from_env("MESHCORIUM_DATA_DIR", PROJECT_ROOT / "data")
+CONFIG_DIR = _path_from_env("MESHCORIUM_CONFIG_DIR", DATA_DIR)
+LOG_DIR = _path_from_env("MESHCORIUM_LOG_DIR", PROJECT_ROOT / "logs")
 LEGACY_LOG_PATH = LOG_DIR / "meshcore_web.log"
 LOG_PATH = LOG_DIR / "meshcorium_web.log"
 DELIVERY_DEBUG_LOG_PATH = LOG_DIR / "message_delivery_debug.log"
@@ -92,12 +101,12 @@ BACKGROUND_MAINTENANCE_IDLE_GRACE_SECS = 1.0
 BACKGROUND_QUEUE_DRAIN_INTERACTIVE_IDLE_GRACE_SECS = 1.5
 BACKGROUND_FRAME_POLL_TIMEOUT_SECS = 0.25
 BACKGROUND_SEND_COMMAND_TIMEOUT_SECS = 35.0
-DATA_DIR = PROJECT_ROOT / "data"
 LEGACY_DB_PATH = DATA_DIR / "meshcore_messages.sqlite3"
 LEGACY_CONTACTS_DB_PATH = DATA_DIR / "meshcore_contacts.sqlite3"
 DB_PATH = DATA_DIR / "meshcorium_messages.sqlite3"
 CONTACTS_DB_PATH = DATA_DIR / "meshcorium_contacts.sqlite3"
-CLIENT_SETTINGS_PATH = DATA_DIR / "client_settings.json"
+LEGACY_CLIENT_SETTINGS_PATH = DATA_DIR / "client_settings.json"
+CLIENT_SETTINGS_PATH = _path_from_env("MESHCORIUM_CLIENT_SETTINGS_PATH", CONFIG_DIR / "client_settings.json")
 ICONS_DIR = PROJECT_ROOT / "icons"
 SOUNDS_DIR = PROJECT_ROOT / "sounds"
 VENDOR_DIR = PROJECT_ROOT / "vendor"
@@ -167,8 +176,9 @@ EMOJI_CHOICES = [
 
 def _display_project_path(path: os.PathLike[str] | str) -> str:
     try:
-        return os.path.relpath(os.fspath(path), os.fspath(PROJECT_ROOT))
-    except ValueError:
+        resolved_path = Path(path).resolve()
+        return os.fspath(resolved_path.relative_to(PROJECT_ROOT.resolve()))
+    except (ValueError, OSError, RuntimeError):
         return os.fspath(path)
 
 
@@ -546,19 +556,26 @@ def _normalize_client_settings(data: object) -> dict:
 
 
 def _load_client_settings_unlocked() -> dict:
-    if not os.path.isfile(CLIENT_SETTINGS_PATH):
+    candidate_paths = [CLIENT_SETTINGS_PATH]
+    if LEGACY_CLIENT_SETTINGS_PATH != CLIENT_SETTINGS_PATH:
+        candidate_paths.append(LEGACY_CLIENT_SETTINGS_PATH)
+    for candidate_path in candidate_paths:
+        if not os.path.isfile(candidate_path):
+            continue
+        try:
+            with open(candidate_path, "r", encoding="utf-8") as fh:
+                return _normalize_client_settings(json.load(fh))
+        except (OSError, json.JSONDecodeError, ValueError, TypeError):
+            logging.exception("failed to load client settings path=%s", candidate_path)
+            break
+    else:
         return _default_client_settings()
-    try:
-        with open(CLIENT_SETTINGS_PATH, "r", encoding="utf-8") as fh:
-            return _normalize_client_settings(json.load(fh))
-    except (OSError, json.JSONDecodeError, ValueError, TypeError):
-        logging.exception("failed to load client settings path=%s", CLIENT_SETTINGS_PATH)
-        return _default_client_settings()
+    return _default_client_settings()
 
 
 def _save_client_settings_unlocked(settings: dict) -> dict:
     normalized = _normalize_client_settings(settings)
-    os.makedirs(DATA_DIR, exist_ok=True)
+    os.makedirs(CLIENT_SETTINGS_PATH.parent, exist_ok=True)
     with open(CLIENT_SETTINGS_PATH, "w", encoding="utf-8") as fh:
         json.dump(normalized, fh, ensure_ascii=False, indent=2, sort_keys=True)
     return normalized
@@ -11431,12 +11448,13 @@ def main() -> int:
     _attempt_service_startup_auto_connect()
     server = ThreadingHTTPServer((args.host, args.port), MeshcoriumWebHandler)
     logging.info(
-        "server starting host=%s port=%s log=%s messages_db=%s contacts_db=%s",
+        "server starting host=%s port=%s log=%s messages_db=%s contacts_db=%s client_settings=%s",
         args.host,
         args.port,
         _display_project_path(LOG_PATH),
         _display_project_path(DB_PATH),
         _display_project_path(CONTACTS_DB_PATH),
+        _display_project_path(CLIENT_SETTINGS_PATH),
     )
     print(f"Meshcorium listening on http://{args.host}:{args.port}")
     try:

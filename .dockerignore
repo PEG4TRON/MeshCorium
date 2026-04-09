@@ -1,0 +1,15 @@
+.git
+.venv
+.release
+__pycache__
+*.pyc
+*.pyo
+logs
+data
+reference.d
+android-web-client
+screenshot
+web/node_modules
+web/dist
+tmp
+

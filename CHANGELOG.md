@@ -1,5 +1,23 @@
 # Changelog
 
+## Next release
+
+### Docker and runtime layout
+
+- Added a Docker deployment variant to the release bundle:
+  - `Dockerfile`
+  - `docker-compose.yml`
+- Docker layout is prepared around:
+  - `/etc/meshcorium` for config
+  - `/var/lib/meshcorium` for runtime data
+  - `/var/log/meshcorium` for logs
+- `meshcorium_web.py` now supports environment-driven runtime paths via:
+  - `MESHCORIUM_CONFIG_DIR`
+  - `MESHCORIUM_DATA_DIR`
+  - `MESHCORIUM_LOG_DIR`
+  - optional `MESHCORIUM_CLIENT_SETTINGS_PATH`
+- Ordinary launcher and systemd usage remain supported; Docker is an additional release variant, not a replacement.
+
 ## v0.5.2
 
 Release `v0.5.2 -- USB` is based on post-`v0.5.1` development work and includes the following additional user-visible changes on top of `v0.5.1`.

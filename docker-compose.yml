@@ -1,0 +1,23 @@
+services:
+  meshcorium:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: meshcorium:next
+    container_name: meshcorium
+    restart: unless-stopped
+    ports:
+      - "${MESHCORIUM_PORT:-8080}:8080"
+    environment:
+      MESHCORIUM_HOST: "0.0.0.0"
+      MESHCORIUM_PORT: "8080"
+      MESHCORIUM_CONFIG_DIR: "/etc/meshcorium"
+      MESHCORIUM_DATA_DIR: "/var/lib/meshcorium"
+      MESHCORIUM_LOG_DIR: "/var/log/meshcorium"
+      MESHCORIUM_RELEASE_VERSION: "dev-docker"
+    volumes:
+      - "${MESHCORIUM_HOST_CONFIG_DIR:-/etc/meshcorium}:/etc/meshcorium"
+      - "${MESHCORIUM_HOST_DATA_DIR:-/var/lib/meshcorium}:/var/lib/meshcorium"
+      - "${MESHCORIUM_HOST_LOG_DIR:-/var/log/meshcorium}:/var/log/meshcorium"
+    devices:
+      - "${MESHCORIUM_SERIAL_DEVICE:-/dev/ttyUSB0}:${MESHCORIUM_SERIAL_DEVICE:-/dev/ttyUSB0}"

@@ -8,6 +8,8 @@ Basic project overview:
 
 MeshCorium is a self-hosted MeshCore client with a hybrid contact system and a local web interface for working with a MeshCore node through companion firmware.
 
+The development tree now also includes a Docker Compose packaging variant for the next release, while keeping the ordinary launcher/systemd runtime path intact.
+
 ## Release Status
 
 This `v0.5.2 -- USB` release keeps USB/serial as the validated connection path.
