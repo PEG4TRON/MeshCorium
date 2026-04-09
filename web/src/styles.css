@@ -2337,6 +2337,116 @@ button {
   line-height: 1.5;
 }
 
+.mc-connect-ble-panel {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(64, 196, 255, 0.18), transparent 40%),
+    rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(114, 209, 255, 0.16);
+}
+
+.mc-connect-ble-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mc-connect-ble-panel-header h3 {
+  margin: 4px 0 0;
+  font-size: 16px;
+}
+
+.mc-connect-ble-state {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.mc-connect-ble-state.is-live {
+  color: #d6fff2;
+  background: rgba(79, 188, 159, 0.18);
+}
+
+.mc-connect-ble-state.is-cached {
+  color: #ffd6b0;
+  background: rgba(255, 173, 102, 0.16);
+}
+
+.mc-connect-ble-summary {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.mc-connect-ble-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.mc-connect-ble-metric {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.mc-connect-ble-metric span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mc-connect-ble-metric strong {
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.mc-connect-ble-diagnostics {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.mc-connect-ble-diagnostics.is-error {
+  background: rgba(240, 113, 120, 0.08);
+  border: 1px solid rgba(240, 113, 120, 0.16);
+}
+
+.mc-connect-ble-diagnostics p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.mc-connect-ble-hints {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  display: grid;
+  gap: 6px;
+}
+
 .mc-connect-wifi-placeholder {
   display: grid;
   gap: 7px;

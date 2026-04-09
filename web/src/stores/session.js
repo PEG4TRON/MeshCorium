@@ -192,6 +192,8 @@ export const useSessionStore = defineStore('session', () => {
   const { t } = i18n.global
   const ports = ref([])
   const bleConnections = ref([])
+  const bleDiagnostics = ref(null)
+  const bleLastScanAt = ref(0)
   const savedConnections = ref([])
   const activeSessions = ref([])
   const recoveringSessions = ref([])
@@ -763,11 +765,26 @@ export const useSessionStore = defineStore('session', () => {
       const bleTransport = Array.isArray(data?.transports)
         ? data.transports.find((entry) => String(entry?.transport_type || '') === 'ble')
         : null
+      bleLastScanAt.value = Date.now()
       bleConnections.value = Array.isArray(bleTransport?.connections) ? bleTransport.connections : []
+      bleDiagnostics.value = bleTransport?.diagnostics || null
       if (bleTransport && bleTransport.available === false) {
         setStatus(bleTransport?.diagnostics?.message || bleTransport?.error || t('connect.ble.scanUnavailable'), true)
       } else if (!bleConnections.value.length) {
         setStatus(t('connect.ble.noDevices'), true)
+        if (!bleDiagnostics.value) {
+          bleDiagnostics.value = {
+            kind: 'scan-empty',
+            message: t('connect.ble.noDevices'),
+            hints: [
+              t('connect.ble.hints.powerCycle'),
+              t('connect.ble.hints.ensureAdvertising'),
+              t('connect.ble.hints.keepAgentOpen'),
+            ],
+          }
+        }
+      } else {
+        bleDiagnostics.value = null
       }
       if (!normalizePort(selectedBleDevice.value) && bleConnections.value.length) {
         selectedBleDevice.value = normalizePort(bleConnections.value[0]?.transport_id || bleConnections.value[0]?.address || '')
@@ -1031,6 +1048,8 @@ export const useSessionStore = defineStore('session', () => {
     DEFAULT_BAUDRATE,
     ports,
     bleConnections,
+    bleDiagnostics,
+    bleLastScanAt,
     savedConnections,
     activeSessions,
     recoveringSessions,
@@ -1073,6 +1092,7 @@ export const useSessionStore = defineStore('session', () => {
     selfPublicKey,
     deviceModel,
     notificationSoundEnabled,
+    selectedBleDeviceInfo,
     selectedSavedConnection,
     setStatus,
     showConnectNotice,

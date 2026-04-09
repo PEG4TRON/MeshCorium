@@ -64,6 +64,82 @@ const bleDeviceOptions = computed(() => {
   }))
 })
 
+const bleSelectedDeviceLive = computed(() => Boolean(session.selectedBleDeviceInfo))
+
+const bleSelectedAddress = computed(() => {
+  return String(
+    session.selectedBleDeviceInfo?.address
+    || session.selectedBleDeviceInfo?.transport_id
+    || session.selectedBleDevice
+    || ''
+  ).trim()
+})
+
+const bleDiagnosticMessage = computed(() => {
+  return String(session.bleDiagnostics?.message || '').trim()
+})
+
+const bleDiagnosticHints = computed(() => {
+  const hints = Array.isArray(session.bleDiagnostics?.hints) ? session.bleDiagnostics.hints : []
+  if (hints.length) {
+    return hints.filter(Boolean)
+  }
+  if (session.selectedBleDevice && !session.selectedBleDeviceInfo) {
+    return [
+      t('connect.ble.hints.cachedDevice'),
+      t('connect.ble.hints.powerCycle'),
+      t('connect.ble.hints.keepAgentOpen'),
+    ]
+  }
+  return [
+    t('connect.ble.hints.ensureAdvertising'),
+    t('connect.ble.hints.keepAgentOpen'),
+  ]
+})
+
+const bleScanSummary = computed(() => {
+  const count = Number(session.bleConnections.length || 0)
+  const lastScanAt = Number(session.bleLastScanAt || 0)
+  const timeLabel = lastScanAt ? new Date(lastScanAt).toLocaleTimeString() : t('common.unknown')
+  if (count > 0) {
+    return t('connect.ble.scanSummaryFound', { count, time: timeLabel })
+  }
+  if (lastScanAt) {
+    return t('connect.ble.scanSummaryEmpty', { time: timeLabel })
+  }
+  return t('connect.ble.scanSummaryIdle')
+})
+
+const bleStateLabel = computed(() => {
+  if (session.selectedBleDeviceInfo) {
+    return t('connect.ble.stateVisible')
+  }
+  if (session.selectedBleDevice) {
+    return t('connect.ble.stateCached')
+  }
+  return t('connect.ble.stateNotSelected')
+})
+
+const bleDetailRows = computed(() => {
+  const info = session.selectedBleDeviceInfo || {}
+  const rows = []
+  if (bleSelectedAddress.value) {
+    rows.push({ label: t('connect.ble.address'), value: bleSelectedAddress.value })
+  }
+  if (info?.rssi != null) {
+    rows.push({ label: t('connect.ble.rssi'), value: `RSSI ${info.rssi}` })
+  }
+  const adapterId = String(info?.adapter_id || '').trim()
+  if (adapterId) {
+    rows.push({ label: t('connect.ble.adapter'), value: adapterId })
+  }
+  const serviceUuids = Array.isArray(info?.service_uuids) ? info.service_uuids : []
+  if (serviceUuids.length) {
+    rows.push({ label: t('connect.ble.services'), value: serviceUuids.join(', ') })
+  }
+  return rows
+})
+
 const filteredSavedConnections = computed(() => {
   const activeTransportType = ['ble', 'wifi'].includes(session.selectedTransportType) ? session.selectedTransportType : 'serial'
   return session.savedConnections.filter((profile) => resolveSavedConnectionTransportType(profile) === activeTransportType)
@@ -285,6 +361,36 @@ async function forgetSavedConnection(profile) {
             </label>
 
             <p class="mc-connect-ble-hint">{{ t('connect.ble.pinHint') }}</p>
+
+            <section class="mc-connect-ble-panel">
+              <div class="mc-connect-ble-panel-header">
+                <div>
+                  <p class="mc-overline">{{ t('connect.ble.panelOverline') }}</p>
+                  <h3>{{ t('connect.ble.panelTitle') }}</h3>
+                </div>
+                <span class="mc-connect-ble-state" :class="{ 'is-live': bleSelectedDeviceLive, 'is-cached': session.selectedBleDevice && !bleSelectedDeviceLive }">
+                  {{ bleStateLabel }}
+                </span>
+              </div>
+
+              <p class="mc-connect-ble-summary">{{ bleScanSummary }}</p>
+
+              <div v-if="bleDetailRows.length" class="mc-connect-ble-grid">
+                <div v-for="row in bleDetailRows" :key="row.label" class="mc-connect-ble-metric">
+                  <span>{{ row.label }}</span>
+                  <strong>{{ row.value }}</strong>
+                </div>
+              </div>
+
+              <div class="mc-connect-ble-diagnostics" :class="{ 'is-error': Boolean(bleDiagnosticMessage) || (session.selectedBleDevice && !bleSelectedDeviceLive) }">
+                <p v-if="bleDiagnosticMessage">{{ bleDiagnosticMessage }}</p>
+                <p v-else-if="session.selectedBleDevice && !bleSelectedDeviceLive">{{ t('connect.ble.cachedWarning') }}</p>
+                <p v-else>{{ t('connect.ble.liveReadyHint') }}</p>
+                <ul class="mc-connect-ble-hints">
+                  <li v-for="hint in bleDiagnosticHints" :key="hint">{{ hint }}</li>
+                </ul>
+              </div>
+            </section>
           </template>
 
           <template v-else>
