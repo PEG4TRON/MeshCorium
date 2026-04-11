@@ -54,8 +54,16 @@ export function describeReconnectEta(stopState, { locale = 'ru' } = {}) {
 }
 
 export function describeRestorePendingStatus(stopState, { t, locale = 'ru' } = {}) {
+  if (!stopState || stopState.intentional) {
+    return ''
+  }
   const reconnectAttempts = Math.max(0, Number(stopState?.reconnect_attempts || stopState?.reconnectAttempts || 0) || 0)
   if (reconnectAttempts <= 0) {
+    return ''
+  }
+  const reconnectScheduledAt = Number(stopState?.reconnect_scheduled_at || stopState?.reconnectScheduledAt || 0) || 0
+  const nextReconnectAt = Number(stopState?.next_reconnect_at || stopState?.nextReconnectAt || 0) || 0
+  if (reconnectScheduledAt <= 0 && nextReconnectAt <= 0) {
     return ''
   }
   const eta = describeReconnectEta(stopState, { locale })

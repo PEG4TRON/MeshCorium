@@ -3320,6 +3320,22 @@ onBeforeUnmount(() => {
 
             <div class="mc-settings-row">
               <div class="mc-settings-row-label">
+                <strong>{{ t('settings.nodeCompanion.connection.accessAllContacts.title') }}</strong>
+                <span>{{ t('settings.nodeCompanion.connection.accessAllContacts.subtitle') }}</span>
+              </div>
+              <div class="mc-settings-row-control">
+                <div class="mc-settings-checkbox">
+                  <input
+                    type="checkbox"
+                    :checked="accessAllMeshcoriumContacts"
+                    @change="updateAccessAllMeshcoriumContacts($event.target.checked)"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div class="mc-settings-row">
+              <div class="mc-settings-row-label">
                 <strong>{{ t('settings.meshcorium.background.title') }}</strong>
                 <span>{{ t('settings.meshcorium.background.subtitle') }}</span>
               </div>
@@ -3812,22 +3828,6 @@ onBeforeUnmount(() => {
                       type="checkbox"
                       :checked="nodeConnectionRenderModel.startupUseLastSuccessful"
                       @change="updateStartupUseLastSuccessful($event.target.checked)"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div class="mc-settings-row">
-                <div class="mc-settings-row-label">
-                  <strong>{{ t('settings.nodeCompanion.connection.accessAllContacts.title') }}</strong>
-                  <span>{{ t('settings.nodeCompanion.connection.accessAllContacts.subtitle') }}</span>
-                </div>
-                <div class="mc-settings-row-control">
-                  <div class="mc-settings-checkbox">
-                    <input
-                      type="checkbox"
-                      :checked="nodeConnectionRenderModel.accessAllMeshcoriumContacts"
-                      @change="updateAccessAllMeshcoriumContacts($event.target.checked)"
                     />
                   </div>
                 </div>

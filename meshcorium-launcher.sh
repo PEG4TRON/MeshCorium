@@ -181,7 +181,14 @@ python_supports_builtin_venv() {
     if ! command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
         return 1
     fi
-    "${PYTHON_BIN}" -m venv --help >/dev/null 2>&1
+    local probe_dir
+    probe_dir="$(mktemp -d "${TMPDIR:-/tmp}/meshcorium-venv-probe.XXXXXX")"
+    if "${PYTHON_BIN}" -m venv "${probe_dir}" >/dev/null 2>&1; then
+        rm -rf "${probe_dir}"
+        return 0
+    fi
+    rm -rf "${probe_dir}"
+    return 1
 }
 
 python_supports_virtualenv_module() {

@@ -2046,6 +2046,43 @@ button {
   place-items: center;
 }
 
+.mc-icon-button--with-label {
+  width: auto;
+  min-width: 144px;
+  padding: 0 14px;
+  grid-auto-flow: column;
+  gap: 10px;
+}
+
+@keyframes mc-icon-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.mc-icon-button-glyph {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  line-height: 1;
+  transform-origin: 50% 50%;
+  flex: 0 0 auto;
+}
+
+.mc-icon-button-glyph.is-spinning {
+  animation: mc-icon-spin 0.85s linear infinite;
+}
+
+.mc-icon-button-label {
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
+  white-space: nowrap;
+}
+
 .mc-field {
   display: grid;
   gap: 8px;
@@ -2337,114 +2374,46 @@ button {
   line-height: 1.5;
 }
 
-.mc-connect-ble-panel {
-  display: grid;
-  gap: 10px;
-  padding: 14px;
-  border-radius: 16px;
-  background:
-    radial-gradient(circle at 100% 0%, rgba(64, 196, 255, 0.18), transparent 40%),
-    rgba(255, 255, 255, 0.045);
-  border: 1px solid rgba(114, 209, 255, 0.16);
-}
-
-.mc-connect-ble-panel-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.mc-connect-ble-panel-header h3 {
-  margin: 4px 0 0;
-  font-size: 16px;
-}
-
-.mc-connect-ble-state {
+.mc-connect-history-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 28px;
-  padding: 0 10px;
+  width: 20px;
+  height: 20px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  white-space: nowrap;
+  color: #9fe6ff;
+  background: rgba(83, 220, 255, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(83, 220, 255, 0.2);
+  font-size: 12px;
 }
 
-.mc-connect-ble-state.is-live {
-  color: #d6fff2;
-  background: rgba(79, 188, 159, 0.18);
+.mc-connect-ble-tools {
+  display: flex;
+  justify-content: flex-end;
 }
 
-.mc-connect-ble-state.is-cached {
-  color: #ffd6b0;
-  background: rgba(255, 173, 102, 0.16);
+.mc-connect-ble-unpair {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 10px;
+  color: #ffe3ea;
+  background: rgba(255, 92, 92, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(255, 92, 92, 0.24);
+  font-size: 16px;
 }
 
-.mc-connect-ble-summary {
-  margin: 0;
-  color: var(--muted);
-  line-height: 1.5;
-}
-
-.mc-connect-ble-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 8px;
-}
-
-.mc-connect-ble-metric {
-  display: grid;
-  gap: 4px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.mc-connect-ble-metric span {
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.mc-connect-ble-metric strong {
-  min-width: 0;
-  font-size: 13px;
-  line-height: 1.4;
-  word-break: break-word;
-}
-
-.mc-connect-ble-diagnostics {
-  display: grid;
-  gap: 8px;
-  padding: 12px 14px;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.mc-connect-ble-diagnostics.is-error {
-  background: rgba(240, 113, 120, 0.08);
-  border: 1px solid rgba(240, 113, 120, 0.16);
-}
-
-.mc-connect-ble-diagnostics p {
-  margin: 0;
-  line-height: 1.5;
-}
-
-.mc-connect-ble-hints {
-  margin: 0;
-  padding-left: 18px;
-  color: var(--muted);
-  display: grid;
-  gap: 6px;
+.mc-connect-ble-unpair::after {
+  content: '';
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 16px;
+  height: 2px;
+  background: rgba(255, 132, 132, 0.9);
+  transform: rotate(-32deg);
+  border-radius: 999px;
 }
 
 .mc-connect-wifi-placeholder {
@@ -2482,6 +2451,15 @@ button {
   font-size: 18px;
 }
 
+.mc-connect-history-header--subsection p:last-child {
+  margin-top: 6px;
+}
+
+.mc-connect-paired-shell {
+  display: grid;
+  gap: 10px;
+}
+
 .mc-connect-history-list {
   max-height: 220px;
   display: grid;
@@ -2504,6 +2482,13 @@ button {
 
 .mc-connect-history-card:hover {
   background: rgba(51, 144, 236, 0.1);
+}
+
+.mc-connect-history-card--paired {
+  background:
+    radial-gradient(circle at 88% 18%, rgba(255, 210, 98, 0.16), transparent 34%),
+    rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 0 0 1px rgba(255, 211, 120, 0.1);
 }
 
 .mc-connect-history-preview {
@@ -2557,6 +2542,11 @@ button {
   color: #91d3ff;
   font-size: 11px;
   font-weight: 700;
+}
+
+.mc-connect-history-kind--paired {
+  background: rgba(255, 211, 120, 0.16);
+  color: #ffe3a5;
 }
 
 .mc-connect-history-forget {

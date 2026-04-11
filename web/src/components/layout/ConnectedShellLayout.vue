@@ -1220,7 +1220,7 @@ watch(() => [session.radioStats?.last_tx_secs, session.radioStats?.tx_air_secs],
 })
 
 watch(() => [phonebarTick.value, session.connected, session.stopState?.reconnect_attempts, session.stopState?.next_reconnect_at], () => {
-  if (session.connected) {
+  if (session.connected || session.connecting) {
     return
   }
   const restoreStatus = describeRestorePendingStatus(session.stopState, {

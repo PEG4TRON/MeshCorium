@@ -36,6 +36,7 @@ class ConnectionDescriptor:
     display_label: str = ""
     adapter_id: str = ""
     pin: str = ""
+    allow_ble_bond_repair: bool = False
 
     @classmethod
     def from_legacy_serial(
@@ -69,7 +70,7 @@ class ConnectionDescriptor:
             return cls(
                 transport_type=BLE_TRANSPORT_TYPE,
                 transport_id=normalized_transport_id,
-                baudrate=int(source.get("baudrate", body.get("baudrate", 0)) or 0),
+                baudrate=0,
                 timeout=float(source.get("timeout", body.get("timeout", DEFAULT_TIMEOUT)) or DEFAULT_TIMEOUT),
                 display_label=str(
                     source.get("display_label")
@@ -82,6 +83,9 @@ class ConnectionDescriptor:
                 ).strip(),
                 adapter_id=str(source.get("adapter_id") or body.get("adapter_id") or "").strip(),
                 pin=str(source.get("pin") or body.get("pin") or "").strip(),
+                allow_ble_bond_repair=bool(
+                    source.get("allow_ble_bond_repair", body.get("allow_ble_bond_repair", False))
+                ),
             )
         if transport_type != SERIAL_TRANSPORT_TYPE:
             raise ValueError(f"unsupported transport_type: {transport_type}")
@@ -171,6 +175,7 @@ class BleTransportAdapter:
             timeout=descriptor.timeout,
             adapter_id=descriptor.adapter_id,
             pin=descriptor.pin,
+            allow_bond_repair=descriptor.allow_ble_bond_repair,
             frame_error=MeshCoreError,
         )
         return MeshCoreClient(

@@ -571,6 +571,9 @@ function applyConnectedStatusFromSnapshot(snapshot = session.sessionSnapshot) {
 }
 
 function applyRestorePendingStatus() {
+  if (session.connecting) {
+    return
+  }
   const restoreStatus = describeRestorePendingStatus(session.stopState, {
     t,
     locale: locale.value,
@@ -3882,7 +3885,7 @@ function startListening() {
     }
   }
   source.onerror = () => {
-    if (session.connected) {
+    if (session.connected && !session.connecting) {
       const restoreStatus = describeRestorePendingStatus(session.stopState, {
         t,
         locale: locale.value,
@@ -4167,7 +4170,7 @@ watch(
 )
 
 watch(() => [phonebarTick.value, session.connected, session.stopState?.reconnect_attempts, session.stopState?.next_reconnect_at], () => {
-  if (!session.connected) {
+  if (!session.connected && !session.connecting) {
     applyRestorePendingStatus()
   }
 })

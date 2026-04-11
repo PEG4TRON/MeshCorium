@@ -56,13 +56,14 @@ function normalizeConnectionDescriptor(source = {}, fallback = {}) {
     || fallback?.transport_id
     || fallback?.port
   )
-  const baudrate = Number(
+  const rawBaudrate = Number(
     sourceConnection.baudrate
     || source?.baudrate
     || fallbackConnection.baudrate
     || fallback?.baudrate
     || DEFAULT_BAUDRATE
   ) || DEFAULT_BAUDRATE
+  const baudrate = transportType === 'serial' ? rawBaudrate : 0
   const timeout = Number(
     sourceConnection.timeout
     || source?.timeout
@@ -192,8 +193,6 @@ export const useSessionStore = defineStore('session', () => {
   const { t } = i18n.global
   const ports = ref([])
   const bleConnections = ref([])
-  const bleDiagnostics = ref(null)
-  const bleLastScanAt = ref(0)
   const savedConnections = ref([])
   const activeSessions = ref([])
   const recoveringSessions = ref([])
@@ -754,37 +753,44 @@ export const useSessionStore = defineStore('session', () => {
     }
   }
 
-  async function refreshBleConnections({ timeout = 6 } = {}) {
+  function isKnownBleSelection(address) {
+    const target = normalizePort(address)
+    if (!target) {
+      return false
+    }
+    if (bleConnections.value.some((entry) => normalizePort(entry?.transport_id || entry?.address) === target)) {
+      return true
+    }
+    return savedConnections.value.some((entry) => {
+      const connection = normalizeConnectionDescriptor(entry)
+      return connection.transport_type === 'ble' && normalizePort(connection.transport_id || connection.port) === target
+    })
+  }
+
+  async function refreshBleConnections({ timeout = 6, resetKnownDevices = false } = {}) {
     loadingBleConnections.value = true
     try {
       const query = new URLSearchParams({
         type: 'ble',
         timeout: String(Math.max(1, Number(timeout || 6))),
       })
+      if (resetKnownDevices) {
+        query.set('reset', '1')
+      }
       const data = await api(`/api/transports?${query.toString()}`)
       const bleTransport = Array.isArray(data?.transports)
         ? data.transports.find((entry) => String(entry?.transport_type || '') === 'ble')
         : null
-      bleLastScanAt.value = Date.now()
       bleConnections.value = Array.isArray(bleTransport?.connections) ? bleTransport.connections : []
-      bleDiagnostics.value = bleTransport?.diagnostics || null
+      if (normalizePort(selectedBleDevice.value) && !isKnownBleSelection(selectedBleDevice.value)) {
+        selectedBleDevice.value = ''
+      }
       if (bleTransport && bleTransport.available === false) {
         setStatus(bleTransport?.diagnostics?.message || bleTransport?.error || t('connect.ble.scanUnavailable'), true)
       } else if (!bleConnections.value.length) {
         setStatus(t('connect.ble.noDevices'), true)
-        if (!bleDiagnostics.value) {
-          bleDiagnostics.value = {
-            kind: 'scan-empty',
-            message: t('connect.ble.noDevices'),
-            hints: [
-              t('connect.ble.hints.powerCycle'),
-              t('connect.ble.hints.ensureAdvertising'),
-              t('connect.ble.hints.keepAgentOpen'),
-            ],
-          }
-        }
-      } else {
-        bleDiagnostics.value = null
+      } else if (resetKnownDevices && Number(bleTransport?.reset?.count || 0) > 0) {
+        setStatus(t('connect.ble.resetPairsDone', { count: Number(bleTransport?.reset?.count || 0) }))
       }
       if (!normalizePort(selectedBleDevice.value) && bleConnections.value.length) {
         selectedBleDevice.value = normalizePort(bleConnections.value[0]?.transport_id || bleConnections.value[0]?.address || '')
@@ -793,6 +799,26 @@ export const useSessionStore = defineStore('session', () => {
     } finally {
       loadingBleConnections.value = false
     }
+  }
+
+  async function unpairBleDevice({ address = '', adapterId = '' } = {}) {
+    const normalizedAddress = normalizePort(address)
+    if (!normalizedAddress) {
+      return null
+    }
+    const data = await api('/api/transports/ble/unpair', {
+      method: 'POST',
+      body: JSON.stringify({
+        address: normalizedAddress,
+        adapter_id: String(adapterId || '').trim(),
+      }),
+    })
+    if (normalizePort(selectedBleDevice.value) === normalizedAddress) {
+      selectedBlePin.value = ''
+    }
+    await refreshBleConnections()
+    setStatus(t('connect.ble.unpaired', { address: normalizedAddress }))
+    return data?.result || null
   }
 
   function configBody(extra = {}) {
@@ -929,11 +955,15 @@ export const useSessionStore = defineStore('session', () => {
       throw new Error(connection.transport_type === 'ble' ? t('connect.status.bleRequired') : t('connect.status.portRequired'))
     }
     connecting.value = true
+    patchSessionSnapshotFields({ stop_state: null })
     setStatus(t('connect.status.connectingTo', { port: connection.display_label || port }))
     try {
       const payload = await api('/api/connect', {
         method: 'POST',
-        body: JSON.stringify(configBody({ light })),
+        body: JSON.stringify(configBody({
+          light,
+          allow_ble_bond_repair: connection.transport_type === 'ble' && Boolean(connection.pin),
+        })),
       })
       patchSessionSnapshotFields({
         ...payload,
@@ -943,6 +973,9 @@ export const useSessionStore = defineStore('session', () => {
       clearConnectNotice()
       setStatus(t('connect.status.connectedTo', { target: payload?.self?.name || connection.display_label || port }))
       return payload
+    } catch (error) {
+      await loadClientSettings()
+      throw error
     } finally {
       connecting.value = false
     }
@@ -995,10 +1028,6 @@ export const useSessionStore = defineStore('session', () => {
   const selfPublicKey = computed(() => String(self.value?.public_key || '').trim())
   const deviceModel = computed(() => String(device.value?.manufacturer_model || '').trim())
   const notificationSoundEnabled = computed(() => Boolean(settingsPayload.value?.settings?.notifications_sound_enabled))
-  const selectedBleDeviceInfo = computed(() => {
-    const target = normalizePort(selectedBleDevice.value)
-    return bleConnections.value.find((entry) => normalizePort(entry?.transport_id || entry?.address) === target) || null
-  })
   const selectedConnection = computed(() => {
     const rawTransportType = String(selectedTransportType.value || 'serial').trim().toLowerCase()
     const transportType = ['serial', 'ble', 'wifi'].includes(rawTransportType) ? rawTransportType : 'serial'
@@ -1013,7 +1042,9 @@ export const useSessionStore = defineStore('session', () => {
       })
     }
     if (transportType === 'ble') {
-      const bleDevice = selectedBleDeviceInfo.value || {}
+      const bleDevice = bleConnections.value.find(
+        (entry) => normalizePort(entry?.transport_id || entry?.address) === normalizePort(selectedBleDevice.value),
+      ) || {}
       const transportId = normalizePort(selectedBleDevice.value || bleDevice?.transport_id || bleDevice?.address)
       return normalizeConnectionDescriptor({
         connection: {
@@ -1048,8 +1079,6 @@ export const useSessionStore = defineStore('session', () => {
     DEFAULT_BAUDRATE,
     ports,
     bleConnections,
-    bleDiagnostics,
-    bleLastScanAt,
     savedConnections,
     activeSessions,
     recoveringSessions,
@@ -1092,7 +1121,6 @@ export const useSessionStore = defineStore('session', () => {
     selfPublicKey,
     deviceModel,
     notificationSoundEnabled,
-    selectedBleDeviceInfo,
     selectedSavedConnection,
     setStatus,
     showConnectNotice,
@@ -1118,6 +1146,7 @@ export const useSessionStore = defineStore('session', () => {
     loadClientSettings,
     refreshPorts,
     refreshBleConnections,
+    unpairBleDevice,
     configBody,
     syncSessionState,
     loadChannels,

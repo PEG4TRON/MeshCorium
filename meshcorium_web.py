@@ -75,7 +75,7 @@ from meshcorium_transport import (
     ConnectionDescriptor,
     SERIAL_TRANSPORT_TYPE,
 )
-from meshcorium_ble_transport import BLE_TRANSPORT_TYPE, BleTransportUnavailable
+from meshcorium_ble_transport import BLE_TRANSPORT_TYPE, BleTransportUnavailable, reset_meshcore_ble_pairs, unpair_ble_device
 from meshcorium_serial_transport import SerialException
 
 def _path_from_env(name: str, default: Path) -> Path:
@@ -450,6 +450,8 @@ def _normalize_saved_connection(entry: object) -> dict | None:
     )
     key = str(entry.get("key") or _build_saved_connection_history_key(normalized_config, public_key=public_key)).strip()
     last_connected_at = int(entry.get("last_connected_at") or 0)
+    last_attempted_at = int(entry.get("last_attempted_at") or 0)
+    attempted_only = bool(entry.get("attempted_only", False))
     return {
         "key": key,
         "port": port,
@@ -463,6 +465,8 @@ def _normalize_saved_connection(entry: object) -> dict | None:
         "manufacturer_model": manufacturer_model,
         "connection_type": connection_type,
         "last_connected_at": last_connected_at,
+        "last_attempted_at": last_attempted_at,
+        "attempted_only": attempted_only,
         "transport_type": str(normalized_config.get("transport_type") or "serial"),
         "transport_id": str(normalized_config.get("transport_id") or port),
         "display_label": str((normalized_config.get("connection") or {}).get("display_label") or entry.get("display_label") or port),
@@ -478,7 +482,7 @@ def _normalize_connection_config(config: object) -> dict | None:
     except (TypeError, ValueError):
         return None
     connection_id = descriptor.port if descriptor.transport_type == SERIAL_TRANSPORT_TYPE else descriptor.transport_id
-    return _normalize_session_config(
+    normalized = _normalize_session_config(
         port=connection_id,
         baudrate=descriptor.baudrate,
         timeout=descriptor.timeout,
@@ -489,6 +493,8 @@ def _normalize_connection_config(config: object) -> dict | None:
         transport_id=descriptor.transport_id,
         display_label=descriptor.display_label,
     )
+    normalized.pop("allow_ble_bond_repair", None)
+    return normalized
 
 
 def _normalize_client_settings(data: object) -> dict:
@@ -506,7 +512,13 @@ def _normalize_client_settings(data: object) -> dict:
         normalized = _normalize_saved_connection(item)
         if normalized is not None:
             saved_connections.append(normalized)
-    saved_connections.sort(key=lambda item: (int(item.get("last_connected_at") or 0), item["key"]), reverse=True)
+    saved_connections.sort(
+        key=lambda item: (
+            max(int(item.get("last_connected_at") or 0), int(item.get("last_attempted_at") or 0)),
+            item["key"],
+        ),
+        reverse=True,
+    )
     last_successful_config = _normalize_connection_config(raw.get("last_successful_config"))
     return {
         "auto_connect_on_service_start": bool(raw.get("auto_connect_on_service_start", base["auto_connect_on_service_start"])),
@@ -684,7 +696,11 @@ def _resolve_owner_id_for_port(port: str | None = None) -> str:
                 if owner_id:
                     return owner_id
     settings = _get_client_settings()
-    saved_connections = list(settings.get("saved_connections") or [])
+    saved_connections = [
+        entry
+        for entry in list(settings.get("saved_connections") or [])
+        if _is_successful_saved_connection(entry)
+    ]
     if normalized_port:
         matching_entries = [
             entry
@@ -785,6 +801,14 @@ def _format_saved_connection_label(entry: dict) -> str:
     return f"{port} @ {baudrate}"
 
 
+def _is_successful_saved_connection(entry: object) -> bool:
+    if not isinstance(entry, dict):
+        return False
+    if bool(entry.get("attempted_only", False)):
+        return False
+    return int(entry.get("last_connected_at") or 0) > 0
+
+
 def _looks_like_hex_node_name(value: object) -> bool:
     text = str(value or "").strip().lower()
     if len(text) not in {32, 64}:
@@ -822,6 +846,8 @@ def _record_successful_connection(config: dict, self_info: dict | None = None, d
             updated.update(normalized_config)
             updated["key"] = key
             updated["last_connected_at"] = now_ts
+            updated["last_attempted_at"] = now_ts
+            updated["attempted_only"] = False
             next_node_name = str((self_info or {}).get("name") or "").strip()
             if _looks_like_hex_node_name(next_node_name):
                 next_node_name = str(entry.get("node_name") or "").strip()
@@ -845,6 +871,8 @@ def _record_successful_connection(config: dict, self_info: dict | None = None, d
                 "key": key,
                 **normalized_config,
                 "last_connected_at": now_ts,
+                "last_attempted_at": now_ts,
+                "attempted_only": False,
                 "node_name": next_node_name,
                 "public_key": public_key,
                 "manufacturer_model": str((device_info or {}).get("manufacturer_model") or "").strip(),
@@ -1020,6 +1048,8 @@ def _resolve_startup_connection_config(settings: dict) -> dict | None:
     if not selected_key:
         return None
     for entry in normalized["saved_connections"]:
+        if not _is_successful_saved_connection(entry):
+            continue
         if str(entry.get("key")) == selected_key:
             return _validate_available(entry)
     return None
@@ -1174,6 +1204,13 @@ def _build_ble_transport_diagnostics(error_message: object) -> dict:
             "Verify the configured BLE PIN and retry pairing if BlueZ still reports Not paired.",
             "If using a desktop Bluetooth agent, complete the pairing prompt before retrying Meshcorium connect.",
         ]
+    elif "pairing failed" in lowered or "automatic ble pairing failed" in lowered:
+        kind = "pairing-failed"
+        hints = [
+            "Verify the current MeshCore BLE PIN/passkey and retry the manual connection.",
+            "If the node PIN or firmware changed, let Meshcorium repair the stale BlueZ bond during the next manual connect.",
+            "If pairing still fails, remove the cached bond and pair again from Meshcorium with the correct PIN.",
+        ]
     elif "not found during pre-connect scan" in lowered:
         kind = "ble-device-not-advertising"
         hints = [
@@ -1226,6 +1263,7 @@ def _schedule_background_reconnect(
     normalized_config = _normalize_connection_config(config)
     if normalized_config is None:
         return
+    normalized_config["allow_ble_bond_repair"] = False
     port = normalized_config["port"]
     session = _get_background_session(port)
     effective_delay_secs = float(delay_secs)
@@ -1425,8 +1463,11 @@ def _build_client_settings_payload() -> dict:
                 "manufacturer_model": str(entry.get("manufacturer_model") or ""),
                 "connection_type": _normalize_saved_connection_type(entry.get("connection_type")),
                 "last_connected_at": int(entry.get("last_connected_at") or 0),
+                "last_attempted_at": int(entry.get("last_attempted_at") or 0),
+                "attempted_only": bool(entry.get("attempted_only", False)),
             }
             for entry in settings.get("saved_connections", [])
+            if _is_successful_saved_connection(entry)
         ],
         "last_successful_key": str(settings.get("last_successful_key") or ""),
         "last_successful_config": settings.get("last_successful_config"),
@@ -5677,6 +5718,7 @@ def _normalize_session_config(
     transport_id: str = "",
     display_label: str = "",
     pin: str = "",
+    allow_ble_bond_repair: bool = False,
 ) -> dict:
     normalized_transport_type = str(transport_type or SERIAL_TRANSPORT_TYPE).strip().lower() or SERIAL_TRANSPORT_TYPE
     normalized_transport_id = str(transport_id or port or "").strip()
@@ -5698,6 +5740,7 @@ def _normalize_session_config(
                     "baudrate": baudrate,
                     "timeout": timeout,
                     "pin": pin,
+                    "allow_ble_bond_repair": bool(allow_ble_bond_repair),
                 }
             }
         )
@@ -5711,6 +5754,7 @@ def _normalize_session_config(
         "app_name": str(app_name),
         "transport_type": descriptor.transport_type,
         "transport_id": descriptor.transport_id,
+        "allow_ble_bond_repair": bool(descriptor.allow_ble_bond_repair),
         "connection": descriptor.to_dict(include_secrets=bool(descriptor.pin)),
     }
 
@@ -6485,9 +6529,21 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
             )
             if emit_error_event:
                 if str(classification["failure_kind"]) == "ble-unavailable":
-                    logging.warning("background session unavailable port=%s baudrate=%s error=%s", port, baudrate, exc)
+                    logging.warning(
+                        "background session unavailable transport=%s connection=%s baudrate=%s error=%s",
+                        session.config.get("transport_type"),
+                        session.config.get("transport_id") or port,
+                        baudrate,
+                        exc,
+                    )
                 else:
-                    logging.exception("background session failed port=%s baudrate=%s error=%s", port, baudrate, exc)
+                    logging.exception(
+                        "background session failed transport=%s connection=%s baudrate=%s error=%s",
+                        session.config.get("transport_type"),
+                        session.config.get("transport_id") or port,
+                        baudrate,
+                        exc,
+                    )
                 _broadcast_event(
                     port,
                     {
@@ -6521,11 +6577,61 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
             session.active = False
             session.client = None
         session.ready_event.set()
-        logging.info("background session stopped port=%s baudrate=%s", port, baudrate)
+        logging.info(
+            "background session stopped transport=%s connection=%s baudrate=%s",
+            session.config.get("transport_type"),
+            session.config.get("transport_id") or port,
+            baudrate,
+        )
 
 
 def _wait_for_background_session(session: BackgroundCompanionSession, timeout_secs: float = 15.0) -> dict:
-    if not session.ready_event.wait(timeout_secs):
+    transport_type = str((session.config or {}).get("transport_type") or "")
+    effective_timeout = float(timeout_secs or 15.0)
+    grace_extension_secs = 0.0
+    if transport_type == BLE_TRANSPORT_TYPE:
+        effective_timeout = max(effective_timeout, 75.0)
+        if str((session.config or {}).get("pin") or "").strip():
+            effective_timeout = max(effective_timeout, 84.0)
+        grace_extension_secs = 24.0
+    wait_deadline = time.monotonic() + effective_timeout
+    grace_used = False
+    while True:
+        remaining = max(0.0, wait_deadline - time.monotonic())
+        if session.ready_event.wait(min(remaining, 1.0) if remaining > 0 else 0.0):
+            break
+        if time.monotonic() < wait_deadline:
+            continue
+        if (
+            transport_type == BLE_TRANSPORT_TYPE
+            and not grace_used
+            and grace_extension_secs > 0.0
+        ):
+            with session.snapshot_lock:
+                bootstrap_stage = str(session.bootstrap_stage or "")
+                stage_started_at = float(session.bootstrap_stage_started_at or 0.0)
+                active = bool(session.active)
+                collections_ready = bool(session.collections_ready)
+            stage_age = time.monotonic() - stage_started_at if stage_started_at > 0 else float("inf")
+            if (
+                active
+                and not collections_ready
+                and bootstrap_stage in {"load-contacts", "load-channels", "finalize-snapshot"}
+                and stage_age < 30.0
+            ):
+                logging.info(
+                    "background session ready wait extending transport=%s connection=%s stage=%s stage_age_secs=%.2f extension_secs=%.2f",
+                    transport_type,
+                    (session.config or {}).get("transport_id") or (session.config or {}).get("port"),
+                    bootstrap_stage,
+                    stage_age,
+                    grace_extension_secs,
+                )
+                wait_deadline = time.monotonic() + grace_extension_secs
+                grace_used = True
+                continue
+        break
+    if not session.ready_event.is_set():
         snapshot = _build_session_snapshot(session, include_contacts=False, include_channels=False)
         bootstrap_state = dict(snapshot.get("bootstrap_state") or {})
         queue_state = dict(snapshot.get("queue_state") or {})
@@ -6544,11 +6650,10 @@ def _wait_for_background_session(session: BackgroundCompanionSession, timeout_se
             active_command_kind=str(getattr(session, "active_command_kind", "") or ""),
         )
         logging.warning(
-            "background session ready wait timed out port=%s baudrate=%s transport=%s connection=%s active=%s collections_ready=%s bootstrap_stage=%s bootstrap_last_update_at=%s active_command=%s queue_drain_in_progress=%s queue_drain_requested=%s",
-            snapshot.get("port"),
-            snapshot.get("baudrate"),
+            "background session ready wait timed out transport=%s connection=%s baudrate=%s active=%s collections_ready=%s bootstrap_stage=%s bootstrap_last_update_at=%s active_command=%s queue_drain_in_progress=%s queue_drain_requested=%s",
             snapshot.get("transport_type"),
             snapshot.get("transport_id"),
+            snapshot.get("baudrate"),
             bool(snapshot.get("active")),
             bool(snapshot.get("collections_ready")),
             bootstrap_state.get("stage"),
@@ -6571,7 +6676,16 @@ def _wait_for_background_session(session: BackgroundCompanionSession, timeout_se
     return snapshot
 
 
-def _start_background_session(config: dict) -> BackgroundCompanionSession:
+def _reset_background_session_reconnect_state(session: BackgroundCompanionSession) -> None:
+    with session.snapshot_lock:
+        session.last_reconnect_reason = None
+        session.reconnect_scheduled_at = 0
+        session.reconnect_delay_secs = 0.0
+        session.next_reconnect_at = 0
+        session.reconnect_attempts = 0
+
+
+def _start_background_session(config: dict, *, preserve_reconnect_state: bool = True) -> BackgroundCompanionSession:
     port = str(config["port"])
     _cancel_pending_reconnect(port)
     existing = _get_background_session(port)
@@ -6585,6 +6699,8 @@ def _start_background_session(config: dict) -> BackgroundCompanionSession:
         _carry_background_session_state(existing, session)
         session.intentional_stop = False
         session.stop_reason = None
+        if not preserve_reconnect_state:
+            _reset_background_session_reconnect_state(session)
     thread = threading.Thread(target=_run_background_session, args=(session,), name=f"meshcore-bg-{port}", daemon=True)
     session.thread = thread
     with BACKGROUND_SESSIONS_GUARD:
@@ -9505,6 +9621,7 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
             params = parse_qs(parsed.query)
             requested_type = str(params.get("type", ["all"])[0] or "all").strip().lower()
             adapter_id = str(params.get("adapter_id", [""])[0] or "").strip()
+            reset_ble_pairs = str(params.get("reset", ["0"])[0] or "0").strip().lower() in {"1", "true", "yes", "on"}
             try:
                 ble_timeout = max(1.0, min(15.0, float(params.get("timeout", ["5"])[0] or 5.0)))
             except (TypeError, ValueError):
@@ -9527,6 +9644,9 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                 )
             if requested_type in {"all", BLE_TRANSPORT_TYPE}:
                 try:
+                    ble_reset_result = None
+                    if reset_ble_pairs:
+                        ble_reset_result = reset_meshcore_ble_pairs(timeout=max(4.0, ble_timeout), adapter_id=adapter_id)
                     ble_connections = DEFAULT_CONNECTION_ROUTER.discover(
                         BLE_TRANSPORT_TYPE,
                         timeout=ble_timeout,
@@ -9538,6 +9658,7 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                             "available": True,
                             "connections": ble_connections,
                             "adapter_id": adapter_id,
+                            "reset": ble_reset_result,
                         }
                     )
                 except BleTransportUnavailable as exc:
@@ -9845,7 +9966,12 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
             if parsed.path == "/api/connect":
                 session_kwargs = self._session_kwargs(body)
                 light = bool(body.get("light"))
-                logging.info("api connect requested port=%s baudrate=%s", conn["port"], conn["baudrate"])
+                logging.info(
+                    "api connect requested transport=%s connection=%s baudrate=%s",
+                    conn["transport_type"],
+                    conn["transport_id"],
+                    conn["baudrate"],
+                )
                 session = _start_background_session(
                     _normalize_session_config(
                         port=session_kwargs["port"],
@@ -9858,7 +9984,9 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                         transport_id=session_kwargs["transport_id"],
                         display_label=str((session_kwargs.get("connection") or {}).get("display_label") or session_kwargs["transport_id"]),
                         pin=str((session_kwargs.get("connection") or {}).get("pin") or ""),
-                    )
+                        allow_ble_bond_repair=bool(session_kwargs.get("allow_ble_bond_repair")),
+                    ),
+                    preserve_reconnect_state=False,
                 )
                 snapshot = _wait_for_background_session(session)
                 response_snapshot = _build_session_snapshot(
@@ -9867,9 +9995,10 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                     include_channels=not light,
                 )
                 logging.info(
-                    "api connect completed port=%s baudrate=%s contacts=%s channels=%s collections_ready=%s node=%s",
-                    conn["port"],
-                    conn["baudrate"],
+                    "api connect completed transport=%s connection=%s baudrate=%s contacts=%s channels=%s collections_ready=%s node=%s",
+                    response_snapshot.get("transport_type"),
+                    response_snapshot.get("transport_id"),
+                    response_snapshot.get("baudrate"),
                     response_snapshot.get("contacts_count")
                     if response_snapshot.get("contacts_count") is not None
                     else "pending",
@@ -9928,6 +10057,21 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                     }
                 )
                 self._send_json(response_payload)
+                return
+            if parsed.path == "/api/transports/ble/unpair":
+                connection = body.get("connection") if isinstance(body.get("connection"), dict) else {}
+                address = str(
+                    body.get("address")
+                    or connection.get("transport_id")
+                    or connection.get("address")
+                    or body.get("transport_id")
+                    or ""
+                ).strip()
+                adapter_id = str(body.get("adapter_id") or connection.get("adapter_id") or "").strip()
+                if not address:
+                    raise ValueError("BLE device address is required")
+                result = unpair_ble_device(address=address, adapter_id=adapter_id)
+                self._send_json({"ok": True, "result": result})
                 return
             if parsed.path == "/api/frontend-diagnostic":
                 diagnostic_kind = str(body.get("kind") or body.get("event") or "frontend-event").strip() or "frontend-event"
@@ -11106,6 +11250,7 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
             "timeout": float(descriptor.timeout),
             "transport_type": descriptor.transport_type,
             "transport_id": descriptor.transport_id,
+            "allow_ble_bond_repair": bool(descriptor.allow_ble_bond_repair),
             "protocol_version": int(body.get("protocol_version", DEFAULT_PROTOCOL_VERSION)),
         }
 
@@ -11125,7 +11270,7 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
         connection_id = descriptor.port if descriptor.transport_type == SERIAL_TRANSPORT_TYPE else descriptor.transport_id
         return {
             "port": connection_id,
-            "baudrate": str(descriptor.baudrate),
+            "baudrate": str(descriptor.baudrate) if descriptor.transport_type == SERIAL_TRANSPORT_TYPE else "-",
             "transport_type": descriptor.transport_type,
             "transport_id": descriptor.transport_id,
         }
@@ -11323,7 +11468,14 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                 status=HTTPStatus.SERVICE_UNAVAILABLE,
             )
             return
-        self._send_html(index_path.read_text(encoding="utf-8"))
+        self._send_html(
+            index_path.read_text(encoding="utf-8"),
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
 
     def _send_connect_app_file(self, rel_path: str) -> None:
         normalized = os.path.normpath("/" + rel_path).lstrip("/")
@@ -11356,6 +11508,10 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
             content_type = "image/svg+xml"
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", content_type)
+        if resolved.name == "index.html":
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Expires", "0")
         if guessed_encoding:
             self.send_header("Content-Encoding", guessed_encoding)
         self.send_header("Content-Length", str(len(payload)))

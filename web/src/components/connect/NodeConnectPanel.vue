@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import LocaleSwitch from '../ui/LocaleSwitch.vue'
@@ -21,6 +21,52 @@ const session = useSessionStore()
 
 const baudrateOptions = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600]
 const brandLogoUrl = '/icons/Meshcorium3.png'
+const refreshAnimating = ref(false)
+const refreshBusy = computed(() => (
+  session.selectedTransportType === 'ble'
+    ? (refreshAnimating.value || session.loadingBleConnections)
+    : (refreshAnimating.value || session.loadingPorts)
+))
+const refreshButtonLabel = computed(() => {
+  if (session.selectedTransportType === 'ble') {
+    return t('connect.ble.scan')
+  }
+  if (session.selectedTransportType === 'wifi') {
+    return t('connect.wifi.unavailableTitle')
+  }
+  return t('common.refreshPorts')
+})
+const serialOnlyStatusMessages = computed(() => new Set([
+  t('connect.status.noVisiblePorts'),
+  t('connect.status.portNotSelected'),
+  t('connect.status.portRequired'),
+]))
+const visibleConnectNotice = computed(() => {
+  const notice = session.connectNotice
+  if (!notice) {
+    return null
+  }
+  if (
+    session.selectedTransportType === 'ble'
+    && serialOnlyStatusMessages.value.has(String(notice.message || ''))
+  ) {
+    return null
+  }
+  return notice
+})
+const visibleStatusText = computed(() => {
+  const message = String(session.statusText || '')
+  if (!message) {
+    return ''
+  }
+  if (
+    session.selectedTransportType === 'ble'
+    && serialOnlyStatusMessages.value.has(message)
+  ) {
+    return ''
+  }
+  return message
+})
 
 const selectedConnectionLabel = computed(() => {
   if (session.selectedTransportType === 'wifi') {
@@ -56,93 +102,155 @@ const baudrateDropdownOptions = computed(() => {
 })
 
 const bleDeviceOptions = computed(() => {
-  return session.bleConnections.map((entry) => ({
-    value: String(entry?.transport_id || entry?.address || ''),
-    label: String(entry?.display_label || entry?.name || entry?.transport_id || entry?.address || ''),
-    meta: entry?.rssi == null ? String(entry?.address || '') : `RSSI ${entry.rssi} | ${entry?.address || ''}`,
-    triggerLabel: `${entry?.display_label || entry?.name || entry?.address || ''} | ${entry?.address || ''}`,
-  }))
+  const seen = new Set()
+  const options = []
+  for (const entry of session.bleConnections) {
+    const value = String(entry?.transport_id || entry?.address || '')
+    if (!value || seen.has(value)) {
+      continue
+    }
+    seen.add(value)
+    options.push({
+      value,
+      label: String(entry?.display_label || entry?.name || entry?.transport_id || entry?.address || ''),
+      meta: entry?.rssi == null
+        ? `${entry?.cached ? t('connect.ble.availability.cached') + ' | ' : ''}${entry?.address || ''}`
+        : `RSSI ${entry.rssi} | ${entry?.address || ''}`,
+      triggerLabel: `${entry?.display_label || entry?.name || entry?.address || ''} | ${entry?.address || ''}`,
+    })
+  }
+  for (const profile of filteredSavedConnections.value) {
+    const value = String(profile?.connection?.transport_id || profile?.transport_id || profile?.port || '')
+    if (!value || seen.has(value)) {
+      continue
+    }
+    seen.add(value)
+    const label = String(profile?.node_name || profile?.manufacturer_model || value)
+    options.push({
+      value,
+      label,
+      meta: t('connect.ble.savedDeviceMeta', { address: value }),
+      triggerLabel: `${label} | ${value}`,
+    })
+  }
+  return options
 })
 
-const bleSelectedDeviceLive = computed(() => Boolean(session.selectedBleDeviceInfo))
-
-const bleSelectedAddress = computed(() => {
-  return String(
-    session.selectedBleDeviceInfo?.address
-    || session.selectedBleDeviceInfo?.transport_id
-    || session.selectedBleDevice
-    || ''
-  ).trim()
-})
-
-const bleDiagnosticMessage = computed(() => {
-  return String(session.bleDiagnostics?.message || '').trim()
-})
-
-const bleDiagnosticHints = computed(() => {
-  const hints = Array.isArray(session.bleDiagnostics?.hints) ? session.bleDiagnostics.hints : []
-  if (hints.length) {
-    return hints.filter(Boolean)
+const selectedBleDeviceInfo = computed(() => {
+  const selectedId = String(session.selectedBleDevice || '')
+  const liveMatch = session.bleConnections.find(
+    (entry) => String(entry?.transport_id || entry?.address || '') === selectedId,
+  )
+  if (liveMatch) {
+    return liveMatch
   }
-  if (session.selectedBleDevice && !session.selectedBleDeviceInfo) {
-    return [
-      t('connect.ble.hints.cachedDevice'),
-      t('connect.ble.hints.powerCycle'),
-      t('connect.ble.hints.keepAgentOpen'),
-    ]
+  const savedMatch = filteredSavedConnections.value.find(
+    (profile) => String(profile?.connection?.transport_id || profile?.transport_id || profile?.port || '') === selectedId,
+  )
+  if (!savedMatch) {
+    return null
   }
-  return [
-    t('connect.ble.hints.ensureAdvertising'),
-    t('connect.ble.hints.keepAgentOpen'),
-  ]
-})
-
-const bleScanSummary = computed(() => {
-  const count = Number(session.bleConnections.length || 0)
-  const lastScanAt = Number(session.bleLastScanAt || 0)
-  const timeLabel = lastScanAt ? new Date(lastScanAt).toLocaleTimeString() : t('common.unknown')
-  if (count > 0) {
-    return t('connect.ble.scanSummaryFound', { count, time: timeLabel })
+  return {
+    address: selectedId,
+    transport_id: selectedId,
+    display_label: String(savedMatch?.node_name || savedMatch?.manufacturer_model || selectedId),
+    name: String(savedMatch?.node_name || ''),
+    rssi: null,
+    paired: false,
+    bonded: false,
+    trusted: false,
+    connected: false,
+    cached: false,
+    savedOnly: true,
   }
-  if (lastScanAt) {
-    return t('connect.ble.scanSummaryEmpty', { time: timeLabel })
-  }
-  return t('connect.ble.scanSummaryIdle')
-})
-
-const bleStateLabel = computed(() => {
-  if (session.selectedBleDeviceInfo) {
-    return t('connect.ble.stateVisible')
-  }
-  if (session.selectedBleDevice) {
-    return t('connect.ble.stateCached')
-  }
-  return t('connect.ble.stateNotSelected')
-})
-
-const bleDetailRows = computed(() => {
-  const info = session.selectedBleDeviceInfo || {}
-  const rows = []
-  if (bleSelectedAddress.value) {
-    rows.push({ label: t('connect.ble.address'), value: bleSelectedAddress.value })
-  }
-  if (info?.rssi != null) {
-    rows.push({ label: t('connect.ble.rssi'), value: `RSSI ${info.rssi}` })
-  }
-  const adapterId = String(info?.adapter_id || '').trim()
-  if (adapterId) {
-    rows.push({ label: t('connect.ble.adapter'), value: adapterId })
-  }
-  const serviceUuids = Array.isArray(info?.service_uuids) ? info.service_uuids : []
-  if (serviceUuids.length) {
-    rows.push({ label: t('connect.ble.services'), value: serviceUuids.join(', ') })
-  }
-  return rows
 })
 
 const filteredSavedConnections = computed(() => {
   const activeTransportType = ['ble', 'wifi'].includes(session.selectedTransportType) ? session.selectedTransportType : 'serial'
   return session.savedConnections.filter((profile) => resolveSavedConnectionTransportType(profile) === activeTransportType)
+})
+
+const pairedBleDevices = computed(() => {
+  if (session.selectedTransportType !== 'ble') {
+    return []
+  }
+  const byId = new Map()
+  for (const entry of session.bleConnections) {
+    const id = String(entry?.transport_id || entry?.address || '').trim()
+    if (!id) {
+      continue
+    }
+    if (!(entry?.paired || entry?.bonded || entry?.trusted || entry?.connected)) {
+      continue
+    }
+    const savedProfile = filteredSavedConnections.value.find(
+      (profile) => resolveSavedConnectionPort(profile) === id,
+    )
+    byId.set(id, {
+      key: `paired-${id}`,
+      address: id,
+      displayName: String(
+        entry?.display_label
+        || entry?.name
+        || savedProfile?.node_name
+        || savedProfile?.manufacturer_model
+        || id,
+      ).trim(),
+      modelName: String(
+        savedProfile?.manufacturer_model
+        || entry?.display_label
+        || entry?.name
+        || id,
+      ).trim(),
+      previewLabel: String(
+        savedProfile?.manufacturer_model
+        || savedProfile?.node_name
+        || entry?.display_label
+        || entry?.name
+        || id,
+      ).trim(),
+      pairState: entry?.connected
+        ? t('connect.ble.pairStates.connected')
+        : (entry?.paired || entry?.bonded)
+            ? t('connect.ble.pairStates.paired')
+            : entry?.trusted
+              ? t('connect.ble.pairStates.trusted')
+              : t('connect.ble.pairStates.unpaired'),
+    })
+  }
+  return Array.from(byId.values())
+})
+
+const nonPairedSavedConnections = computed(() => {
+  if (session.selectedTransportType !== 'ble') {
+    return filteredSavedConnections.value
+  }
+  const pairedIds = new Set(pairedBleDevices.value.map((entry) => entry.address))
+  return filteredSavedConnections.value.filter((profile) => !pairedIds.has(resolveSavedConnectionPort(profile)))
+})
+
+const bleScanDisabledByPairing = computed(() => (
+  session.selectedTransportType === 'ble' && pairedBleDevices.value.length > 0
+))
+
+const refreshDisabled = computed(() => {
+  if (session.selectedTransportType === 'wifi') {
+    return true
+  }
+  if (session.selectedTransportType === 'ble') {
+    return session.loadingBleConnections || bleScanDisabledByPairing.value
+  }
+  return session.loadingPorts
+})
+
+const connectDisabled = computed(() => {
+  if (session.connecting || session.selectedTransportType === 'wifi') {
+    return true
+  }
+  if (session.selectedTransportType === 'ble') {
+    return session.loadingBleConnections
+  }
+  return false
 })
 
 const historyTitle = computed(() => {
@@ -166,6 +274,9 @@ const historyEmptyText = computed(() => {
   return session.selectedTransportType === 'ble' ? t('connect.history.bleEmpty') : t('connect.history.usbEmpty')
 })
 
+const pairedSectionTitle = computed(() => t('connect.ble.pairedSectionTitle'))
+const pairedSectionSubtitle = computed(() => t('connect.ble.pairedSectionSubtitle'))
+
 function resolveSavedConnectionDisplayName(profile) {
   const nodeName = String(profile?.node_name || '').trim()
   if (nodeName) {
@@ -176,6 +287,15 @@ function resolveSavedConnectionDisplayName(profile) {
     return manufacturerModel
   }
   return resolveSavedConnectionPort(profile)
+}
+
+function pickPairedBleDevice(entry) {
+  const address = String(entry?.address || '').trim()
+  if (!address) {
+    return
+  }
+  session.selectedTransportType = 'ble'
+  session.selectedBleDevice = address
 }
 
 function resolveSavedConnectionModelName(profile) {
@@ -230,15 +350,31 @@ async function connectNode() {
 }
 
 async function refreshTransport() {
-  if (session.selectedTransportType === 'ble') {
-    await session.refreshBleConnections()
+  if (bleScanDisabledByPairing.value) {
     return
+  }
+  refreshAnimating.value = true
+  if (session.selectedTransportType === 'ble') {
+    try {
+      await session.refreshBleConnections()
+      return
+    } finally {
+      refreshAnimating.value = false
+    }
   }
   if (session.selectedTransportType === 'wifi') {
-    session.setStatus(t('connect.status.wifiUnavailable'), true)
-    return
+    try {
+      session.setStatus(t('connect.status.wifiUnavailable'), true)
+      return
+    } finally {
+      refreshAnimating.value = false
+    }
   }
-  await session.refreshPorts()
+  try {
+    await session.refreshPorts()
+  } finally {
+    refreshAnimating.value = false
+  }
 }
 
 function pickSavedConnection(profile) {
@@ -260,6 +396,47 @@ function pickSavedConnection(profile) {
 async function forgetSavedConnection(profile) {
   await session.forgetSavedConnection(profile)
 }
+
+async function unpairSelectedBleDevice() {
+  if (!selectedBleDeviceInfo.value) {
+    return
+  }
+  try {
+    await session.unpairBleDevice({
+      address: String(selectedBleDeviceInfo.value?.address || selectedBleDeviceInfo.value?.transport_id || ''),
+      adapterId: String(selectedBleDeviceInfo.value?.adapter_id || ''),
+    })
+  } catch (error) {
+    session.setStatus(error instanceof Error ? error.message : String(error || t('connect.ble.unpairFailed')), true)
+  }
+}
+
+async function ensureBleConnectionsLoaded() {
+  if (session.loadingBleConnections) {
+    return
+  }
+  if (session.bleConnections.length) {
+    return
+  }
+  try {
+    await session.refreshBleConnections()
+  } catch {
+    // Keep the connect window responsive even if background BLE discovery fails.
+  }
+}
+
+onMounted(() => {
+  void ensureBleConnectionsLoaded()
+})
+
+watch(
+  () => session.selectedTransportType,
+  (transportType) => {
+    if (transportType === 'ble') {
+      void ensureBleConnectionsLoaded()
+    }
+  },
+)
 </script>
 
 <template>
@@ -276,26 +453,45 @@ async function forgetSavedConnection(profile) {
       </div>
     </div>
 
-    <div v-if="session.connectNotice" class="mc-connect-alert" :class="{ 'is-error': session.connectNotice.isError }">
-      {{ session.connectNotice.message }}
+    <div v-if="visibleConnectNotice" class="mc-connect-alert" :class="{ 'is-error': visibleConnectNotice.isError }">
+      {{ visibleConnectNotice.message }}
     </div>
 
     <div class="mc-connect-float-layout">
       <div class="mc-connect-float-stack">
         <div class="mc-connect-float-card">
           <div class="mc-connect-float-primary">
-            <button class="mc-button mc-button--primary mc-button--wide" type="button" :disabled="session.connecting || session.selectedTransportType === 'wifi'" @click="connectNode">
+            <button class="mc-button mc-button--primary mc-button--wide" type="button" :disabled="connectDisabled" @click="connectNode">
               {{ session.connecting ? t('connect.actions.connecting') : t('connect.actions.connect') }}
             </button>
             <button
-              v-tooltip="{ content: session.selectedTransportType === 'wifi' ? t('connect.wifi.unavailableTitle') : (session.selectedTransportType === 'ble' ? t('connect.ble.scan') : t('common.refreshPorts')), theme: 'meshcorium-tooltip' }"
+              v-tooltip="{ content: refreshButtonLabel, theme: 'meshcorium-tooltip' }"
               class="mc-icon-button"
+              :class="{ 'is-spinning': refreshBusy, 'mc-icon-button--with-label': session.selectedTransportType === 'ble' }"
               type="button"
-              :aria-label="session.selectedTransportType === 'wifi' ? t('connect.wifi.unavailableTitle') : (session.selectedTransportType === 'ble' ? t('connect.ble.scan') : t('common.refreshPorts'))"
-              :disabled="session.loadingPorts || session.loadingBleConnections || session.selectedTransportType === 'wifi'"
+              :aria-label="refreshButtonLabel"
+              :disabled="refreshDisabled"
               @click="refreshTransport"
             >
-              ↻
+              <svg class="mc-icon-button-glyph" :class="{ 'is-spinning': refreshBusy }" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M20 6v5h-5"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+                <path
+                  d="M20 11a8 8 0 1 0 2 5.2"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+              <span v-if="session.selectedTransportType === 'ble'" class="mc-icon-button-label">{{ refreshButtonLabel }}</span>
             </button>
           </div>
 
@@ -360,37 +556,20 @@ async function forgetSavedConnection(profile) {
               />
             </label>
 
-            <p class="mc-connect-ble-hint">{{ t('connect.ble.pinHint') }}</p>
-
-            <section class="mc-connect-ble-panel">
-              <div class="mc-connect-ble-panel-header">
-                <div>
-                  <p class="mc-overline">{{ t('connect.ble.panelOverline') }}</p>
-                  <h3>{{ t('connect.ble.panelTitle') }}</h3>
-                </div>
-                <span class="mc-connect-ble-state" :class="{ 'is-live': bleSelectedDeviceLive, 'is-cached': session.selectedBleDevice && !bleSelectedDeviceLive }">
-                  {{ bleStateLabel }}
-                </span>
-              </div>
-
-              <p class="mc-connect-ble-summary">{{ bleScanSummary }}</p>
-
-              <div v-if="bleDetailRows.length" class="mc-connect-ble-grid">
-                <div v-for="row in bleDetailRows" :key="row.label" class="mc-connect-ble-metric">
-                  <span>{{ row.label }}</span>
-                  <strong>{{ row.value }}</strong>
-                </div>
-              </div>
-
-              <div class="mc-connect-ble-diagnostics" :class="{ 'is-error': Boolean(bleDiagnosticMessage) || (session.selectedBleDevice && !bleSelectedDeviceLive) }">
-                <p v-if="bleDiagnosticMessage">{{ bleDiagnosticMessage }}</p>
-                <p v-else-if="session.selectedBleDevice && !bleSelectedDeviceLive">{{ t('connect.ble.cachedWarning') }}</p>
-                <p v-else>{{ t('connect.ble.liveReadyHint') }}</p>
-                <ul class="mc-connect-ble-hints">
-                  <li v-for="hint in bleDiagnosticHints" :key="hint">{{ hint }}</li>
-                </ul>
-              </div>
-            </section>
+            <div
+              v-if="selectedBleDeviceInfo && (selectedBleDeviceInfo.paired || selectedBleDeviceInfo.bonded || selectedBleDeviceInfo.trusted || selectedBleDeviceInfo.connected)"
+              class="mc-connect-ble-tools"
+            >
+              <button
+                class="mc-connect-ble-unpair"
+                type="button"
+                :title="t('connect.ble.unpair')"
+                :aria-label="t('connect.ble.unpair')"
+                @click="unpairSelectedBleDevice"
+              >
+                ⛓
+              </button>
+            </div>
           </template>
 
           <template v-else>
@@ -420,7 +599,7 @@ async function forgetSavedConnection(profile) {
           </div>
         </div>
 
-        <div class="mc-connect-float-note" :class="{ 'is-error': session.statusError }">{{ session.statusText }}</div>
+        <div v-if="visibleStatusText" class="mc-connect-float-note" :class="{ 'is-error': session.statusError }">{{ visibleStatusText }}</div>
       </div>
 
       <aside class="mc-connect-history-shell">
@@ -429,9 +608,47 @@ async function forgetSavedConnection(profile) {
           <h3>{{ historyTitle }}</h3>
           <p>{{ historySubtitle }}</p>
         </div>
+        <div v-if="session.selectedTransportType === 'ble' && pairedBleDevices.length" class="mc-connect-paired-shell">
+          <div class="mc-connect-history-header mc-connect-history-header--subsection">
+            <p class="mc-overline">{{ pairedSectionTitle }}</p>
+            <p>{{ pairedSectionSubtitle }}</p>
+          </div>
+          <div class="mc-connect-history-list">
+            <article
+              v-for="entry in pairedBleDevices"
+              :key="entry.key"
+              class="mc-connect-history-card mc-connect-history-card--paired"
+              role="button"
+              tabindex="0"
+              @click="pickPairedBleDevice(entry)"
+              @keydown.enter.prevent="pickPairedBleDevice(entry)"
+            >
+              <div class="mc-connect-history-preview">
+                <img
+                  v-if="resolveNodePreviewUrl(entry.previewLabel)"
+                  :src="resolveNodePreviewUrl(entry.previewLabel)"
+                  alt=""
+                />
+                <span v-else>◈</span>
+              </div>
+              <div class="mc-connect-history-main">
+                <div class="mc-connect-history-top">
+                  <strong>{{ entry.displayName }}</strong>
+                  <span class="mc-connect-history-kind mc-connect-history-kind--paired">{{ t('connect.ble.pairStates.paired') }}</span>
+                </div>
+                <div class="mc-connect-history-bottom">
+                  <span class="mc-connect-history-icon">⌁</span>
+                  <span>{{ entry.modelName }}</span>
+                  <span>{{ entry.address }}</span>
+                  <span>{{ entry.pairState }}</span>
+                </div>
+              </div>
+            </article>
+          </div>
+        </div>
         <div class="mc-connect-history-list">
           <article
-            v-for="profile in filteredSavedConnections"
+            v-for="profile in nonPairedSavedConnections"
             :key="profile.key || `${resolveSavedConnectionPort(profile)}-${profile.baudrate}-${profile.public_key || profile.node_name}`"
             class="mc-connect-history-card"
             role="button"
@@ -453,16 +670,17 @@ async function forgetSavedConnection(profile) {
                 <span class="mc-connect-history-kind">{{ resolveSavedConnectionKind(profile) }}</span>
               </div>
               <div class="mc-connect-history-bottom">
+                <span v-if="resolveSavedConnectionTransportType(profile) === 'ble'" class="mc-connect-history-icon">⌁</span>
                 <span>{{ resolveSavedConnectionModelName(profile) }}</span>
                 <span>{{ resolveSavedConnectionPort(profile) }}</span>
                 <span v-if="resolveSavedConnectionTransportType(profile) === 'serial'">{{ resolveSavedConnectionBaudrate(profile) }}</span>
-                <button class="mc-connect-history-forget" type="button" @click.stop="forgetSavedConnection(profile)">
-                  {{ t('connect.history.forget') }}
+                <button class="mc-connect-history-forget" type="button" :title="t('connect.history.forget')" @click.stop="forgetSavedConnection(profile)">
+                  🗑
                 </button>
               </div>
             </div>
           </article>
-          <div v-if="!filteredSavedConnections.length" class="mc-connect-history-empty">{{ historyEmptyText }}</div>
+          <div v-if="!nonPairedSavedConnections.length" class="mc-connect-history-empty">{{ historyEmptyText }}</div>
         </div>
       </aside>
     </div>
