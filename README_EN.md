@@ -6,33 +6,62 @@ MeshCorium is a self-hosted MeshCore client with a hybrid contact system.
 
 The project provides a unified interface for working with a MeshCore node through companion firmware and is intended for local deployment on a Linux host located next to the node.
 
-Current primary transport:
+Current transports:
 
 - `USB serial`
+- `BLE`
 
-`v0.5.3 -- Docker + USB` release status:
+`dev` branch status after `v0.5.3 -- Docker + USB`:
 
-- `USB serial` — primary and validated connection path
-- `BLE` — additional experimental path, not a replacement for USB
+- `USB serial` — permanent and validated connection path, not being removed from the project
+- `BLE` — additional companion-node connection path through Linux / BlueZ, available alongside USB serial
 - `Wi-Fi` — UI placeholder only, real transport not implemented yet
-- `Docker Compose` — included release deployment variant alongside the ordinary launcher/systemd flow
+- `Docker Compose` — deployment variant introduced in `v0.5.3`, kept alongside the ordinary launcher/systemd flow
+
+BLE in `dev` is implemented through a dedicated transport adapter and is available in the connection UI. It is still a new path that needs validation across different Linux hosts and BLE adapters.
 
 ## Key Features
 
 - Python backend with a local web UI
 - Vue frontend for the main application surfaces
+- node connection through `USB serial` or `BLE`
+- separate saved-node history for USB and BLE nodes
+- known-node and BLE PIN persistence in a local DB
 - channels, messages, and direct conversations
 - contacts management backed by a local backend DB
 - notifications with unread/mention/direct counters
 - different notification sounds for different event types
 - maps, routes, and route-trace tools
+- MeshCore node settings, including radio presets
+- node battery percentage for BLE/Wi-Fi connections and battery history
 - remote repeater/room-server management through the companion session
 - systemd-friendly launcher for local installation as a service
 
+## Main Difference Between `dev` And The Latest `v0.5.3` Release
+
+`v0.5.3` was a `Docker + USB` release: Docker deployment was added to the stable USB serial workflow, while BLE was still mostly groundwork.
+
+The `dev` branch adds and extends the following functional areas:
+
+- BLE companion-node connection through Linux / BlueZ: scan, node selection, PIN entry, connect, unpair, pairing status display, and separate BLE node history.
+- A transport-adapter model: backend code uses universal transport calls while USB serial and BLE are handled by their own adapters.
+- Known-node DB: successful connections, transport types, BLE addresses, public keys, and BLE PINs are stored outside browser-only state or `client_settings.json`.
+- MeshCore node settings: dedicated parameter pages, radio settings, regional radio presets, and BLE pacing around heavy snapshot/apply operations.
+- Meshcorium-wide data visibility: separate toggles for contacts, messages, and channels across owner IDs without replacing the current node owner ID.
+- Node channel IDX mapping: Meshcorium can place DB channels into free node slots and remove channels that were added by the global-channel mode.
+- Category-based DB import/export in Meshcorium settings with merge behavior, duplicate handling, and warnings for missing free IDX slots.
+- UI/UX updates: redesigned connection float, BLE-specific states, sync icons/animations, scrollable dropdowns, route-level loading views, and removal of duplicate text tooltips.
+- Transport-aware phonebar: USB and BLE use different icons, battery is shown only for BLE/Wi-Fi, and battery icons were added.
+- Battery settings: per-node battery profile, voltage-to-percent calculation, DB-backed battery history, chart ranges, point density control, and optional sunlight strip based on node geo.
+- Launcher hardening for local operation: more robust venv/dependency setup and automatic serial-access group handling for USB devices.
+
 ## Architecture In Short
 
-- `meshcorium_web.py` — backend, HTTP API, SSE, session orchestration, local SQLite DBs
-- `meshcorium_client.py` — MeshCore companion transport/protocol layer
+- `meshcorium_web.py` — backend, HTTP API, SSE, session orchestration, local SQLite DBs, and universal transport orchestration
+- `meshcorium_client.py` — MeshCore companion protocol layer
+- `meshcorium_serial_transport.py` — USB serial transport adapter
+- `meshcorium_ble_transport.py` — BLE transport adapter for Linux / BlueZ
+- `known_nodes.py` — local known-node and saved BLE PIN DB
 - `web/` — Vue frontend
 - `meshcorium-launcher.sh` — bootstrap, dependency setup, startup, and systemd installation
 

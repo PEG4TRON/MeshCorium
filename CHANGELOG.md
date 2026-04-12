@@ -1,5 +1,66 @@
 # Changelog
 
+## Dev / Unreleased
+
+This development branch is based on the latest `v0.5.3 -- Docker + USB` release and adds functional work that is not present in that release.
+
+### Connection and transports
+
+- BLE connection to a MeshCore companion node is now available alongside the permanent USB serial transport.
+- USB serial remains a first-class supported path and is not being removed.
+- BLE support now includes discovery, node selection, PIN entry, connect flow, unpair action, pairing status, and separate BLE history in the connection UI.
+- Backend transport handling was moved further toward the adapter model: USB serial and BLE are handled by transport-specific adapters while higher-level backend code uses universal connection/session calls.
+- Known-node persistence was added for successful connections, transport type, BLE address, public key, node name, and saved BLE PIN state.
+- BLE PIN handling was changed from repeated dynamic rotation to one-time managed initialization after the first successful user-provided PIN connection, with the saved PIN kept in the known-node DB.
+- Wi-Fi remains a UI placeholder and is not yet a real transport.
+
+### MeshCore node settings
+
+- `/settings/node/meshcore-params` was expanded into dedicated MeshCore parameter pages.
+- Radio settings now include regional presets, including a Russia preset, and safer backend application through the companion client instead of direct serial-only paths.
+- BLE snapshot/apply operations now include pacing and short cooldowns to reduce the chance of overloading BLE-connected nodes during repeated heavy settings reads or writes.
+- A separate battery settings page was added under `/settings/node/battery`.
+- Battery profile settings allow per-node voltage range calibration for displayed battery percentage.
+
+### Meshcorium data and owner-scope features
+
+- Meshcorium settings now include separate controls for global contacts, messages, and channels across owner IDs.
+- Global channel access can place channels from the local DB into free node IDX slots and remove the channels that were added by that mode when it is disabled.
+- Channel metadata now tracks where channels exist on nodes and which IDX slots they occupy.
+- Dialog/channel editing was extended with delete flows that remove channel IDX data from the node where applicable.
+- Category-based DB import/export was added to `/settings/meshcorium`; imports merge with existing data, ignore exact duplicates, and surface conflicts where user choice is needed.
+
+### Messages, notifications, and channels
+
+- Message and unread handling was adjusted so owner-scope filtering affects counters, notification badges, and conversation visibility consistently.
+- Mute / mentions-only behavior was corrected so ordinary unread badges and notification entries do not appear when a conversation is muted except for mentions.
+- Channel list and conversation flows were updated around global-channel visibility and node IDX availability.
+
+### UI and UX
+
+- The connection float was redesigned around transport modes, with BLE-specific states and history separated from USB serial state.
+- The phonebar is transport-aware: USB and BLE use different connection icons, while battery percentage is shown only for BLE/Wi-Fi style connections.
+- Battery icons were added next to the phonebar battery percentage.
+- Sync icons and active sync/scan animations were unified around `icons/sync.svg`.
+- Dropdowns were improved with scroll handling and optional filtering when the menu does not fit on screen.
+- Duplicate hover hints were removed where button text already explains the action.
+- Route-level loading components were added for heavier Vue screens.
+- Static visual assets such as background images are now cache-friendly for the browser.
+
+### Battery history
+
+- Battery readings are persisted per node owner ID.
+- The battery page now includes a DB-backed graph with presets for 6 hours, 12 hours, 1 day, 1 week, 1 month, and custom ranges.
+- The graph supports density control by averaging samples at lower density.
+- Optional sunlight context can be shown under the graph when node geo is valid; all-zero coordinates are treated as missing geo.
+- Battery history retention can be configured for 7 days, 1 month, 3 months, 6 months, or 1 year.
+
+### Launcher and runtime
+
+- Launcher venv handling was hardened so partial or missing virtual environments are recreated more reliably.
+- Launcher can add the current user to serial-access groups detected from USB serial devices, such as `dialout`.
+- Frontend build behavior remains compatible with a prebuilt `web/dist` fallback, while still rebuilding locally when Node/NPM are present.
+
 ## v0.5.3
 
 Release `v0.5.3 -- Docker + USB` is based on post-`v0.5.2` development work and adds the first official Docker packaging variant alongside the ordinary USB release workflow.

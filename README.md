@@ -8,18 +8,30 @@ Basic project overview:
 
 MeshCorium is a self-hosted MeshCore client with a hybrid contact system and a local web interface for working with a MeshCore node through companion firmware.
 
-The development tree now also includes a Docker Compose packaging variant for the next release, while keeping the ordinary launcher/systemd runtime path intact.
+The development tree keeps the Docker Compose packaging variant from `v0.5.3` and now adds a functional BLE connection path alongside the permanent USB serial transport.
 
-## Release Status
+## Development Status
 
-This `v0.5.3 -- Docker + USB` release keeps USB/serial as the validated connection path.
-BLE discovery and connection plumbing are included as experimental groundwork,
-but BLE operation is not yet fully debugged or validated.
+The latest published baseline is `v0.5.3 -- Docker + USB`.
+The current `dev` branch is ahead of that release in user-facing functionality.
 
-The release bundle now includes two supported runtime variants:
+Key `dev` differences relative to `v0.5.3`:
+
+- BLE node connection is now available next to USB serial through a Linux / BlueZ transport adapter.
+- USB serial remains permanent and is not being removed.
+- The connection UI now separates USB, BLE, and Wi-Fi placeholder modes, with BLE pairing/PIN handling and BLE node history.
+- MeshCorium now keeps a known-node DB for successful connections, transport metadata, public keys, BLE addresses, and saved BLE PINs.
+- MeshCore node settings were expanded with parameter pages, radio presets, and safer BLE pacing for heavy operations.
+- Meshcorium settings now include broader owner-scope controls for contacts, messages, and channels, plus category-based DB import/export.
+- Channel IDX handling was expanded so channels from the local DB can be placed into free node slots and later removed when global-channel mode is disabled.
+- UI/UX was refreshed across the connection float, phonebar, dropdowns, sync animations, route loading, battery display, and notification/message flows.
+- BLE/Wi-Fi battery percentage, battery profiles, and DB-backed battery history charts were added.
+- The launcher was hardened around venv setup, frontend build fallback, and USB serial access groups.
+
+Runtime variants remain:
 
 - ordinary local launcher / systemd operation
-- Docker Compose operation
+- Docker Compose operation from the `v0.5.3` packaging work
 
 Upgrade information from `v0.5.0` is documented in:
 
