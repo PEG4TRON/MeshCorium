@@ -60,6 +60,8 @@ This development branch is based on the latest `v0.5.3 -- Docker + USB` release 
 - Launcher venv handling was hardened so partial or missing virtual environments are recreated more reliably.
 - Launcher can add the current user to serial-access groups detected from USB serial devices, such as `dialout`.
 - Frontend build behavior remains compatible with a prebuilt `web/dist` fallback, while still rebuilding locally when Node/NPM are present.
+- Docker was updated for the current dev runtime: the image now includes the new backend modules required by `meshcorium_web.py`, keeps USB serial passthrough, and mounts host `/run/dbus` so BLE can use host BlueZ from inside the container.
+- The Docker image tag and release label now use dev-oriented metadata instead of the old `v0.5.3-docker` label.
 
 ## v0.5.3
 

@@ -11,6 +11,10 @@ LEGACY_DATA_CONFIG="${DATA_DIR}/client_settings.json"
 
 mkdir -p "${CONFIG_DIR}" "${DATA_DIR}" "${LOG_DIR}"
 
+if [ ! -S /run/dbus/system_bus_socket ]; then
+    echo "warning: /run/dbus/system_bus_socket is not available; BLE via host BlueZ will be unavailable" >&2
+fi
+
 if [ ! -f "${CONFIG_PATH}" ]; then
     if [ -f "${LEGACY_DATA_CONFIG}" ]; then
         cp "${LEGACY_DATA_CONFIG}" "${CONFIG_PATH}"
@@ -23,4 +27,3 @@ exec "${APP_ROOT}/.venv/bin/python3" "${APP_ROOT}/meshcorium_web.py" \
     --host "${MESHCORIUM_HOST:-0.0.0.0}" \
     --port "${MESHCORIUM_PORT:-8080}" \
     "$@"
-

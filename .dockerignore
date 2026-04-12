@@ -1,6 +1,9 @@
 .git
 .venv
 .release
+.codex
+.claude
+.npm
 __pycache__
 *.pyc
 *.pyo
@@ -12,4 +15,3 @@ screenshot
 web/node_modules
 web/dist
 tmp
-

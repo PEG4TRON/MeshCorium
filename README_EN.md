@@ -125,13 +125,21 @@ This release also ships a Docker-based runtime variant:
 - `Dockerfile`
 - `docker-compose.yml`
 
-This does not replace the ordinary launcher or systemd flow. It is an additional way to run the same release.
+This does not replace the ordinary launcher or systemd flow. It is an additional way to run the same build.
+
+In `dev`, the Docker variant is aligned with the current application code:
+
+- the image builds the current Vue frontend during Docker build
+- the backend includes the new known-node, DB import/export, and BLE transport modules
+- USB serial remains available through device passthrough
+- BLE uses host BlueZ through the host system D-Bus socket
 
 Default bind mounts in `docker-compose.yml`:
 
 - `/etc/meshcorium` -> container config directory `/etc/meshcorium`
 - `/var/lib/meshcorium` -> container runtime data directory `/var/lib/meshcorium`
 - `/var/log/meshcorium` -> container log directory `/var/log/meshcorium`
+- `/run/dbus` -> host D-Bus socket for BlueZ access when using BLE
 
 The compose file also forwards one USB serial device by default:
 
@@ -153,7 +161,9 @@ Notes:
 
 - the container image is built from `alpine:latest`
 - Docker uses the same MeshCorium backend/frontend code as the ordinary release
-- BLE inside Docker is not a validated scenario yet; USB serial remains the primary expected transport
+- BLE inside Docker depends on host `bluetoothd` / BlueZ and the mounted `/run/dbus`
+- if `/run/dbus/system_bus_socket` is unavailable, the container still starts, but BLE is unavailable
+- USB serial remains independent from BLE and continues to work through the forwarded serial device
 
 ## Updating From `v0.5.0` / `v0.5.1`
 
