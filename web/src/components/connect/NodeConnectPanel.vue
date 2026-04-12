@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 
 import LocaleSwitch from '../ui/LocaleSwitch.vue'
 import PluginDropdown from '../ui/PluginDropdown.vue'
+import SyncIcon from '../ui/SyncIcon.vue'
 import { resolveNodePreviewUrl } from '../../lib/nodePreview'
 import { useSessionStore } from '../../stores/session'
 
@@ -22,6 +23,7 @@ const session = useSessionStore()
 const baudrateOptions = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600]
 const brandLogoUrl = '/icons/Meshcorium3.png'
 const refreshAnimating = ref(false)
+const unpairingBleAddress = ref('')
 const refreshBusy = computed(() => (
   session.selectedTransportType === 'ble'
     ? (refreshAnimating.value || session.loadingBleConnections)
@@ -29,7 +31,7 @@ const refreshBusy = computed(() => (
 ))
 const refreshButtonLabel = computed(() => {
   if (session.selectedTransportType === 'ble') {
-    return t('connect.ble.scan')
+    return refreshBusy.value ? t('connect.ble.scanning') : t('connect.ble.scan')
   }
   if (session.selectedTransportType === 'wifi') {
     return t('connect.wifi.unavailableTitle')
@@ -41,6 +43,21 @@ const serialOnlyStatusMessages = computed(() => new Set([
   t('connect.status.portNotSelected'),
   t('connect.status.portRequired'),
 ]))
+function isSerialOnlyBleNoiseMessage(message) {
+  const normalized = String(message || '').trim().toLowerCase()
+  if (!normalized) {
+    return false
+  }
+  if (serialOnlyStatusMessages.value.has(String(message || ''))) {
+    return true
+  }
+  return (
+    normalized.includes('serial-порт')
+    || normalized.includes('serial port')
+    || normalized.includes('serial-портов')
+    || normalized.includes('visible serial ports')
+  )
+}
 const visibleConnectNotice = computed(() => {
   const notice = session.connectNotice
   if (!notice) {
@@ -48,7 +65,7 @@ const visibleConnectNotice = computed(() => {
   }
   if (
     session.selectedTransportType === 'ble'
-    && serialOnlyStatusMessages.value.has(String(notice.message || ''))
+    && isSerialOnlyBleNoiseMessage(notice.message)
   ) {
     return null
   }
@@ -61,7 +78,7 @@ const visibleStatusText = computed(() => {
   }
   if (
     session.selectedTransportType === 'ble'
-    && serialOnlyStatusMessages.value.has(message)
+    && isSerialOnlyBleNoiseMessage(message)
   ) {
     return ''
   }
@@ -73,9 +90,12 @@ const selectedConnectionLabel = computed(() => {
     return t('connect.status.wifiUnavailable')
   }
   if (session.selectedTransportType === 'ble') {
-    const match = session.bleConnections.find((entry) => String(entry?.transport_id || entry?.address || '') === String(session.selectedBleDevice || ''))
+    const match = selectedBleDeviceInfo.value
     if (match) {
-      return `${match.display_label || match.name || match.address} | RSSI ${match.rssi ?? 'n/a'}`
+      const label = match.display_label || match.name || match.address
+      return match.rssi == null
+        ? `${label} | ${match.address || session.selectedBleDevice || 'n/a'}`
+        : `${label} | RSSI ${match.rssi}`
     }
     return session.selectedBleDevice ? session.selectedBleDevice : t('connect.status.bleNotSelected')
   }
@@ -189,6 +209,7 @@ const pairedBleDevices = computed(() => {
     byId.set(id, {
       key: `paired-${id}`,
       address: id,
+      adapter_id: String(entry?.adapter_id || '').trim(),
       displayName: String(
         entry?.display_label
         || entry?.name
@@ -229,16 +250,12 @@ const nonPairedSavedConnections = computed(() => {
   return filteredSavedConnections.value.filter((profile) => !pairedIds.has(resolveSavedConnectionPort(profile)))
 })
 
-const bleScanDisabledByPairing = computed(() => (
-  session.selectedTransportType === 'ble' && pairedBleDevices.value.length > 0
-))
-
 const refreshDisabled = computed(() => {
   if (session.selectedTransportType === 'wifi') {
     return true
   }
   if (session.selectedTransportType === 'ble') {
-    return session.loadingBleConnections || bleScanDisabledByPairing.value
+    return session.loadingBleConnections
   }
   return session.loadingPorts
 })
@@ -350,9 +367,6 @@ async function connectNode() {
 }
 
 async function refreshTransport() {
-  if (bleScanDisabledByPairing.value) {
-    return
-  }
   refreshAnimating.value = true
   if (session.selectedTransportType === 'ble') {
     try {
@@ -397,21 +411,30 @@ async function forgetSavedConnection(profile) {
   await session.forgetSavedConnection(profile)
 }
 
-async function unpairSelectedBleDevice() {
-  if (!selectedBleDeviceInfo.value) {
+async function unpairBleDevice(entry) {
+  const address = String(entry?.address || entry?.transport_id || '').trim()
+  if (!address) {
     return
   }
+  if (unpairingBleAddress.value === address) {
+    return
+  }
+  unpairingBleAddress.value = address
   try {
     await session.unpairBleDevice({
-      address: String(selectedBleDeviceInfo.value?.address || selectedBleDeviceInfo.value?.transport_id || ''),
-      adapterId: String(selectedBleDeviceInfo.value?.adapter_id || ''),
+      address,
+      adapterId: String(entry?.adapter_id || ''),
     })
   } catch (error) {
     session.setStatus(error instanceof Error ? error.message : String(error || t('connect.ble.unpairFailed')), true)
+  } finally {
+    if (unpairingBleAddress.value === address) {
+      unpairingBleAddress.value = ''
+    }
   }
 }
 
-async function ensureBleConnectionsLoaded() {
+async function ensureKnownBleConnectionsLoaded() {
   if (session.loadingBleConnections) {
     return
   }
@@ -419,24 +442,27 @@ async function ensureBleConnectionsLoaded() {
     return
   }
   try {
-    await session.refreshBleConnections()
+    await session.refreshBleConnections({ cachedOnly: true })
   } catch {
-    // Keep the connect window responsive even if background BLE discovery fails.
+    // Keep the connect window responsive even if cached BLE state is unavailable.
   }
 }
 
 onMounted(() => {
-  void ensureBleConnectionsLoaded()
+  if (session.selectedTransportType === 'ble') {
+    void ensureKnownBleConnectionsLoaded()
+  }
 })
 
 watch(
   () => session.selectedTransportType,
   (transportType) => {
     if (transportType === 'ble') {
-      void ensureBleConnectionsLoaded()
+      void ensureKnownBleConnectionsLoaded()
     }
   },
 )
+
 </script>
 
 <template>
@@ -465,7 +491,7 @@ watch(
               {{ session.connecting ? t('connect.actions.connecting') : t('connect.actions.connect') }}
             </button>
             <button
-              v-tooltip="{ content: refreshButtonLabel, theme: 'meshcorium-tooltip' }"
+              v-tooltip="session.selectedTransportType === 'ble' ? null : { content: refreshButtonLabel, theme: 'meshcorium-tooltip' }"
               class="mc-icon-button"
               :class="{ 'is-spinning': refreshBusy, 'mc-icon-button--with-label': session.selectedTransportType === 'ble' }"
               type="button"
@@ -473,24 +499,7 @@ watch(
               :disabled="refreshDisabled"
               @click="refreshTransport"
             >
-              <svg class="mc-icon-button-glyph" :class="{ 'is-spinning': refreshBusy }" viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  d="M20 6v5h-5"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.8"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-                <path
-                  d="M20 11a8 8 0 1 0 2 5.2"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.8"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
+              <SyncIcon class="mc-icon-button-glyph" :spinning="refreshBusy" />
               <span v-if="session.selectedTransportType === 'ble'" class="mc-icon-button-label">{{ refreshButtonLabel }}</span>
             </button>
           </div>
@@ -547,29 +556,16 @@ watch(
               <input
                 v-model="session.selectedBlePin"
                 class="mc-input"
-                type="password"
+                type="text"
                 inputmode="numeric"
                 autocomplete="new-password"
                 data-lpignore="true"
                 data-1p-ignore="true"
                 :placeholder="t('connect.ble.pinPlaceholder')"
+                @keydown.enter.prevent="connectNode"
               />
             </label>
 
-            <div
-              v-if="selectedBleDeviceInfo && (selectedBleDeviceInfo.paired || selectedBleDeviceInfo.bonded || selectedBleDeviceInfo.trusted || selectedBleDeviceInfo.connected)"
-              class="mc-connect-ble-tools"
-            >
-              <button
-                class="mc-connect-ble-unpair"
-                type="button"
-                :title="t('connect.ble.unpair')"
-                :aria-label="t('connect.ble.unpair')"
-                @click="unpairSelectedBleDevice"
-              >
-                ⛓
-              </button>
-            </div>
           </template>
 
           <template v-else>
@@ -641,6 +637,21 @@ watch(
                   <span>{{ entry.modelName }}</span>
                   <span>{{ entry.address }}</span>
                   <span>{{ entry.pairState }}</span>
+                  <button
+                    class="mc-connect-ble-unpair mc-connect-history-unpair"
+                    :class="{ 'is-busy': unpairingBleAddress === entry.address }"
+                    type="button"
+                    :title="t('connect.ble.unpair')"
+                    :aria-label="unpairingBleAddress === entry.address ? t('connect.ble.unpairing') : t('connect.ble.unpair')"
+                    :disabled="unpairingBleAddress === entry.address"
+                    @click.stop="unpairBleDevice(entry)"
+                  >
+                    <template v-if="unpairingBleAddress === entry.address">
+                      <span class="mc-connect-history-unpair-spinner" aria-hidden="true"></span>
+                      <span class="mc-connect-history-unpair-label">{{ t('connect.ble.unpairing') }}</span>
+                    </template>
+                    <template v-else>⛓</template>
+                  </button>
                 </div>
               </div>
             </article>

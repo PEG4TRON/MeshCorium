@@ -10,18 +10,20 @@ import { useMessagesReadTracking } from '../composables/useMessagesReadTracking'
 import { useMessagesVirtualChat } from '../composables/useMessagesVirtualChat'
 import MessagesChatHistoryPane from '../components/messages/MessagesChatHistoryPane.vue'
 import MessagesComposerBar from '../components/messages/MessagesComposerBar.vue'
+import MessagesConfirmSheet from '../components/messages/MessagesConfirmSheet.vue'
 import MessagesConversationSidebar from '../components/messages/MessagesConversationSidebar.vue'
 import MessagesChannelEditorWorkspace from '../components/messages/MessagesChannelEditorWorkspace.vue'
 import MessagesWorkspaceHeader from '../components/messages/MessagesWorkspaceHeader.vue'
 import MessagesEmptyWorkspace from '../components/messages/MessagesEmptyWorkspace.vue'
 import MessagesMessageContextMenu from '../components/messages/MessagesMessageContextMenu.vue'
-import MessagesRouteMapSheet from '../components/messages/MessagesRouteMapSheet.vue'
+import MessagesRouteMapSheetLoading from '../components/messages/MessagesRouteMapSheetLoading.vue'
 import ShellPageFrame from '../components/layout/ShellPageFrame.vue'
 import ShellPhonebar from '../components/layout/ShellPhonebar.vue'
 import {
   buildContactRoutePayloadFromMessage,
   buildKnownRoutePublicKeys,
 } from '../lib/contactRoutes'
+import { resolveDisplayedBatteryPercent } from '../lib/batteryProfile'
 import { resolveNodePreviewUrl } from '../lib/nodePreview'
 import { resolveCachedWallpaperAsset } from '../lib/wallpaperCache'
 import {
@@ -32,10 +34,16 @@ import {
   normalizeStopState,
   packetTypeLabel,
 } from '../lib/sessionLiveState'
+import { filterStatusTextForTransport } from '../lib/statusText'
 import { useSessionStore } from '../stores/session'
 
-const MessagesConfirmSheet = defineAsyncComponent(() => import('../components/messages/MessagesConfirmSheet.vue'))
 const MessagesGifPickerSheet = defineAsyncComponent(() => import('../components/messages/MessagesGifPickerSheet.vue'))
+const MessagesRouteMapSheet = defineAsyncComponent({
+  loader: () => import('../components/messages/MessagesRouteMapSheet.vue'),
+  delay: 0,
+  suspensible: false,
+  loadingComponent: MessagesRouteMapSheetLoading,
+})
 
 const route = useRoute()
 const router = useRouter()
@@ -67,8 +75,14 @@ const DEFAULT_CHAT_BACKPLANE_URL = '/icons/chat-backplane-blue.jpg'
 
 const selectedConversationKind = ref('channel')
 const selectedChannelIdx = ref(null)
+const selectedChannelIdentity = ref('')
 const selectedContactKey = ref('')
 const messages = ref([])
+const messageConversationDirectory = ref({
+  channels: [],
+  contacts: [],
+})
+const loadingConversationDirectory = ref(false)
 const loadingMessages = ref(false)
 const loadingOlderMessages = ref(false)
 const draftText = ref('')
@@ -98,6 +112,7 @@ const suppressTopPaginationUntil = ref(0)
 const chatEditMode = ref(false)
 const workspaceMode = ref('chat')
 const channelEditorBusy = ref(false)
+const channelEditorDeleteBusy = ref(false)
 const channelEditorSecretPreview = ref('')
 const channelEditorHashPreview = ref('')
 const channelEditorForm = ref({
@@ -127,6 +142,7 @@ const notificationsMentionsCollapsed = ref(false)
 const notificationsRegularCollapsed = ref(false)
 const chatActionsMenuOpen = ref(false)
 const dialogHistoryCache = useStorage('meshcorium_dialog_history_cache_v1', {}, globalThis.sessionStorage)
+const channelDialogOrder = useStorage('meshcorium_channel_dialog_order_v1', [])
 const sentDraftHistoryCache = useStorage('meshcorium_sent_draft_history_v2', {}, globalThis.sessionStorage)
 
 const consoleOpen = computed({
@@ -175,6 +191,7 @@ let pendingConversationCacheWrite = null
 let messageTopPaginationIntentHost = null
 let hydrationCompletionTimerId = 0
 let notificationHighlightTimerId = 0
+let eventSourceKey = ''
 
 const confirmDialog = ref({
   open: false,
@@ -204,7 +221,67 @@ const notificationHighlightState = ref({
   tone: '',
 })
 
+const footerStatusText = computed(() => {
+  return filterStatusTextForTransport(session.statusText, session.selectedTransportType)
+})
+
 const unreadSummary = computed(() => session.unreadSummary || {})
+const accessAllMeshcoriumMessages = computed(() => Boolean(session.settingsPayload?.settings?.access_all_meshcorium_messages !== false))
+
+function channelListMergeKey(channel) {
+  const rawIdentity = String(channel?.channel_identity || '').trim()
+  const idx = Number(channel?.idx ?? -1)
+  const normalizedName = String(channel?.name || '').trim().replace(/^#+/, '').toLowerCase()
+  const isOfficialPublicAlias = (
+    rawIdentity.toLowerCase() === `public::${OFFICIAL_PUBLIC_CHANNEL_NAME}`
+    || rawIdentity.toLowerCase() === 'public::public'
+    || (Number.isFinite(idx) && idx === 0)
+    || normalizedName === OFFICIAL_PUBLIC_CHANNEL_NAME.slice(1)
+  )
+  const identity = isOfficialPublicAlias ? `public::${OFFICIAL_PUBLIC_CHANNEL_NAME}` : rawIdentity
+  if (identity) {
+    return `identity:${identity}`
+  }
+  return Number.isFinite(idx) && idx >= 0 ? `idx:${idx}` : ''
+}
+
+function channelDialogOrderKey(channel) {
+  return channelListMergeKey(channel)
+}
+
+const conversationChannelsSource = computed(() => {
+  const liveChannels = Array.isArray(session.channels) ? session.channels : []
+  const merged = new Map()
+  const upsertChannel = (channel, isOnNode = false) => {
+    const key = channelListMergeKey(channel)
+    if (!key) {
+      return
+    }
+    const current = merged.get(key) || {}
+    merged.set(key, {
+      ...current,
+      ...channel,
+      is_on_node: Boolean(current?.is_on_node) || Boolean(isOnNode) || Boolean(channel?.is_on_node),
+    })
+  }
+  if (accessAllMeshcoriumMessages.value) {
+    const directoryChannels = Array.isArray(messageConversationDirectory.value?.channels) ? messageConversationDirectory.value.channels : []
+    for (const channel of directoryChannels) {
+      upsertChannel(channel, false)
+    }
+  }
+  for (const channel of liveChannels) {
+    upsertChannel(channel, true)
+  }
+  return Array.from(merged.values())
+})
+const conversationContactsSource = computed(() => {
+  if (!accessAllMeshcoriumMessages.value) {
+    return Array.isArray(session.contacts) ? session.contacts : []
+  }
+  const contacts = Array.isArray(messageConversationDirectory.value?.contacts) ? messageConversationDirectory.value.contacts : []
+  return contacts.length ? contacts : (Array.isArray(session.contacts) ? session.contacts : [])
+})
 const requestedRouteContactKey = computed(() => {
   if (route.name !== 'messages') {
     return ''
@@ -217,6 +294,12 @@ const requestedRouteChannelIdx = computed(() => {
   }
   const value = Number(route.query.channel)
   return Number.isFinite(value) && value >= 0 ? value : null
+})
+const requestedRouteChannelIdentity = computed(() => {
+  if (route.name !== 'messages') {
+    return ''
+  }
+  return String(route.query.channel_identity || '').trim()
 })
 const requestedRouteFocusMessageId = computed(() => {
   if (route.name !== 'messages') {
@@ -345,7 +428,7 @@ function gifPreviewUrl(gif) {
 
 function normalizeMeshcoreChannelName(value) {
   const normalized = normalizeChannelName(value)
-  return normalized.toLowerCase() === OFFICIAL_PUBLIC_CHANNEL_NAME ? OFFICIAL_PUBLIC_CHANNEL_NAME : normalized
+  return normalized.replace(/^#+/, '').toLowerCase() === OFFICIAL_PUBLIC_CHANNEL_NAME.slice(1) ? OFFICIAL_PUBLIC_CHANNEL_NAME : normalized
 }
 
 function isHashtagChannelName(value) {
@@ -356,8 +439,15 @@ function isOfficialPublicChannelName(value) {
   return normalizeMeshcoreChannelName(value).toLowerCase() === OFFICIAL_PUBLIC_CHANNEL_NAME
 }
 
+function isOfficialPublicChannel(channel) {
+  return Boolean(
+    isOfficialPublicChannelName(channel?.name)
+    || String(channel?.channel_identity || '').trim().toLowerCase() === `public::${OFFICIAL_PUBLIC_CHANNEL_NAME}`,
+  )
+}
+
 function isProtectedPublicChannel(channel) {
-  return isOfficialPublicChannelName(channel?.name) && normalizePskHex(channel?.secret_hex) === OFFICIAL_PUBLIC_CHANNEL_PSK_HEX
+  return isOfficialPublicChannel(channel)
 }
 
 function isPublicChannel(channel) {
@@ -366,7 +456,7 @@ function isPublicChannel(channel) {
 }
 
 function channelAvatarSymbol(channel) {
-  if (isOfficialPublicChannelName(channel?.name)) {
+  if (isOfficialPublicChannel(channel)) {
     return '📣'
   }
   return isPublicChannel(channel) ? '#' : '🔒'
@@ -381,6 +471,17 @@ function formatChannelPreview(channel) {
     return t('messages.gif.messageLabel')
   }
   return channel?.last_message_from_self ? t('messages.youPrefix', { text: preview }) : preview
+}
+
+function displayChannelTitle(channelName, channelIdx, channelIdentity = '') {
+  const normalizedName = normalizeChannelName(channelName)
+  if (normalizedName) {
+    return normalizedName
+  }
+  if (String(channelIdentity || '').trim().toLowerCase() === `public::${OFFICIAL_PUBLIC_CHANNEL_NAME}` || Number(channelIdx) === 0) {
+    return OFFICIAL_PUBLIC_CHANNEL_NAME
+  }
+  return Number(channelIdx) >= 0 ? `#${Number(channelIdx)}` : t('messages.fallback.channel')
 }
 
 function formatContactPreview(contact) {
@@ -442,7 +543,13 @@ const mutedConversationsMap = computed(() => normalizeMutedConversationsMap(sess
 function getConversationMuteKey(kind, value) {
   const normalizedKind = String(kind || '').trim().toLowerCase()
   if (normalizedKind === 'channel') {
-    const channelIdx = Number(value)
+    const channelIdentity = typeof value === 'object' && value
+      ? String(value.channel_identity || '').trim()
+      : ''
+    if (channelIdentity) {
+      return `channelid:${channelIdentity}`
+    }
+    const channelIdx = Number(typeof value === 'object' && value ? value.idx : value)
     return Number.isFinite(channelIdx) && channelIdx >= 0 ? `channel:${channelIdx}` : ''
   }
   if (normalizedKind === 'contact') {
@@ -452,8 +559,8 @@ function getConversationMuteKey(kind, value) {
   return ''
 }
 
-function getChannelMuteKey(channelIdx) {
-  return getConversationMuteKey('channel', channelIdx)
+function getChannelMuteKey(channelOrIdx) {
+  return getConversationMuteKey('channel', channelOrIdx)
 }
 
 function getContactMuteKey(contactOrPrefix) {
@@ -468,19 +575,73 @@ function getConversationMuteModeByKey(muteKey) {
   return mode === 'regular' || mode === 'all' ? mode : 'none'
 }
 
+function getHighestPriorityMuteMode(modes = []) {
+  if (modes.includes('all')) {
+    return 'all'
+  }
+  if (modes.includes('regular')) {
+    return 'regular'
+  }
+  return 'none'
+}
+
+function getChannelMuteKeys(channelOrIdx) {
+  const keys = []
+  const pushUnique = (next) => {
+    const normalized = String(next || '').trim().toLowerCase()
+    if (normalized && !keys.includes(normalized)) {
+      keys.push(normalized)
+    }
+  }
+  if (channelOrIdx && typeof channelOrIdx === 'object') {
+    const channelIdentity = String(channelOrIdx.channel_identity || '').trim()
+    const channelIdx = Number(channelOrIdx.idx ?? -1)
+    if (channelIdentity) {
+      pushUnique(`channelid:${channelIdentity}`)
+    }
+    if (Number.isFinite(channelIdx) && channelIdx >= 0) {
+      pushUnique(`channel:${channelIdx}`)
+    }
+    return keys
+  }
+  const normalized = String(channelOrIdx || '').trim()
+  if (!normalized) {
+    return keys
+  }
+  if (normalized.startsWith('channelid:') || normalized.startsWith('channel:')) {
+    pushUnique(normalized)
+    return keys
+  }
+  if (/^-?\d+$/.test(normalized)) {
+    const channelIdx = Number(normalized)
+    if (Number.isFinite(channelIdx) && channelIdx >= 0) {
+      pushUnique(`channel:${channelIdx}`)
+    }
+    return keys
+  }
+  pushUnique(`channelid:${normalized}`)
+  return keys
+}
+
+function getChannelMuteMode(channelOrIdx) {
+  return getHighestPriorityMuteMode(
+    getChannelMuteKeys(channelOrIdx).map((muteKey) => getConversationMuteModeByKey(muteKey)),
+  )
+}
+
 function getConversationMuteModeForEntry(entry) {
   if (!entry?.kind) {
     return 'none'
   }
   if (entry.kind === 'channel') {
-    return getConversationMuteModeByKey(getChannelMuteKey(entry.channel?.idx))
+    return getChannelMuteMode(entry.channel)
   }
   return getConversationMuteModeByKey(getContactMuteKey(entry.contact))
 }
 
 function getCurrentConversationMuteKey() {
-  if (selectedConversationKind.value === 'channel' && selectedChannelIdx.value != null) {
-    return getChannelMuteKey(selectedChannelIdx.value)
+  if (selectedConversationKind.value === 'channel' && (selectedChannelIdx.value != null || selectedChannelIdentity.value)) {
+    return getChannelMuteKey(selectedChannel.value || selectedChannelIdx.value)
   }
   if (selectedConversationKind.value === 'contact' && selectedContactKey.value) {
     return getContactMuteKey(selectedContactKey.value)
@@ -489,6 +650,12 @@ function getCurrentConversationMuteKey() {
 }
 
 function getCurrentConversationMuteMode() {
+  if (selectedConversationKind.value === 'channel' && (selectedChannelIdx.value != null || selectedChannelIdentity.value)) {
+    return getChannelMuteMode(selectedChannel.value || {
+      idx: selectedChannelIdx.value,
+      channel_identity: selectedChannelIdentity.value,
+    })
+  }
   return getConversationMuteModeByKey(getCurrentConversationMuteKey())
 }
 
@@ -506,19 +673,27 @@ function conversationMuteIndicatorLabel(mode) {
 }
 
 function displayedChannelUnreadCount(channel) {
-  const muteKey = getChannelMuteKey(channel?.idx)
-  if (isConversationRegularMutedByKey(muteKey)) {
+  if (getChannelMuteMode(channel) === 'regular' || getChannelMuteMode(channel) === 'all') {
     return 0
   }
-  return Number(unreadSummary.value.channel_unread_counts[String(channel?.idx ?? '')] || 0)
+  const identity = String(channel?.channel_identity || '').trim()
+  return Number(channel?.unread_count ?? (
+    (identity ? unreadSummary.value.channel_unread_counts[identity] : 0)
+    || unreadSummary.value.channel_unread_counts[String(channel?.idx ?? '')]
+    || 0
+  ))
 }
 
 function displayedChannelMentionCount(channel) {
-  const muteKey = getChannelMuteKey(channel?.idx)
-  if (isConversationMentionMutedByKey(muteKey)) {
+  if (getChannelMuteMode(channel) === 'all') {
     return 0
   }
-  return Number(unreadSummary.value.channel_mention_counts[String(channel?.idx ?? '')] || 0)
+  const identity = String(channel?.channel_identity || '').trim()
+  return Number(channel?.mention_count ?? (
+    (identity ? unreadSummary.value.channel_mention_counts[identity] : 0)
+    || unreadSummary.value.channel_mention_counts[String(channel?.idx ?? '')]
+    || 0
+  ))
 }
 
 function displayedContactUnreadCount(contact) {
@@ -526,7 +701,7 @@ function displayedContactUnreadCount(contact) {
   if (isConversationRegularMutedByKey(muteKey)) {
     return 0
   }
-  return Number(unreadSummary.value.contact_unread_counts[getContactPrefix(contact)] || 0)
+  return Number(contact?.unread_count ?? (unreadSummary.value.contact_unread_counts[getContactPrefix(contact)] || 0))
 }
 
 function displayedContactMentionCount(contact) {
@@ -534,7 +709,7 @@ function displayedContactMentionCount(contact) {
   if (isConversationMentionMutedByKey(muteKey)) {
     return 0
   }
-  return Number(unreadSummary.value.contact_mention_counts[getContactPrefix(contact)] || 0)
+  return Number(contact?.mention_count ?? (unreadSummary.value.contact_mention_counts[getContactPrefix(contact)] || 0))
 }
 
 function formatLocalizedNumber(value, options = {}) {
@@ -581,18 +756,6 @@ function applyRestorePendingStatus() {
   if (restoreStatus) {
     session.setStatus(restoreStatus)
   }
-}
-
-function getBatteryPercentage(millivolts) {
-  if (millivolts == null || Number.isNaN(Number(millivolts))) {
-    return null
-  }
-  const numeric = Number(millivolts)
-  const minVoltage = 3400
-  const maxVoltage = 4200
-  if (numeric <= minVoltage) return 0
-  if (numeric >= maxVoltage) return 100
-  return Math.floor(((numeric - minVoltage) / (maxVoltage - minVoltage)) * 100)
 }
 
 function classifyConsolePayload(payload) {
@@ -644,16 +807,21 @@ const {
   bindConversationRowElement,
 } = useMessagesConversationList({
   session,
+  channelsSource: conversationChannelsSource,
+  contactsSource: conversationContactsSource,
   locale,
   t,
   unreadSummary,
   selectedConversationKind,
   selectedChannelIdx,
+  selectedChannelIdentity,
   selectedContactKey,
   chatEditMode,
+  channelDialogOrder,
   estimatedRowHeight: CONVERSATION_ROW_ESTIMATED_HEIGHT,
   overscanPx: CONVERSATION_ROW_OVERSCAN_PX,
   helpers: {
+    channelDialogOrderKey,
     getContactPrefix,
     contactDisplayName,
     contactAvatarEmoji,
@@ -665,6 +833,7 @@ const {
     isProtectedPublicChannel,
     isOfficialPublicChannelName,
     channelAvatarSymbol,
+    displayChannelTitle,
     displayedChannelUnreadCount,
     displayedChannelMentionCount,
     displayedContactUnreadCount,
@@ -676,10 +845,26 @@ const {
 })
 
 const selectedChannel = computed(() => {
-  if (selectedChannelIdx.value == null) {
+  if (selectedChannelIdx.value == null && !selectedChannelIdentity.value) {
     return null
   }
-  return session.channels.find((channel) => Number(channel?.idx) === Number(selectedChannelIdx.value)) || null
+  const channel = conversationChannelsSource.value.find((channel) => (
+    (selectedChannelIdentity.value && String(channel?.channel_identity || '').trim() === String(selectedChannelIdentity.value || '').trim())
+    || (selectedChannelIdx.value != null && Number(channel?.idx) === Number(selectedChannelIdx.value))
+  )) || null
+  if (channel) {
+    return channel
+  }
+  if (selectedChannelIdentity.value) {
+    return {
+      idx: selectedChannelIdx.value ?? 0,
+      name: displayChannelTitle('', selectedChannelIdx.value ?? 0, selectedChannelIdentity.value),
+      description: t('messages.fallback.channelPreview'),
+      channel_identity: selectedChannelIdentity.value,
+      is_on_node: false,
+    }
+  }
+  return null
 })
 
 const selectedContact = computed(() => {
@@ -701,10 +886,28 @@ const editingChannel = computed(() => {
     return null
   }
   const byIdentity = String(channelEditorForm.value.channelIdentity || '').trim()
-  return session.channels.find((channel) => (
+  return (Array.isArray(session.channels) ? session.channels : []).find((channel) => (
     (byIdentity && String(channel?.channel_identity || '').trim() === byIdentity)
     || Number(channel?.idx ?? -1) === idx
   )) || null
+})
+
+const channelEditorProtectedPublic = computed(() => {
+  if (workspaceMode.value !== 'edit-channel') {
+    return false
+  }
+  return isProtectedPublicChannel(editingChannel.value)
+})
+
+const channelEditorCanEdit = computed(() => !channelEditorProtectedPublic.value)
+
+const channelEditorCanDelete = computed(() => {
+  return Boolean(
+    workspaceMode.value === 'edit-channel'
+    && session.connected
+    && !channelEditorBusy.value
+    && editingChannel.value != null,
+  )
 })
 
 const currentConversationKey = computed(() => {
@@ -712,17 +915,18 @@ const currentConversationKey = computed(() => {
     const contactKey = normalizePublicKey(selectedContactKey.value)
     return contactKey ? `contact:${contactKey}` : ''
   }
-  if (selectedChannelIdx.value == null) {
+  if (selectedChannelIdx.value == null && !selectedChannelIdentity.value) {
     return ''
   }
-  return `channel:${Number(selectedChannelIdx.value)}`
+  const identity = String(selectedChannelIdentity.value || '').trim()
+  return identity ? `channel:${identity}` : `channel:${Number(selectedChannelIdx.value)}`
 })
 
 const hydrationConversationSignature = computed(() => {
-  const expectedContacts = Math.max(0, Number(session.sessionSnapshot?.contacts_count ?? session.contacts.length) || 0)
-  const expectedChannels = Math.max(0, Number(session.sessionSnapshot?.channels_count ?? session.channels.length) || 0)
-  const loadedContacts = Math.max(0, Number(session.contacts.length || 0))
-  const loadedChannels = Math.max(0, Number(session.channels.length || 0))
+  const expectedContacts = Math.max(0, Number(session.sessionSnapshot?.contacts_count ?? conversationContactsSource.value.length) || 0)
+  const expectedChannels = Math.max(0, Number(session.sessionSnapshot?.channels_count ?? conversationChannelsSource.value.length) || 0)
+  const loadedContacts = Math.max(0, Number(conversationContactsSource.value.length || 0))
+  const loadedChannels = Math.max(0, Number(conversationChannelsSource.value.length || 0))
   const channelKeys = channelScrollerRows.value.map((row) => String(row.channelKey || row.value || '')).join('|')
   const directKeys = directConversationRows.value
     .map((row) => `${row.value}:${Number(row.contact?.last_message_at || 0)}`)
@@ -761,7 +965,7 @@ const channelEditorResolvedName = computed(() => {
 })
 
 const channelEditorCanSave = computed(() => {
-  if (!session.connected || channelEditorBusy.value) {
+  if (!session.connected || channelEditorBusy.value || !channelEditorCanEdit.value) {
     return false
   }
   if (channelEditorForm.value.type === 'hashtag') {
@@ -813,7 +1017,10 @@ const channelEditorViewModel = computed(() => {
     secretPreview: channelEditorSecretPreview.value || t('common.na'),
     channelHashPreview: channelEditorHashPreview.value || t('common.na'),
     canSave: channelEditorCanSave.value,
+    canEdit: channelEditorCanEdit.value,
+    canDelete: channelEditorCanDelete.value,
     busy: channelEditorBusy.value,
+    deleteBusy: channelEditorDeleteBusy.value,
     hashtagTypeLabel: t('messages.editor.types.hashtag'),
     privateTypeLabel: t('messages.editor.types.private'),
     channelIdxLabel: t('messages.editor.fields.channelIdx'),
@@ -826,10 +1033,13 @@ const channelEditorViewModel = computed(() => {
     pskHexPlaceholder: t('messages.editor.fields.pskPlaceholder'),
     secretPreviewLabel: t('messages.editor.fields.secretPreview'),
     channelHashLabel: t('messages.editor.fields.channelHash'),
-    noteText: channelEditorForm.value.type === 'hashtag'
-      ? t('messages.editor.notes.hashtag')
-      : t('messages.editor.notes.private'),
+    noteText: channelEditorProtectedPublic.value
+      ? t('messages.editor.notes.publicDelete')
+      : channelEditorForm.value.type === 'hashtag'
+        ? t('messages.editor.notes.hashtag')
+        : t('messages.editor.notes.private'),
     cancelLabel: t('common.cancel'),
+    deleteLabel: channelEditorDeleteBusy.value ? t('messages.editor.actions.deleting') : t('messages.editor.actions.delete'),
     saveLabel: channelEditorBusy.value ? t('messages.editor.actions.saving') : t('common.save'),
   }
 })
@@ -1004,15 +1214,11 @@ const shellBlurred = computed(() => {
 const notificationSoundEnabled = computed(() => session.notificationSoundEnabled)
 
 const batteryPercent = computed(() => {
-  const telemetry = session.selfTelemetry || {}
-  const batteryInfo = session.batteryInfo || {}
-  if (telemetry.battery_percent != null) {
-    return Math.max(0, Math.min(100, Number(telemetry.battery_percent)))
-  }
-  if (batteryInfo.level != null) {
-    return Math.max(0, Math.min(100, Number(batteryInfo.level)))
-  }
-  return getBatteryPercentage(telemetry.battery_mv)
+  return resolveDisplayedBatteryPercent({
+    telemetry: session.selfTelemetry || {},
+    batteryInfo: session.batteryInfo || {},
+    profile: session.currentNodeBatteryProfile,
+  })
 })
 
 const recentRepeaterCount = computed(() => {
@@ -1168,7 +1374,7 @@ const mentionNotificationEntries = computed(() => {
         const row = findChannelNotificationRowByMentionEntry(entry)
         const channelName = String(entry?.channel_name || '').trim()
         const rawChannelIdx = Number(entry?.channel_idx ?? -1)
-        const title = row?.title || channelName || (rawChannelIdx >= 0 ? `#${rawChannelIdx}` : t('messages.fallback.channel'))
+        const title = row?.title || displayChannelTitle(channelName, rawChannelIdx, String(entry?.channel_identity || '').trim())
         const avatarSymbol = row?.avatarSymbol || channelAvatarSymbol({
           idx: rawChannelIdx,
           name: channelName,
@@ -1376,6 +1582,12 @@ const composerByteCounterText = computed(() => {
 })
 
 const canSendCurrentDraft = computed(() => {
+  if (selectedConversationKind.value === 'channel' && selectedChannel.value?.is_on_node === false) {
+    return false
+  }
+  if (selectedConversationKind.value === 'contact' && selectedContact.value?.sendable === false) {
+    return false
+  }
   return !sending.value && Boolean(String(draftStructured.value.body || '').trim()) && !draftIsOverflow.value
 })
 
@@ -1523,34 +1735,137 @@ function normalizePskHex(value) {
   return String(value || '').replaceAll(/[^0-9a-f]/gi, '').toLowerCase()
 }
 
+function utf8Bytes(value) {
+  const text = String(value || '')
+  if (typeof TextEncoder !== 'undefined') {
+    return new TextEncoder().encode(text)
+  }
+  const encoded = unescape(encodeURIComponent(text))
+  return Uint8Array.from(encoded, (char) => char.charCodeAt(0))
+}
+
 function bytesToHex(bytes) {
   return Array.from(bytes || [], (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
-async function sha256Hex(text) {
-  if (!globalThis.crypto?.subtle) {
-    return ''
+function sha256FallbackDigestBytes(inputBytes) {
+  const bytes = inputBytes instanceof Uint8Array ? inputBytes : Uint8Array.from(inputBytes || [])
+  const bitLength = bytes.length * 8
+  const totalLength = Math.ceil((bytes.length + 1 + 8) / 64) * 64
+  const padded = new Uint8Array(totalLength)
+  const view = new DataView(padded.buffer)
+  const words = new Uint32Array(64)
+  const hash = new Uint32Array([
+    0x6a09e667,
+    0xbb67ae85,
+    0x3c6ef372,
+    0xa54ff53a,
+    0x510e527f,
+    0x9b05688c,
+    0x1f83d9ab,
+    0x5be0cd19,
+  ])
+  const constants = new Uint32Array([
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
+    0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+    0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+    0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+    0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+    0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
+    0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
+    0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+    0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+  ])
+  const rightRotate = (value, shift) => (value >>> shift) | (value << (32 - shift))
+
+  padded.set(bytes)
+  padded[bytes.length] = 0x80
+  view.setUint32(totalLength - 8, Math.floor(bitLength / 0x100000000), false)
+  view.setUint32(totalLength - 4, bitLength >>> 0, false)
+
+  for (let offset = 0; offset < totalLength; offset += 64) {
+    for (let index = 0; index < 16; index += 1) {
+      words[index] = view.getUint32(offset + (index * 4), false)
+    }
+    for (let index = 16; index < 64; index += 1) {
+      const s0 = rightRotate(words[index - 15], 7) ^ rightRotate(words[index - 15], 18) ^ (words[index - 15] >>> 3)
+      const s1 = rightRotate(words[index - 2], 17) ^ rightRotate(words[index - 2], 19) ^ (words[index - 2] >>> 10)
+      words[index] = (words[index - 16] + s0 + words[index - 7] + s1) >>> 0
+    }
+
+    let a = hash[0]
+    let b = hash[1]
+    let c = hash[2]
+    let d = hash[3]
+    let e = hash[4]
+    let f = hash[5]
+    let g = hash[6]
+    let h = hash[7]
+
+    for (let index = 0; index < 64; index += 1) {
+      const s1 = rightRotate(e, 6) ^ rightRotate(e, 11) ^ rightRotate(e, 25)
+      const ch = (e & f) ^ (~e & g)
+      const temp1 = (h + s1 + ch + constants[index] + words[index]) >>> 0
+      const s0 = rightRotate(a, 2) ^ rightRotate(a, 13) ^ rightRotate(a, 22)
+      const maj = (a & b) ^ (a & c) ^ (b & c)
+      const temp2 = (s0 + maj) >>> 0
+
+      h = g
+      g = f
+      f = e
+      e = (d + temp1) >>> 0
+      d = c
+      c = b
+      b = a
+      a = (temp1 + temp2) >>> 0
+    }
+
+    hash[0] = (hash[0] + a) >>> 0
+    hash[1] = (hash[1] + b) >>> 0
+    hash[2] = (hash[2] + c) >>> 0
+    hash[3] = (hash[3] + d) >>> 0
+    hash[4] = (hash[4] + e) >>> 0
+    hash[5] = (hash[5] + f) >>> 0
+    hash[6] = (hash[6] + g) >>> 0
+    hash[7] = (hash[7] + h) >>> 0
   }
-  const encoded = new TextEncoder().encode(String(text || ''))
-  const digest = await globalThis.crypto.subtle.digest('SHA-256', encoded)
-  return bytesToHex(new Uint8Array(digest))
+
+  const digest = new Uint8Array(32)
+  const digestView = new DataView(digest.buffer)
+  for (let index = 0; index < hash.length; index += 1) {
+    digestView.setUint32(index * 4, hash[index], false)
+  }
+  return digest
 }
 
-let channelEditorPreviewSeq = 0
+function sha256DigestBytesSync(input) {
+  const bytes = input instanceof Uint8Array ? input : utf8Bytes(input)
+  return sha256FallbackDigestBytes(bytes)
+}
 
-async function syncChannelEditorPreview() {
-  const requestId = ++channelEditorPreviewSeq
-  const computeChannelHash = async (secretHex) => {
-    const normalized = normalizePskHex(secretHex)
-    if (!normalized || normalized.length !== 32 || !globalThis.crypto?.subtle) {
-      return ''
-    }
-    const bytes = Uint8Array.from(
-      normalized.match(/.{2}/g)?.map((chunk) => Number.parseInt(chunk, 16)) || [],
-    )
-    const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes)
-    return bytesToHex(new Uint8Array(digest)).slice(0, 2)
+function sha256HexSync(text) {
+  return bytesToHex(sha256DigestBytesSync(text))
+}
+
+function computeChannelHashHexSync(secretHex) {
+  const normalized = normalizePskHex(secretHex)
+  if (!normalized || normalized.length !== 32) {
+    return ''
   }
+  const bytes = Uint8Array.from(
+    normalized.match(/.{2}/g)?.map((chunk) => Number.parseInt(chunk, 16)) || [],
+  )
+  return bytesToHex(sha256DigestBytesSync(bytes)).slice(0, 2)
+}
+
+function syncChannelEditorPreview() {
   if (channelEditorForm.value.type === 'hashtag') {
     const resolvedName = channelEditorResolvedName.value
     if (!resolvedName) {
@@ -1560,17 +1875,14 @@ async function syncChannelEditorPreview() {
     }
     const secretHex = isOfficialPublicChannelName(resolvedName)
       ? OFFICIAL_PUBLIC_CHANNEL_PSK_HEX
-      : (await sha256Hex(resolvedName)).slice(0, 32)
-    if (requestId !== channelEditorPreviewSeq) {
-      return
-    }
+      : sha256HexSync(resolvedName).slice(0, 32)
     channelEditorSecretPreview.value = secretHex
-    channelEditorHashPreview.value = await computeChannelHash(secretHex)
+    channelEditorHashPreview.value = computeChannelHashHexSync(secretHex)
     return
   }
   const secretHex = normalizePskHex(channelEditorForm.value.pskHex)
   channelEditorSecretPreview.value = secretHex
-  channelEditorHashPreview.value = await computeChannelHash(secretHex)
+  channelEditorHashPreview.value = computeChannelHashHexSync(secretHex)
 }
 
 const consoleHtml = computed(() => {
@@ -2213,6 +2525,7 @@ const {
   selectedConversationKind,
   selectedContactKey,
   selectedChannelIdx,
+  selectedChannelIdentity,
   activeConversationTotalMessages,
   visibleMessageIds,
   messageScroller,
@@ -2424,6 +2737,7 @@ function clearConversationSelection() {
   workspaceMode.value = 'chat'
   selectedConversationKind.value = 'channel'
   selectedChannelIdx.value = null
+  selectedChannelIdentity.value = ''
   selectedContactKey.value = ''
   messages.value = []
   activeConversationTotalMessages.value = 0
@@ -2491,10 +2805,6 @@ function openChannelEditor(channel) {
   if (!channel) {
     return
   }
-  if (isProtectedPublicChannel(channel)) {
-    session.setStatus(t('messages.editor.status.publicReadOnly'), true)
-    return
-  }
   workspaceMode.value = 'edit-channel'
   populateChannelEditor(channel)
 }
@@ -2544,6 +2854,7 @@ function updateChannelEditorPskHex(value) {
 function closeChannelEditor() {
   workspaceMode.value = 'chat'
   channelEditorBusy.value = false
+  channelEditorDeleteBusy.value = false
 }
 
 function toggleChatEditMode() {
@@ -2551,6 +2862,34 @@ function toggleChatEditMode() {
   if (!chatEditMode.value && workspaceShowsChannelEditor.value) {
     closeChannelEditor()
   }
+}
+
+function reorderChannelDialog({ sourceKey, targetKey, position = 'after' } = {}) {
+  const source = String(sourceKey || '').trim()
+  const target = String(targetKey || '').trim()
+  if (!source || !target || source === target) {
+    return
+  }
+  const currentKeys = channelScrollerRows.value
+    .map((row) => String(row.reorderKey || '').trim())
+    .filter(Boolean)
+  const mergedKeys = [
+    ...currentKeys,
+    ...(Array.isArray(channelDialogOrder.value) ? channelDialogOrder.value.map((key) => String(key || '').trim()).filter(Boolean) : []),
+  ]
+  const uniqueKeys = [...new Set(mergedKeys)]
+  const sourceIndex = uniqueKeys.indexOf(source)
+  const targetIndex = uniqueKeys.indexOf(target)
+  if (sourceIndex < 0 || targetIndex < 0) {
+    return
+  }
+  uniqueKeys.splice(sourceIndex, 1)
+  const targetIndexAfterRemoval = uniqueKeys.indexOf(target)
+  const insertIndex = String(position) === 'before' ? targetIndexAfterRemoval : targetIndexAfterRemoval + 1
+  uniqueKeys.splice(Math.max(0, insertIndex), 0, source)
+  channelDialogOrder.value = uniqueKeys
+  updateConversationListMetrics()
+  session.setStatus(t('messages.editor.status.orderSaved'))
 }
 
 async function saveChannelEditor() {
@@ -2585,11 +2924,13 @@ async function saveChannelEditor() {
     if (savedChannel) {
       selectedConversationKind.value = 'channel'
       selectedChannelIdx.value = Number(savedChannel.idx)
+      selectedChannelIdentity.value = String(savedChannel.channel_identity || '').trim()
       selectedContactKey.value = ''
       populateChannelEditor(savedChannel)
       workspaceMode.value = 'edit-channel'
     }
     await loadUnreadCounts()
+    await loadConversationDirectory()
     session.setStatus(t(
       isCreate ? 'messages.editor.status.channelCreated' : 'messages.editor.status.channelSaved',
       { name: data?.channel?.name || resolvedName },
@@ -2598,6 +2939,65 @@ async function saveChannelEditor() {
     session.setStatus(error instanceof Error ? error.message : String(error || t('messages.editor.status.saveFailed')), true)
   } finally {
     channelEditorBusy.value = false
+  }
+}
+
+function requestDeleteChannelEditor() {
+  if (!channelEditorCanDelete.value || !editingChannel.value) {
+    return
+  }
+  const targetName = String(editingChannel.value?.name || channelEditorResolvedName.value || OFFICIAL_PUBLIC_CHANNEL_NAME).trim()
+  confirmDialog.value = {
+    open: true,
+    title: t('messages.editor.confirm.deleteTitle'),
+    message: t('messages.editor.confirm.deleteMessage', { name: targetName }),
+    confirmLabel: t('messages.editor.actions.delete'),
+    action: async () => {
+      if (!editingChannel.value) {
+        return
+      }
+      const channelIdx = Number(editingChannel.value?.idx ?? channelEditorForm.value.channelIdx ?? -1)
+      if (channelIdx < 0) {
+        return
+      }
+      const deletedName = String(editingChannel.value?.name || targetName).trim() || OFFICIAL_PUBLIC_CHANNEL_NAME
+      channelEditorDeleteBusy.value = true
+      try {
+        const data = await session.api('/api/channels/delete', {
+          method: 'POST',
+          body: JSON.stringify({
+            ...session.configBody(),
+            channel_idx: channelIdx,
+          }),
+        })
+        const nextChannels = Array.isArray(data?.channels) ? data.channels : []
+        applyChannelsSnapshot(nextChannels)
+        if (selectedConversationKind.value === 'channel' && Number(selectedChannelIdx.value ?? -1) === channelIdx) {
+          const nextSelectedChannel = nextChannels[0] || null
+          selectedChannelIdx.value = nextSelectedChannel ? Number(nextSelectedChannel.idx) : null
+          selectedChannelIdentity.value = String(nextSelectedChannel?.channel_identity || '').trim()
+          selectedContactKey.value = ''
+          messages.value = []
+          activeConversationTotalMessages.value = 0
+        }
+        closeChannelEditor()
+        await loadUnreadCounts()
+        await loadConversationDirectory()
+        if (selectedConversationKind.value === 'channel' && selectedChannelIdx.value != null) {
+          await loadConversationHistory()
+        }
+        session.setStatus(t('messages.editor.status.channelDeleted', { name: deletedName }))
+      } catch (error) {
+        session.setStatus(
+          error instanceof Error
+            ? error.message
+            : String(error || t('messages.editor.status.deleteFailed', { name: deletedName })),
+          true,
+        )
+      } finally {
+        channelEditorDeleteBusy.value = false
+      }
+    },
   }
 }
 
@@ -2637,6 +3037,34 @@ async function loadUnreadCounts() {
   unreadAppliedSeq.value = requestSeq
 }
 
+async function loadConversationDirectory() {
+  if (!getOwnerPort()) {
+    messageConversationDirectory.value = {
+      channels: [],
+      contacts: [],
+    }
+    return
+  }
+  loadingConversationDirectory.value = true
+  try {
+    const params = new URLSearchParams({
+      port: getOwnerPort(),
+      mention_name: String(session.selfName || ''),
+    })
+    const data = await session.api(`/api/messages/conversations?${params.toString()}`)
+    messageConversationDirectory.value = {
+      channels: Array.isArray(data?.channels) ? data.channels : [],
+      contacts: Array.isArray(data?.contacts) ? data.contacts : [],
+    }
+    return messageConversationDirectory.value
+  } catch (error) {
+    session.setStatus(error instanceof Error ? error.message : String(error || t('messages.status.openFailed')), true)
+    return messageConversationDirectory.value
+  } finally {
+    loadingConversationDirectory.value = false
+  }
+}
+
 async function loadConversationHistory(options = {}) {
   const requestSeq = historyLoadSeq.value + 1
   historyLoadSeq.value = requestSeq
@@ -2663,11 +3091,14 @@ async function loadConversationHistory(options = {}) {
   }
   loadingMessages.value = true
   try {
-    if (selectedConversationKind.value === 'channel' && selectedChannelIdx.value != null) {
+    if (selectedConversationKind.value === 'channel' && (selectedChannelIdx.value != null || selectedChannelIdentity.value)) {
       const params = new URLSearchParams({
-        channel_idx: String(selectedChannelIdx.value),
+        channel_idx: String(selectedChannelIdx.value ?? 0),
         limit: String(effectiveFocusMessageId ? HISTORY_PAGE_SIZE : INITIAL_HISTORY_LIMIT),
       })
+      if (selectedChannelIdentity.value) {
+        params.set('channel_identity', String(selectedChannelIdentity.value))
+      }
       if (getOwnerPort()) {
         params.set('port', getOwnerPort())
       }
@@ -2780,12 +3211,15 @@ async function loadOlderMessages() {
   const previousScrollTop = host?.scrollTop || 0
   loadingOlderMessages.value = true
   try {
-    if (selectedConversationKind.value === 'channel' && selectedChannelIdx.value != null) {
+    if (selectedConversationKind.value === 'channel' && (selectedChannelIdx.value != null || selectedChannelIdentity.value)) {
       const params = new URLSearchParams({
-        channel_idx: String(selectedChannelIdx.value),
+        channel_idx: String(selectedChannelIdx.value ?? 0),
         limit: String(HISTORY_PAGE_SIZE),
         before_message_id: String(oldestMessageId),
       })
+      if (selectedChannelIdentity.value) {
+        params.set('channel_identity', String(selectedChannelIdentity.value))
+      }
       if (getOwnerPort()) {
         params.set('port', getOwnerPort())
       }
@@ -2835,23 +3269,30 @@ async function loadOlderMessages() {
   }
 }
 
-async function selectChannel(channelIdx, options = {}) {
+async function selectChannel(channelOrIdx, options = {}) {
+  const channel = channelOrIdx && typeof channelOrIdx === 'object' ? channelOrIdx : null
+  const resolvedIdx = channel ? Number(channel?.idx ?? -1) : Number(channelOrIdx)
   markVisibleMessagesRead()
   workspaceMode.value = 'chat'
   selectedConversationKind.value = 'channel'
-  selectedChannelIdx.value = Number(channelIdx)
+  selectedChannelIdx.value = Number.isFinite(resolvedIdx) ? resolvedIdx : null
+  selectedChannelIdentity.value = String(channel?.channel_identity || '').trim()
   selectedContactKey.value = ''
   closeAllFloats()
   closeMessageContextMenu()
   await loadConversationHistory(options)
 }
 
-async function selectContact(publicKey, options = {}) {
+async function selectContact(contactOrKey, options = {}) {
+  const publicKey = contactOrKey && typeof contactOrKey === 'object'
+    ? String(contactOrKey.public_key || contactOrKey.pubkey_prefix || '')
+    : contactOrKey
   markVisibleMessagesRead()
   workspaceMode.value = 'chat'
   selectedConversationKind.value = 'contact'
   selectedContactKey.value = normalizePublicKey(publicKey)
   selectedChannelIdx.value = null
+  selectedChannelIdentity.value = ''
   closeAllFloats()
   closeMessageContextMenu()
   await loadConversationHistory(options)
@@ -3092,6 +3533,10 @@ async function sendMessageText(text, options = {}) {
   try {
     const shouldStickToBottom = isMessageScrollerNearBottom()
     if (selectedConversationKind.value === 'channel' && selectedChannelIdx.value != null) {
+      if (selectedChannel.value?.is_on_node === false) {
+        session.setStatus(t('messages.status.channelNotOnNode'), true)
+        return false
+      }
       session.setStatus(t('messages.status.sendingPacket', { type: packetTypeLabel('channel', { t }) }))
       const data = await session.api('/api/messages/channel/send', {
         method: 'POST',
@@ -3116,6 +3561,10 @@ async function sendMessageText(text, options = {}) {
         }
       }
     } else if (selectedConversationKind.value === 'contact' && selectedContactKey.value) {
+      if (selectedContact.value?.sendable === false) {
+        session.setStatus(t('messages.status.contactKeyUnavailable'), true)
+        return false
+      }
       session.setStatus(t('messages.status.sendingPacket', { type: packetTypeLabel('direct', { t }) }))
       const data = await session.api('/api/messages/contact/send', {
         method: 'POST',
@@ -3140,6 +3589,7 @@ async function sendMessageText(text, options = {}) {
         }
       }
     }
+    await loadConversationDirectory()
     if (options.clearDraft !== false) {
       draftText.value = ''
     }
@@ -3328,6 +3778,7 @@ async function confirmClearMessages() {
       writeSentDraftHistory(currentConversationKey.value, [])
       scheduleConversationCacheWrite(currentConversationKey.value, messages.value, activeConversationTotalMessages.value)
       await loadUnreadCounts()
+      await loadConversationDirectory()
       session.setStatus(t('messages.status.cleared'))
     },
   }
@@ -3401,6 +3852,7 @@ async function setAllMessagesReadState(scope = 'regular') {
     }),
   })
   await loadUnreadCounts()
+  await loadConversationDirectory()
   if (currentConversation.value) {
     await loadConversationHistory()
   }
@@ -3641,6 +4093,7 @@ function stopListening() {
     eventSource.value.close()
     eventSource.value = null
   }
+  eventSourceKey = ''
 }
 
 function syncConsoleSearchMatchState(options = {}) {
@@ -3730,10 +4183,19 @@ function saveConsoleLogSnapshot() {
 }
 
 function startListening() {
-  stopListening()
   if (!getOwnerPort()) {
+    stopListening()
     return
   }
+  const nextEventSourceKey = [
+    getOwnerPort(),
+    String(session.selectedBaudrate || session.DEFAULT_BAUDRATE),
+    String(session.DEFAULT_TIMEOUT),
+  ].join('|')
+  if (eventSource.value && eventSourceKey === nextEventSourceKey) {
+    return
+  }
+  stopListening()
   const query = new URLSearchParams({
     port: getOwnerPort(),
     baudrate: String(session.selectedBaudrate || session.DEFAULT_BAUDRATE),
@@ -3741,6 +4203,7 @@ function startListening() {
   })
   const source = new EventSource(`/api/events?${query.toString()}`)
   eventSource.value = source
+  eventSourceKey = nextEventSourceKey
   source.onmessage = async (event) => {
     const payload = JSON.parse(String(event.data || '{}'))
     if (payload.event === 'heartbeat') {
@@ -3924,6 +4387,7 @@ async function ensureScreenReady() {
     lastRadioTxSecs.value = session.radioStats?.tx_air_secs == null ? null : Number(session.radioStats.tx_air_secs)
     applyConnectedStatusFromSnapshot()
     await loadUnreadCounts()
+    await loadConversationDirectory()
     await applyRequestedRouteConversation()
     await ensureConversationSelectionReady({ loadHistoryIfNeeded: true })
     startListening()
@@ -3940,15 +4404,29 @@ async function ensureScreenReady() {
 async function applyRequestedRouteConversation() {
   const requestedContactKey = requestedRouteContactKey.value
   const requestedChannelIdx = requestedRouteChannelIdx.value
+  const requestedChannelIdentity = requestedRouteChannelIdentity.value
   const requestedFocusMessageId = requestedRouteFocusMessageId.value
   const requestedHighlightTone = requestedRouteHighlightTone.value
   const requestedFocusComposer = requestedRouteFocusComposer.value
-  if (requestedChannelIdx != null) {
+  if (requestedChannelIdx != null || requestedChannelIdentity) {
+    const requestedChannel = requestedChannelIdentity
+      ? conversationChannelsSource.value.find((channel) => String(channel?.channel_identity || '').trim() === requestedChannelIdentity) || null
+      : null
+    const channelTarget = requestedChannel || {
+      idx: requestedChannelIdx,
+      channel_identity: requestedChannelIdentity,
+      name: requestedChannelIdentity || (requestedChannelIdx != null ? `#${requestedChannelIdx}` : ''),
+      is_on_node: requestedChannelIdx != null,
+    }
     if (
       selectedConversationKind.value !== 'channel'
-      || Number(selectedChannelIdx.value ?? -1) !== Number(requestedChannelIdx)
+      || (
+        requestedChannelIdentity
+          ? String(selectedChannelIdentity.value || '').trim() !== requestedChannelIdentity
+          : Number(selectedChannelIdx.value ?? -1) !== Number(requestedChannelIdx)
+      )
     ) {
-      await selectChannel(requestedChannelIdx, {
+      await selectChannel(channelTarget, {
         focusMessageId: requestedFocusMessageId,
         notificationHighlightTone: requestedHighlightTone,
       })
@@ -3961,6 +4439,7 @@ async function applyRequestedRouteConversation() {
     }
     const nextQuery = { ...route.query }
     delete nextQuery.channel
+    delete nextQuery.channel_identity
     delete nextQuery.focus
     delete nextQuery.tone
     delete nextQuery.compose
@@ -3977,7 +4456,7 @@ async function applyRequestedRouteConversation() {
   if (!requestedContactKey) {
     return false
   }
-  const requestedContact = session.contacts.find((contact) => {
+  const requestedContact = conversationContactsSource.value.find((contact) => {
     const publicKey = normalizePublicKey(contact?.public_key)
     const prefix = getContactPrefix(contact)
     return publicKey === requestedContactKey || prefix === requestedContactKey
@@ -4118,8 +4597,8 @@ watch(
     requestedRouteChannelIdx.value,
     requestedRouteFocusMessageId.value,
     requestedRouteHighlightTone.value,
-    session.contacts.length,
-    session.channels.length,
+    conversationContactsSource.value.length,
+    conversationChannelsSource.value.length,
     route.name,
   ],
   async ([requestedContactKey, requestedChannelIdx, requestedFocusMessageId, requestedHighlightTone, _contactCount, _channelCount, routeName]) => {
@@ -4130,6 +4609,22 @@ watch(
       return
     }
     await applyRequestedRouteConversation()
+  },
+)
+
+watch(
+  () => [
+    route.name,
+    session.connected,
+    session.selectedPort,
+    accessAllMeshcoriumMessages.value,
+    session.selfName,
+  ],
+  async ([routeName, connected, selectedPort]) => {
+    if (routeName !== 'messages' || !connected || !String(selectedPort || '').trim()) {
+      return
+    }
+    await loadConversationDirectory()
   },
 )
 
@@ -4336,13 +4831,14 @@ onBeforeUnmount(() => {
           @select-contact="selectContact"
           @open-channel-editor="openChannelEditor"
           @start-new-channel-editor="startNewChannelEditor"
+          @reorder-channel="reorderChannelDialog"
         />
       </template>
 
       <template #scroller-footer>
         <MessagesConversationSidebar
           section="footer"
-          :status-text="session.statusText"
+          :status-text="footerStatusText"
           :status-error="session.statusError"
           :connected="session.connected"
         />
@@ -4369,6 +4865,7 @@ onBeforeUnmount(() => {
           @update:name="updateChannelEditorName"
           @update:psk-hex="updateChannelEditorPskHex"
           @close="closeChannelEditor"
+          @delete="requestDeleteChannelEditor"
           @save="saveChannelEditor"
         />
 

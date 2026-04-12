@@ -23,6 +23,8 @@ DEFAULT_APP_VERSION = 1
 MESHCORE_PUBLIC_CHANNEL_NAME = "#public"
 MESHCORE_PUBLIC_CHANNEL_PSK_HEX = "8b3387e9c5cdea6ac9e5edbaa115cd72"
 MESHCORE_PUBLIC_CHANNEL_PSK = bytes.fromhex(MESHCORE_PUBLIC_CHANNEL_PSK_HEX)
+BLE_RADIO_COMMAND_SETTLE_SECS = 0.3
+BLE_RADIO_POST_APPLY_SETTLE_SECS = 0.45
 
 
 CMD_APP_START = 1
@@ -39,7 +41,7 @@ CMD_REMOVE_CONTACT = 15
 
 def normalize_meshcore_channel_name(channel_name: str) -> str:
     normalized = str(channel_name or "").strip()
-    if normalized.lower() == MESHCORE_PUBLIC_CHANNEL_NAME:
+    if normalized.lower().lstrip("#") == MESHCORE_PUBLIC_CHANNEL_NAME.lstrip("#"):
         return MESHCORE_PUBLIC_CHANNEL_NAME
     return normalized
 
@@ -112,11 +114,24 @@ RESP_TUNING_PARAMS = 23
 RESP_STATS = 24
 RESP_AUTOADD_CONFIG = 25
 RESP_ALLOWED_REPEAT_FREQ = 26
+CONTACT_SEQUENCE_IGNORED_CODES = (
+    RESP_CHANNEL_INFO,
+    RESP_OK,
+    RESP_SELF_INFO,
+    RESP_DEVICE_INFO,
+    RESP_BATT_AND_STORAGE,
+    RESP_CURR_TIME,
+    RESP_CUSTOM_VARS,
+    RESP_TUNING_PARAMS,
+    RESP_STATS,
+    RESP_AUTOADD_CONFIG,
+    RESP_ALLOWED_REPEAT_FREQ,
+)
 CONTACT_SEQUENCE_RESPONSE_CODES = (
     RESP_CONTACTS_START,
     RESP_CONTACT,
     RESP_END_OF_CONTACTS,
-    RESP_CHANNEL_INFO,
+    *CONTACT_SEQUENCE_IGNORED_CODES,
 )
 
 PUSH_ADVERT = 0x80
@@ -260,9 +275,14 @@ class SelfTelemetry:
 
 @dataclasses.dataclass(slots=True)
 class BatteryInfo:
-    level: int
+    battery_mv: int
+    battery_percent: int | None
     used_kb: int | None
     total_kb: int | None
+
+    @property
+    def level(self) -> int | None:
+        return self.battery_percent
 
 
 @dataclasses.dataclass(slots=True)
@@ -1065,9 +1085,9 @@ class _ReaderOwnedFrameHub:
                 f"unexpected frame while reading contacts: code={frame[0]} hex=0x{frame[0]:02x}"
             ),
             end_cursor_offset=1,
-            ignored_codes=(RESP_CHANNEL_INFO,),
+            ignored_codes=CONTACT_SEQUENCE_IGNORED_CODES,
             ignored_frame_logger=lambda frame: logging.warning(
-                "discarding stray CHANNEL_INFO while reading contacts code=%s hex=%s",
+                "discarding stray frame while reading contacts code=%s hex=%s",
                 int(frame[0]) if frame else None,
                 frame.hex() if frame else "",
             ),
@@ -1386,13 +1406,19 @@ def parse_battery_info(frame: bytes) -> BatteryInfo:
         raise MeshCoreError(f"expected BATT_AND_STORAGE, got code {frame[:1].hex() if frame else 'empty'}")
     if len(frame) < 3:
         raise MeshCoreError(f"short BATT_AND_STORAGE frame: {len(frame)} bytes")
-    level = int.from_bytes(frame[1:3], byteorder="little", signed=False)
+    battery_mv = int.from_bytes(frame[1:3], byteorder="little", signed=False)
+    battery_percent = battery_percent_from_mv(battery_mv)
     used_kb = None
     total_kb = None
     if len(frame) >= 11:
         used_kb = int.from_bytes(frame[3:7], byteorder="little", signed=False)
         total_kb = int.from_bytes(frame[7:11], byteorder="little", signed=False)
-    return BatteryInfo(level=level, used_kb=used_kb, total_kb=total_kb)
+    return BatteryInfo(
+        battery_mv=battery_mv,
+        battery_percent=battery_percent,
+        used_kb=used_kb,
+        total_kb=total_kb,
+    )
 
 
 def parse_contact_message_v3(payload: bytes) -> ContactMessageV3Info:
@@ -1575,6 +1601,16 @@ class MeshCoreClient:
         except (AttributeError, OSError, ValueError, SerialException):
             return 0
 
+    def transport_type(self) -> str:
+        return str(getattr(self.frame_transport, "transport_type", "") or "").strip().lower()
+
+    def is_ble_transport(self) -> bool:
+        return self.transport_type() == "ble"
+
+    def _sleep_for_radio_settle(self, delay_secs: float) -> None:
+        if self.is_ble_transport() and delay_secs > 0:
+            time.sleep(max(0.0, float(delay_secs)))
+
     def get_transport_timeout(self) -> float | None:
         try:
             value = getattr(self.transport, "timeout", None)
@@ -1752,7 +1788,7 @@ class MeshCoreClient:
         bw_khz: float,
         sf: int,
         cr: int,
-        client_repeat: int = 0,
+        client_repeat: int | None = 0,
     ) -> None:
         freq_khz = int(round(float(freq_mhz) * 1000.0))
         bw_hz = int(round(float(bw_khz) * 1000.0))
@@ -1760,8 +1796,10 @@ class MeshCoreClient:
             bytes([CMD_SET_RADIO_PARAMS])
             + struct.pack("<I", freq_khz)
             + struct.pack("<I", bw_hz)
-            + bytes([int(sf) & 0xFF, int(cr) & 0xFF, int(client_repeat) & 0xFF])
+            + bytes([int(sf) & 0xFF, int(cr) & 0xFF])
         )
+        if client_repeat is not None:
+            payload += bytes([int(client_repeat) & 0xFF])
         self.request_expect_frame(
             payload,
             expected_codes=RESP_OK,
@@ -1778,6 +1816,32 @@ class MeshCoreClient:
             err_error="device returned ERR for SET_RADIO_TX_POWER",
             unexpected_error=lambda frame: f"unexpected response code for SET_RADIO_TX_POWER: {frame[0]}",
         )
+
+    def apply_radio_settings(
+        self,
+        *,
+        freq_mhz: float | None = None,
+        bw_khz: float | None = None,
+        sf: int | None = None,
+        cr: int | None = None,
+        client_repeat: int | None = None,
+        tx_power_dbm: int | None = None,
+    ) -> None:
+        radio_params_requested = all(value is not None for value in (freq_mhz, bw_khz, sf, cr))
+        if radio_params_requested:
+            self.set_radio_params(
+                freq_mhz=float(freq_mhz),
+                bw_khz=float(bw_khz),
+                sf=int(sf),
+                cr=int(cr),
+                client_repeat=client_repeat,
+            )
+            self._sleep_for_radio_settle(BLE_RADIO_COMMAND_SETTLE_SECS)
+        if tx_power_dbm is not None:
+            self.set_radio_tx_power(int(tx_power_dbm))
+            self._sleep_for_radio_settle(BLE_RADIO_COMMAND_SETTLE_SECS)
+        if radio_params_requested or tx_power_dbm is not None:
+            self._sleep_for_radio_settle(BLE_RADIO_POST_APPLY_SETTLE_SECS)
 
     def get_tuning_params(self) -> TuningParams:
         frame = self.request_expect_frame(
@@ -2539,6 +2603,17 @@ class MeshCoreClient:
             empty_error="empty response to SET_CHANNEL",
             err_error=f"device returned ERR for SET_CHANNEL idx={channel_idx}",
             unexpected_error=lambda frame: f"expected OK response to SET_CHANNEL, got code {frame[0]}",
+        )
+
+    def delete_channel(self, channel_idx: int) -> None:
+        if not 0 <= int(channel_idx) <= 255:
+            raise ValueError("channel_idx must be in range 0..255")
+        self.request_expect_frame(
+            bytes([CMD_SET_CHANNEL, channel_idx & 0xFF]) + (b"\x00" * 32) + (b"\x00" * 16),
+            expected_codes=RESP_OK,
+            empty_error="empty response to DELETE_CHANNEL",
+            err_error=f"device returned ERR for DELETE_CHANNEL idx={channel_idx}",
+            unexpected_error=lambda frame: f"expected OK response to DELETE_CHANNEL, got code {frame[0]}",
         )
 
     def get_radio_stats(self) -> RadioStats:

@@ -50,6 +50,8 @@ const railButtonElements = {}
 let railGlowMeasureFrame = 0
 let railGlowReleaseTimer = 0
 let unreadRefreshTimer = 0
+let consoleEventSourceKey = ''
+let notificationEventSourceKey = ''
 
 function normalizePublicKey(value) {
   return String(value || '').trim().toLowerCase()
@@ -93,6 +95,18 @@ function normalizeMutedConversationsMap(value) {
 
 function getOwnerPort() {
   return String(session.selectedPort || '')
+}
+
+function buildOwnerEventStreamKey() {
+  const port = getOwnerPort()
+  if (!port) {
+    return ''
+  }
+  return [
+    port,
+    String(session.selectedBaudrate || session.DEFAULT_BAUDRATE),
+    String(session.DEFAULT_TIMEOUT),
+  ].join('|')
 }
 
 const activeShellPanel = computed(() => {
@@ -252,6 +266,67 @@ function getConversationMuteModeByKey(muteKey) {
   return mode === 'regular' || mode === 'all' ? mode : 'none'
 }
 
+function getHighestPriorityMuteMode(modes = []) {
+  if (modes.includes('all')) {
+    return 'all'
+  }
+  if (modes.includes('regular')) {
+    return 'regular'
+  }
+  return 'none'
+}
+
+function getChannelMuteKeys(value, fallback = null) {
+  const keys = []
+  const pushUnique = (next) => {
+    const normalized = String(next || '').trim().toLowerCase()
+    if (normalized && !keys.includes(normalized)) {
+      keys.push(normalized)
+    }
+  }
+  const appendIdentityAndIdx = (source) => {
+    if (!source || typeof source !== 'object') {
+      return
+    }
+    const identity = String(source.channelIdentity || source.channel_identity || '').trim()
+    const idx = Number(source.channelIdx ?? source.channel_idx ?? source.idx ?? -1)
+    if (identity) {
+      pushUnique(`channelid:${identity}`)
+    }
+    if (Number.isFinite(idx) && idx >= 0) {
+      pushUnique(`channel:${idx}`)
+    }
+  }
+  appendIdentityAndIdx(value)
+  appendIdentityAndIdx(fallback)
+  if (keys.length) {
+    return keys
+  }
+  const normalized = String(value || '').trim()
+  if (!normalized) {
+    return keys
+  }
+  if (normalized.startsWith('channelid:') || normalized.startsWith('channel:')) {
+    pushUnique(normalized)
+    return keys
+  }
+  if (/^-?\d+$/.test(normalized)) {
+    const idx = Number(normalized)
+    if (Number.isFinite(idx) && idx >= 0) {
+      pushUnique(`channel:${idx}`)
+    }
+    return keys
+  }
+  pushUnique(`channelid:${normalized}`)
+  return keys
+}
+
+function getChannelMuteMode(value, fallback = null) {
+  return getHighestPriorityMuteMode(
+    getChannelMuteKeys(value, fallback).map((muteKey) => getConversationMuteModeByKey(muteKey)),
+  )
+}
+
 function isConversationRegularMutedByKey(muteKey) {
   const mode = getConversationMuteModeByKey(muteKey)
   return mode === 'regular' || mode === 'all'
@@ -260,8 +335,7 @@ function isConversationRegularMutedByKey(muteKey) {
 const totalRegularUnreadCount = computed(() => {
   const channelUnreadCounts = unreadSummary.value.channel_unread_counts || {}
   return Object.entries(channelUnreadCounts).reduce((sum, [channelKey, rawCount]) => {
-    const muteKey = getConversationMuteKey('channel', channelKey)
-    if (isConversationRegularMutedByKey(muteKey)) {
+    if (getChannelMuteMode(channelKey) === 'regular' || getChannelMuteMode(channelKey) === 'all') {
       return sum
     }
     return sum + Number(rawCount || 0)
@@ -284,8 +358,7 @@ const totalUnreadCount = computed(() => totalRegularUnreadCount.value + totalDir
 const totalMentionCount = computed(() => {
   const channelMentionCounts = unreadSummary.value.channel_mention_counts || {}
   const channelsTotal = Object.entries(channelMentionCounts).reduce((sum, [channelKey, rawCount]) => {
-    const muteKey = getConversationMuteKey('channel', channelKey)
-    if (getConversationMuteModeByKey(muteKey) === 'all') {
+    if (getChannelMuteMode(channelKey) === 'all') {
       return sum
     }
     return sum + Number(rawCount || 0)
@@ -447,7 +520,16 @@ function isPublicChannel(channel) {
   return normalizedName.startsWith('#') || normalizedName === 'public' || Boolean(channel?.is_public)
 }
 
+function isOfficialPublicChannel(channel) {
+  const normalizedName = normalizeChannelName(channel?.name).replace(/^#+/, '').toLowerCase()
+  const normalizedIdentity = String(channel?.channel_identity || '').trim().toLowerCase()
+  return normalizedName === 'public' || normalizedIdentity === 'public::#public'
+}
+
 function channelAvatarSymbol(channel) {
+  if (isOfficialPublicChannel(channel)) {
+    return '📣'
+  }
   return isPublicChannel(channel) ? '#' : '🔒'
 }
 
@@ -485,7 +567,8 @@ function buildMentionPreviewText(text, fallback = '') {
 }
 
 function findChannelByNotificationKey(key) {
-  const normalizedKey = String(key || '').trim()
+  const parsedKey = parseChannelNotificationKey(key)
+  const normalizedKey = parsedKey.identity || (parsedKey.idx != null ? String(parsedKey.idx) : parsedKey.raw)
   if (!normalizedKey) {
     return null
   }
@@ -494,6 +577,55 @@ function findChannelByNotificationKey(key) {
     const channelIdx = String(channel?.idx ?? '').trim()
     return normalizedKey === channelIdentity || normalizedKey === channelIdx
   }) || null
+}
+
+function parseChannelNotificationKey(key) {
+  const raw = String(key || '').trim()
+  const ownerIdxMatch = /^([0-9a-f]{64}):idx:(\d+)$/i.exec(raw)
+  if (ownerIdxMatch) {
+    return {
+      raw,
+      ownerId: ownerIdxMatch[1].toLowerCase(),
+      idx: Number(ownerIdxMatch[2]),
+      identity: '',
+    }
+  }
+  const numericIdx = Number(raw)
+  if (Number.isFinite(numericIdx) && raw !== '') {
+    return {
+      raw,
+      ownerId: '',
+      idx: numericIdx,
+      identity: '',
+    }
+  }
+  return {
+    raw,
+    ownerId: '',
+    idx: null,
+    identity: raw,
+  }
+}
+
+function buildChannelNotificationTarget(channelKey, fallback = {}) {
+  const parsed = parseChannelNotificationKey(channelKey || fallback.channel_identity || fallback.channel_idx)
+  const channel = findChannelByNotificationKey(parsed.identity || (parsed.idx != null ? parsed.idx : parsed.raw))
+  const channelIdx = Number(channel?.idx ?? parsed.idx ?? fallback.channel_idx ?? -1)
+  const channelIdentity = String(channel?.channel_identity || parsed.identity || fallback.channel_identity || '').trim()
+  const title = String(
+    channel?.name
+    || fallback.channel_name
+    || (channelIdentity || '')
+    || (Number.isFinite(channelIdx) && channelIdx >= 0 ? `#${channelIdx}` : t('messages.fallback.channel'))
+  ).trim()
+  return {
+    channel,
+    channelIdx,
+    channelIdentity,
+    title,
+    avatarSymbol: channelAvatarSymbol(channel || { idx: channelIdx, name: fallback.channel_name || channelIdentity }),
+    preview: formatChannelPreview(channel || { description: channelIdentity || t('messages.fallback.channelPreview') }),
+  }
 }
 
 function findContactByNotificationKey(key) {
@@ -677,18 +809,18 @@ const mentionNotificationEntries = computed(() => {
     return unreadMentionEntries.map((entry) => {
       const conversationKind = String(entry?.conversation_kind || '').trim().toLowerCase()
       if (conversationKind === 'channel') {
-        const channel = findChannelByNotificationKey(entry?.channel_identity || entry?.channel_idx)
-        const channelIdx = Number(entry?.channel_idx ?? channel?.idx ?? -1)
+        const target = buildChannelNotificationTarget(entry?.channel_identity || entry?.channel_idx, entry)
         return {
           kind: 'channel',
-          key: `mention:channel:${Number(entry?.id || 0) || `${String(entry?.channel_identity || '').trim()}:${channelIdx}`}`,
-          title: String(channel?.name || entry?.channel_name || (channelIdx >= 0 ? `#${channelIdx}` : t('messages.fallback.channel'))).trim(),
-          preview: buildMentionPreviewText(entry?.text, formatChannelPreview(channel || {})),
-          avatarSymbol: channelAvatarSymbol(channel || { idx: channelIdx, name: entry?.channel_name }),
-          unreadCount: Number(unreadSummary.value.channel_unread_counts?.[String(channel?.channel_identity || channelIdx)] || unreadSummary.value.channel_unread_counts?.[String(channelIdx)] || 0),
+          key: `mention:channel:${Number(entry?.id || 0) || `${target.channelIdentity}:${target.channelIdx}`}`,
+          title: target.title,
+          preview: buildMentionPreviewText(entry?.text, target.preview),
+          avatarSymbol: target.avatarSymbol,
+          unreadCount: Number(unreadSummary.value.channel_unread_counts?.[target.channelIdentity] || unreadSummary.value.channel_unread_counts?.[String(target.channelIdx)] || 0),
           mentionCount: 1,
           highlightTone: 'mention',
-          value: channelIdx,
+          value: target.channelIdx,
+          channelIdentity: target.channelIdentity,
           focusMessageId: Number(entry?.id || 0),
         }
       }
@@ -709,7 +841,7 @@ const mentionNotificationEntries = computed(() => {
       }
     }).filter((entry) => {
       if (entry.kind === 'channel') {
-        return Number.isFinite(Number(entry.value)) && Number(entry.value) >= 0
+        return (Number.isFinite(Number(entry.value)) && Number(entry.value) >= 0) || Boolean(String(entry.channelIdentity || '').trim())
       }
       return Boolean(String(entry.value || '').trim())
     })
@@ -720,25 +852,21 @@ const mentionNotificationEntries = computed(() => {
     if (!count) {
       continue
     }
-    const channel = findChannelByNotificationKey(channelKey)
-    const channelIdx = Number(channel?.idx ?? channelKey)
-    if (!Number.isFinite(channelIdx) || channelIdx < 0) {
-      continue
-    }
-    const muteKey = getConversationMuteKey('channel', channelIdx)
-    if (getConversationMuteModeByKey(muteKey) === 'all') {
+    const target = buildChannelNotificationTarget(channelKey)
+    if (getChannelMuteMode(channelKey, target) === 'all') {
       continue
     }
     entries.push({
       kind: 'channel',
       key: `mention:channel:${channelKey}`,
-      title: String(channel?.name || (channelIdx >= 0 ? `#${channelIdx}` : t('messages.fallback.channel'))).trim(),
-      preview: formatChannelPreview(channel || {}),
-      avatarSymbol: channelAvatarSymbol(channel || { idx: channelIdx }),
-      unreadCount: Number(unreadSummary.value.channel_unread_counts?.[channelKey] || unreadSummary.value.channel_unread_counts?.[String(channelIdx)] || 0),
+      title: target.title,
+      preview: target.preview,
+      avatarSymbol: target.avatarSymbol,
+      unreadCount: Number(unreadSummary.value.channel_unread_counts?.[channelKey] || unreadSummary.value.channel_unread_counts?.[String(target.channelIdx)] || 0),
       mentionCount: count,
       highlightTone: 'mention',
-      value: channelIdx,
+      value: target.channelIdx,
+      channelIdentity: target.channelIdentity,
       focusMessageId: Number(unreadSummary.value.channel_first_mention_ids?.[channelKey] || unreadSummary.value.channel_first_unread_ids?.[channelKey] || 0),
     })
   }
@@ -776,25 +904,21 @@ const regularNotificationEntries = computed(() => {
     if (!count) {
       continue
     }
-    const channel = findChannelByNotificationKey(channelKey)
-    const channelIdx = Number(channel?.idx ?? channelKey)
-    if (!Number.isFinite(channelIdx) || channelIdx < 0) {
-      continue
-    }
-    const muteKey = getConversationMuteKey('channel', channelIdx)
-    if (isConversationRegularMutedByKey(muteKey)) {
+    const target = buildChannelNotificationTarget(channelKey)
+    if (getChannelMuteMode(channelKey, target) === 'regular' || getChannelMuteMode(channelKey, target) === 'all') {
       continue
     }
     entries.push({
       kind: 'channel',
       key: `regular:channel:${channelKey}`,
-      title: String(channel?.name || `#${channelIdx}`).trim(),
-      preview: formatChannelPreview(channel || {}),
-      avatarSymbol: channelAvatarSymbol(channel || { idx: channelIdx }),
+      title: target.title,
+      preview: target.preview,
+      avatarSymbol: target.avatarSymbol,
       unreadCount: count,
       mentionCount: Number(unreadSummary.value.channel_mention_counts?.[channelKey] || 0),
       highlightTone: 'unread',
-      value: channelIdx,
+      value: target.channelIdx,
+      channelIdentity: target.channelIdentity,
       focusMessageId: Number(unreadSummary.value.channel_first_unread_ids?.[channelKey] || unreadSummary.value.channel_first_mention_ids?.[channelKey] || 0),
     })
   }
@@ -1017,6 +1141,7 @@ function stopConsoleListening() {
     consoleEventSource.value.close()
     consoleEventSource.value = null
   }
+  consoleEventSourceKey = ''
 }
 
 function stopNotificationListening() {
@@ -1024,6 +1149,7 @@ function stopNotificationListening() {
     notificationEventSource.value.close()
     notificationEventSource.value = null
   }
+  notificationEventSourceKey = ''
 }
 
 function scheduleUnreadRefresh(delayMs = 120) {
@@ -1037,10 +1163,15 @@ function scheduleUnreadRefresh(delayMs = 120) {
 }
 
 function startConsoleListening() {
-  stopConsoleListening()
   if (!session.connected || !getOwnerPort()) {
+    stopConsoleListening()
     return
   }
+  const eventStreamKey = buildOwnerEventStreamKey()
+  if (consoleEventSource.value && consoleEventSourceKey === eventStreamKey) {
+    return
+  }
+  stopConsoleListening()
   const query = new URLSearchParams({
     port: getOwnerPort(),
     baudrate: String(session.selectedBaudrate || session.DEFAULT_BAUDRATE),
@@ -1048,6 +1179,7 @@ function startConsoleListening() {
   })
   const source = new EventSource(`/api/events?${query.toString()}`)
   consoleEventSource.value = source
+  consoleEventSourceKey = eventStreamKey
   source.onmessage = (event) => {
     let payload = {}
     try {
@@ -1069,10 +1201,15 @@ function startConsoleListening() {
 }
 
 function startNotificationListening() {
-  stopNotificationListening()
   if (isMessagesRoute.value || !session.connected || !getOwnerPort()) {
+    stopNotificationListening()
     return
   }
+  const eventStreamKey = buildOwnerEventStreamKey()
+  if (notificationEventSource.value && notificationEventSourceKey === eventStreamKey) {
+    return
+  }
+  stopNotificationListening()
   const query = new URLSearchParams({
     port: getOwnerPort(),
     baudrate: String(session.selectedBaudrate || session.DEFAULT_BAUDRATE),
@@ -1080,6 +1217,7 @@ function startNotificationListening() {
   })
   const source = new EventSource(`/api/events?${query.toString()}`)
   notificationEventSource.value = source
+  notificationEventSourceKey = eventStreamKey
   source.onmessage = (event) => {
     let payload = {}
     try {
@@ -1158,10 +1296,13 @@ async function openNotificationEntry(entry) {
   const focusMessageId = Number(entry?.focusMessageId || 0)
   const tone = String(entry?.highlightTone || '').trim().toLowerCase()
   if (entry?.kind === 'channel') {
+    const channelIdentity = String(entry?.channelIdentity || '').trim()
+    const channelIdx = Number(entry?.value)
     await router.push({
       path: '/messages',
       query: {
-        channel: String(entry.value),
+        ...(Number.isFinite(channelIdx) && channelIdx >= 0 ? { channel: String(channelIdx) } : {}),
+        ...(channelIdentity ? { channel_identity: channelIdentity } : {}),
         ...(focusMessageId > 0 ? { focus: String(focusMessageId) } : {}),
         ...((tone === 'mention' || tone === 'unread' || tone === 'direct') ? { tone } : {}),
       },

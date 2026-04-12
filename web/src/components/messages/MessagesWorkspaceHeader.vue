@@ -28,7 +28,6 @@ const emit = defineEmits([
     <div class="mc-workspace-actions">
       <button
         v-if="model.showCloseButton"
-        v-tooltip="{ content: model.closeLabel, theme: 'meshcorium-tooltip', placement: 'left' }"
         class="mc-button mc-button--ghost"
         type="button"
         @click="emit('close-editor')"

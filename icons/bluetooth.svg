@@ -1,0 +1,16 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="btGradient" x1="96" y1="256" x2="416" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#12B8F4"></stop>
+      <stop offset="100%" stop-color="#5A74C9"></stop>
+    </linearGradient>
+  </defs>
+
+  <g transform="rotate(-90 256 256)" stroke="url(#btGradient)" stroke-width="28" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M256 64V448"></path>
+    <path d="M256 64L352 160L256 256"></path>
+    <path d="M256 256L352 352L256 448"></path>
+    <path d="M160 160L256 256"></path>
+    <path d="M160 352L256 256"></path>
+  </g>
+</svg>

@@ -1,4 +1,5 @@
 <script setup>
+import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 defineProps({
@@ -55,9 +56,56 @@ const emit = defineEmits([
   'select-contact',
   'open-channel-editor',
   'start-new-channel-editor',
+  'reorder-channel',
 ])
 
 const { t } = useI18n()
+const draggedReorderKey = ref('')
+const dragOverReorderKey = ref('')
+const dragOverPosition = ref('')
+
+function resetDragState() {
+  draggedReorderKey.value = ''
+  dragOverReorderKey.value = ''
+  dragOverPosition.value = ''
+}
+
+function canDragEntry(entry) {
+  return Boolean(entry?.kind === 'channel' && entry?.reorderKey)
+}
+
+function startDrag(event, entry) {
+  if (!canDragEntry(entry)) {
+    return
+  }
+  draggedReorderKey.value = String(entry.reorderKey)
+  event.dataTransfer.effectAllowed = 'move'
+  event.dataTransfer.setData('text/plain', draggedReorderKey.value)
+}
+
+function updateDragOver(event, entry) {
+  if (!canDragEntry(entry) || !draggedReorderKey.value || String(entry.reorderKey) === draggedReorderKey.value) {
+    return
+  }
+  const rect = event.currentTarget.getBoundingClientRect()
+  dragOverReorderKey.value = String(entry.reorderKey)
+  dragOverPosition.value = event.clientY - rect.top < rect.height / 2 ? 'before' : 'after'
+  event.dataTransfer.dropEffect = 'move'
+}
+
+function dropOnEntry(event, entry) {
+  if (!canDragEntry(entry)) {
+    resetDragState()
+    return
+  }
+  const sourceKey = draggedReorderKey.value || event.dataTransfer.getData('text/plain')
+  const targetKey = String(entry.reorderKey || '')
+  const position = dragOverPosition.value || 'after'
+  if (sourceKey && targetKey && sourceKey !== targetKey) {
+    emit('reorder-channel', { sourceKey, targetKey, position })
+  }
+  resetDragState()
+}
 </script>
 
 <template>
@@ -85,9 +133,32 @@ const { t } = useI18n()
           v-if="entry.kind !== 'add-channel'"
           :ref="(element) => bindRowElement?.(entry.key, element)"
           class="mc-list-item"
-          :class="{ active: entry.selected }"
-          @click="entry.kind === 'channel' ? emit('select-channel', entry.channel.idx) : emit('select-contact', entry.contact.public_key)"
+          :class="{
+            active: entry.selected,
+            'is-edit-mode': chatEditMode,
+            'is-dragging': draggedReorderKey && entry.reorderKey === draggedReorderKey,
+            'is-drop-before': dragOverReorderKey && entry.reorderKey === dragOverReorderKey && dragOverPosition === 'before',
+            'is-drop-after': dragOverReorderKey && entry.reorderKey === dragOverReorderKey && dragOverPosition === 'after',
+          }"
+          :draggable="false"
+          @dragover.prevent="chatEditMode && updateDragOver($event, entry)"
+          @dragleave="dragOverReorderKey === entry.reorderKey && (dragOverReorderKey = '', dragOverPosition = '')"
+          @drop.prevent="chatEditMode && dropOnEntry($event, entry)"
+          @click="entry.kind === 'channel' ? emit('select-channel', entry.channel) : emit('select-contact', entry.contact)"
         >
+          <span
+            v-if="chatEditMode && entry.kind === 'channel'"
+            class="mc-list-drag-handle"
+            draggable="true"
+            :aria-label="t('messages.editor.actions.dragChannel')"
+            @click.stop
+            @dragstart.stop="startDrag($event, entry)"
+            @dragend="resetDragState"
+          >
+            <span></span>
+            <span></span>
+            <span></span>
+          </span>
           <div class="mc-list-avatar" :class="{ 'is-contact': entry.kind === 'contact', 'is-emoji': entry.avatarIsEmoji }">
             {{ entry.avatarText }}
             <span v-if="entry.unreadCount" class="mc-list-badge" :class="{ 'mc-list-badge--direct': entry.kind === 'contact' }">
@@ -115,12 +186,11 @@ const { t } = useI18n()
               🔇
             </span>
             <button
-              v-if="chatEditMode && entry.kind === 'channel'"
+              v-if="chatEditMode && entry.kind === 'channel' && entry.channel?.is_on_node !== false"
               v-tooltip="{ content: entry.editLabel, theme: 'meshcorium-tooltip', placement: 'left' }"
               class="mc-list-edit-button"
               type="button"
               :aria-label="entry.editLabel"
-              :disabled="entry.isProtectedChannel"
               @click.stop="emit('open-channel-editor', entry.channel)"
             >
               ✎

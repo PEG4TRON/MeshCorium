@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 
+import { resolveDisplayedBatteryPercent } from '../../lib/batteryProfile'
 import { resolveNodePreviewUrl } from '../../lib/nodePreview'
 import { useSessionStore } from '../../stores/session'
 import PhonebarClock from './PhonebarClock.vue'
@@ -11,6 +12,11 @@ const session = useSessionStore()
 const { t, locale } = useI18n()
 
 const usbIconUrl = '/icons/icons8-usb-100.png'
+const bluetoothIconUrl = '/icons/bluetooth.svg'
+const battery100IconUrl = '/icons/battery-100p.svg'
+const battery75IconUrl = '/icons/battery-75p.svg'
+const battery50IconUrl = '/icons/battery-50p.svg'
+const battery25IconUrl = '/icons/battery-25p.svg'
 const phonebarTick = ref(Date.now())
 
 function formatLocalizedNumber(value, options = {}) {
@@ -25,30 +31,67 @@ function formatLocalizedDecimal(value, options = {}) {
   }).format(Number(value || 0))
 }
 
-function getBatteryPercentage(millivolts) {
-  if (millivolts == null || Number.isNaN(Number(millivolts))) {
-    return null
-  }
-  const numeric = Number(millivolts)
-  const minVoltage = 3400
-  const maxVoltage = 4200
-  if (numeric <= minVoltage) return 0
-  if (numeric >= maxVoltage) return 100
-  return Math.floor(((numeric - minVoltage) / (maxVoltage - minVoltage)) * 100)
-}
-
 const notificationSoundEnabled = computed(() => Boolean(session.settingsPayload?.settings?.notifications_sound_enabled))
+const connectionTransportType = computed(() => String(session.selectedConnection?.transport_type || '').trim().toLowerCase())
+const connectionIconUrl = computed(() => {
+  if (connectionTransportType.value === 'ble') {
+    return bluetoothIconUrl
+  }
+  if (connectionTransportType.value === 'serial') {
+    return usbIconUrl
+  }
+  return ''
+})
+const connectionIconAlt = computed(() => {
+  if (connectionTransportType.value === 'ble') {
+    return 'BLE companion connected'
+  }
+  if (connectionTransportType.value === 'serial') {
+    return 'USB companion connected'
+  }
+  return ''
+})
+const connectionIconClass = computed(() => {
+  if (connectionTransportType.value === 'serial') {
+    return 'mc-usb-icon--serial'
+  }
+  return ''
+})
+const connectionIconStyle = computed(() => {
+  if (connectionTransportType.value === 'serial') {
+    return { transform: 'rotate(90deg)' }
+  }
+  return null
+})
 
 const batteryPercent = computed(() => {
-  const telemetry = session.selfTelemetry || {}
-  const batteryInfo = session.batteryInfo || {}
-  if (telemetry.battery_percent != null) {
-    return Math.max(0, Math.min(100, Number(telemetry.battery_percent)))
+  return resolveDisplayedBatteryPercent({
+    telemetry: session.selfTelemetry || {},
+    batteryInfo: session.batteryInfo || {},
+    profile: session.currentNodeBatteryProfile,
+  })
+})
+const showBatteryPercent = computed(() => {
+  return connectionTransportType.value === 'ble' || connectionTransportType.value === 'wifi'
+})
+const batteryIndicatorIconUrl = computed(() => {
+  if (!showBatteryPercent.value || batteryPercent.value == null) {
+    return ''
   }
-  if (batteryInfo.level != null) {
-    return Math.max(0, Math.min(100, Number(batteryInfo.level)))
+  const percent = Math.max(0, Math.min(100, Number(batteryPercent.value)))
+  if (percent >= 88) {
+    return battery100IconUrl
   }
-  return getBatteryPercentage(telemetry.battery_mv)
+  if (percent >= 63) {
+    return battery75IconUrl
+  }
+  if (percent >= 38) {
+    return battery50IconUrl
+  }
+  return battery25IconUrl
+})
+const batteryIndicatorIconAlt = computed(() => {
+  return batteryPercent.value == null ? 'Battery' : `Battery ${batteryPercent.value}%`
 })
 
 const nodePreviewUrl = computed(() => {
@@ -142,8 +185,9 @@ useIntervalFn(() => {
           >
             {{ notificationSoundEnabled ? '🔊' : '🔇' }}
           </button>
-          <img v-if="session.connected" :src="usbIconUrl" class="mc-usb-icon" alt="USB companion connected" />
-          <strong v-if="batteryPercent != null">{{ batteryPercent }}%</strong>
+          <img v-if="session.connected && connectionIconUrl" :src="connectionIconUrl" class="mc-usb-icon" :class="connectionIconClass" :style="connectionIconStyle" :alt="connectionIconAlt" />
+          <img v-if="batteryIndicatorIconUrl" :src="batteryIndicatorIconUrl" class="mc-battery-icon" :alt="batteryIndicatorIconAlt" />
+          <strong v-if="showBatteryPercent && batteryPercent != null" class="mc-battery-percent">{{ batteryPercent }}%</strong>
         </div>
       </div>
     </div>

@@ -22,7 +22,6 @@ const { t } = useI18n()
         </header>
         <div class="mc-mini-actions">
           <button
-            v-tooltip="{ content: t('advert.actions.flood'), theme: 'meshcorium-tooltip' }"
             class="mc-button mc-button--ghost"
             :disabled="model.busy"
             :class="{ active: model.mode === 'flood' }"
@@ -31,7 +30,6 @@ const { t } = useI18n()
             {{ model.busy && model.mode === 'flood' ? t('advert.actions.floodBusy') : t('advert.actions.flood') }}
           </button>
           <button
-            v-tooltip="{ content: t('advert.actions.direct'), theme: 'meshcorium-tooltip', placement: 'left' }"
             class="mc-button mc-button--primary"
             :disabled="model.busy"
             :class="{ active: model.mode === 'direct' }"

@@ -62,6 +62,8 @@ class SerialPortTransport:
 class UsbSerialFrameTransport:
     """MeshCore USB companion wire framing over a byte-oriented transport."""
 
+    transport_type = "serial"
+
     def __init__(self, byte_transport, *, frame_error=SerialFrameError):
         self.byte_transport = byte_transport
         self._frame_error = frame_error

@@ -75,6 +75,82 @@ run_privileged() {
     sudo "$@"
 }
 
+add_unique_value() {
+    local value="$1"
+    local existing
+    for existing in "${@:2}"; do
+        if [[ "${existing}" == "${value}" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+detect_serial_access_groups() {
+    local discovered=()
+    local device_path=""
+    local device_group=""
+    local fallback_group=""
+
+    while IFS= read -r device_path; do
+        [[ -n "${device_path}" ]] || continue
+        device_group="$(stat -c '%G' "${device_path}" 2>/dev/null || true)"
+        [[ -n "${device_group}" && "${device_group}" != "UNKNOWN" ]] || continue
+        if getent group "${device_group}" >/dev/null 2>&1; then
+            if ! add_unique_value "${device_group}" "${discovered[@]}"; then
+                discovered+=("${device_group}")
+            fi
+        fi
+    done < <(
+        find /dev -maxdepth 1 -type c \
+            \( -name 'ttyUSB*' -o -name 'ttyACM*' -o -name 'ttyAMA*' -o -name 'ttyS*' \) \
+            2>/dev/null \
+            | sort
+    )
+
+    for fallback_group in dialout uucp; do
+        if getent group "${fallback_group}" >/dev/null 2>&1; then
+            if ! add_unique_value "${fallback_group}" "${discovered[@]}"; then
+                discovered+=("${fallback_group}")
+            fi
+        fi
+    done
+
+    printf '%s\n' "${discovered[@]}"
+}
+
+ensure_serial_access_groups() {
+    local target_user="${SUDO_USER:-$(id -un)}"
+    local target_user_groups=""
+    local missing_groups=()
+    local group_name=""
+
+    if [[ "${target_user}" == "root" ]]; then
+        return 0
+    fi
+    if ! id "${target_user}" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    target_user_groups=" $(id -nG "${target_user}" 2>/dev/null || true) "
+    while IFS= read -r group_name; do
+        [[ -n "${group_name}" ]] || continue
+        if [[ "${target_user_groups}" != *" ${group_name} "* ]]; then
+            missing_groups+=("${group_name}")
+        fi
+    done < <(detect_serial_access_groups)
+
+    if [[ "${#missing_groups[@]}" -eq 0 ]]; then
+        return 0
+    fi
+
+    echo "adding ${target_user} to serial access groups:"
+    printf '  - %s\n' "${missing_groups[@]}"
+    run_privileged usermod -aG "$(IFS=,; echo "${missing_groups[*]}")" "${target_user}"
+    echo "serial group membership updated for ${target_user}"
+    echo "note: log out and back in for the new groups to apply to existing shells"
+}
+
 write_systemd_service_unit() {
     cat > "${1}" <<EOF
 [Unit]
@@ -451,6 +527,8 @@ if ! command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
     echo "error: python interpreter not found: ${PYTHON_BIN}" >&2
     exit 1
 fi
+
+ensure_serial_access_groups
 
 ensure_virtual_environment
 

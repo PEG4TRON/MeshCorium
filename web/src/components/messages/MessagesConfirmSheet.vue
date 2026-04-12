@@ -24,7 +24,6 @@ const { t } = useI18n()
         </header>
         <div class="mc-mini-actions">
           <button
-            v-tooltip="{ content: t('common.cancel'), theme: 'meshcorium-tooltip' }"
             class="mc-button mc-button--ghost"
             type="button"
             @click="emit('close')"
@@ -32,7 +31,6 @@ const { t } = useI18n()
             {{ t('common.cancel') }}
           </button>
           <button
-            v-tooltip="{ content: model.confirmLabel, theme: 'meshcorium-tooltip', placement: 'left' }"
             class="mc-button mc-button--primary"
             type="button"
             :disabled="Boolean(model.confirmDisabled)"

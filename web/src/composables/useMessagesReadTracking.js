@@ -8,6 +8,7 @@ export function useMessagesReadTracking(options) {
     selectedConversationKind,
     selectedContactKey,
     selectedChannelIdx,
+    selectedChannelIdentity,
     activeConversationTotalMessages,
     visibleMessageIds,
     messageScroller,
@@ -75,6 +76,7 @@ export function useMessagesReadTracking(options) {
         port: getOwnerPort(),
         conversation_kind: conversationKind,
         conversation_value: conversationValue,
+        channel_identity: conversationKind === 'channel' ? String(selectedChannelIdentity?.value || '').trim() : '',
         message_id: nextValue,
       }),
     })

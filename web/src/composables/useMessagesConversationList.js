@@ -1,15 +1,19 @@
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 
 export function useMessagesConversationList(options) {
   const {
     session,
+    channelsSource,
+    contactsSource,
     locale,
     t,
     unreadSummary,
     selectedConversationKind,
     selectedChannelIdx,
+    selectedChannelIdentity,
     selectedContactKey,
     chatEditMode,
+    channelDialogOrder,
     estimatedRowHeight,
     overscanPx,
     helpers,
@@ -23,7 +27,7 @@ export function useMessagesConversationList(options) {
   let conversationRowResizeObserver = null
 
   const directConversationRows = computed(() => {
-    return session.contacts
+    return (Array.isArray(contactsSource?.value) ? contactsSource.value : session.contacts)
       .filter((contact) => Number(contact?.last_message_at || 0) > 0)
       .map((contact) => {
         const prefix = helpers.getContactPrefix(contact)
@@ -40,8 +44,8 @@ export function useMessagesConversationList(options) {
           avatarIsEmoji: Boolean(avatarEmoji),
           kindLabel: t(`messages.contactKinds.${helpers.contactKindLabel(contact)}`),
           contactBadge: helpers.contactKindBadgeLabel(contact),
-          rawUnreadCount: Number(unreadSummary.value.contact_unread_counts[prefix] || 0),
-          rawMentionCount: Number(unreadSummary.value.contact_mention_counts[prefix] || 0),
+          rawUnreadCount: Number(contact?.unread_count ?? (unreadSummary.value.contact_unread_counts[prefix] || 0)),
+          rawMentionCount: Number(contact?.mention_count ?? (unreadSummary.value.contact_mention_counts[prefix] || 0)),
           unreadCount: helpers.displayedContactUnreadCount(contact),
           mentionCount: helpers.displayedContactMentionCount(contact),
           value: helpers.normalizePublicKey(contact?.public_key),
@@ -60,27 +64,57 @@ export function useMessagesConversationList(options) {
       })
   })
 
+  const orderedChannelsSource = computed(() => {
+    const channels = Array.isArray(channelsSource?.value) ? channelsSource.value : session.channels
+    const order = Array.isArray(channelDialogOrder?.value) ? channelDialogOrder.value.map((key) => String(key || '')).filter(Boolean) : []
+    if (!order.length) {
+      return channels
+    }
+    const orderIndex = new Map(order.map((key, index) => [key, index]))
+    return [...channels].sort((left, right) => {
+      const leftKey = helpers.channelDialogOrderKey(left)
+      const rightKey = helpers.channelDialogOrderKey(right)
+      const leftIndex = orderIndex.has(leftKey) ? orderIndex.get(leftKey) : Number.MAX_SAFE_INTEGER
+      const rightIndex = orderIndex.has(rightKey) ? orderIndex.get(rightKey) : Number.MAX_SAFE_INTEGER
+      if (leftIndex !== rightIndex) {
+        return leftIndex - rightIndex
+      }
+      return Number(left?.idx ?? 0) - Number(right?.idx ?? 0)
+    })
+  })
+
   const channelScrollerRows = computed(() => {
-    return session.channels.map((channel) => {
+    return orderedChannelsSource.value.map((channel) => {
       const muteMode = helpers.getConversationMuteModeForEntry({ kind: 'channel', channel })
       const isProtectedChannel = helpers.isProtectedPublicChannel(channel)
+      const normalizedChannelIdentity = String(channel?.channel_identity ?? '').trim()
+      const normalizedChannelIdx = Number(channel?.idx ?? -1)
       return {
         kind: 'channel',
         channel,
-        channelKey: String(channel?.idx || ''),
-        title: channel?.name || '',
+        channelKey: normalizedChannelIdentity || (normalizedChannelIdx >= 0 ? String(normalizedChannelIdx) : ''),
+        reorderKey: helpers.channelDialogOrderKey(channel),
+        title: helpers.displayChannelTitle(channel?.name, normalizedChannelIdx, normalizedChannelIdentity),
         meta: helpers.isPublicChannel(channel) ? t('messages.visibility.public') : t('messages.visibility.private'),
         preview: helpers.formatChannelPreview(channel),
         avatarText: helpers.channelAvatarSymbol(channel),
-        avatarSymbol: helpers.isOfficialPublicChannelName(channel?.name) ? '📣' : '#',
+        avatarSymbol: helpers.channelAvatarSymbol(channel),
         unreadCount: helpers.displayedChannelUnreadCount(channel),
         mentionCount: helpers.displayedChannelMentionCount(channel),
-        rawUnreadCount: Number(unreadSummary.value.channel_unread_counts[String(channel?.idx || '')] || 0),
-        rawMentionCount: Number(unreadSummary.value.channel_mention_counts[String(channel?.idx || '')] || 0),
+        rawUnreadCount: Number(channel?.unread_count ?? (
+          (normalizedChannelIdentity ? unreadSummary.value.channel_unread_counts[normalizedChannelIdentity] : 0)
+          || unreadSummary.value.channel_unread_counts[normalizedChannelIdx >= 0 ? String(normalizedChannelIdx) : '']
+          || 0
+        )),
+        rawMentionCount: Number(channel?.mention_count ?? (
+          (normalizedChannelIdentity ? unreadSummary.value.channel_mention_counts[normalizedChannelIdentity] : 0)
+          || unreadSummary.value.channel_mention_counts[normalizedChannelIdx >= 0 ? String(normalizedChannelIdx) : '']
+          || 0
+        )),
         muteMode,
         muteLabel: muteMode !== 'none' ? helpers.conversationMuteIndicatorLabel(muteMode) : '',
         isProtectedChannel,
-        editLabel: isProtectedChannel ? t('messages.editor.status.publicReadOnly') : t('messages.editor.actions.editChannel'),
+        editLabel: t('messages.editor.actions.editChannel'),
         value: Number(channel?.idx),
       }
     })
@@ -89,8 +123,11 @@ export function useMessagesConversationList(options) {
   const scrollerEntryModels = computed(() => {
     const channelRows = channelScrollerRows.value.map((row) => ({
       ...row,
-      key: `channel:${Number(row.channel?.idx)}`,
-      selected: selectedConversationKind.value === 'channel' && Number(row.channel?.idx) === Number(selectedChannelIdx.value),
+      key: `channel:${String(row.channel?.channel_identity ?? '').trim() || String(row.channel?.idx ?? '')}`,
+      selected: selectedConversationKind.value === 'channel' && (
+        (String(row.channel?.channel_identity || '').trim() && String(row.channel?.channel_identity || '').trim() === String(selectedChannelIdentity?.value || '').trim())
+        || Number(row.channel?.idx) === Number(selectedChannelIdx.value)
+      ),
     }))
     const contactRows = directConversationRows.value.map((row) => ({
       ...row,
@@ -119,12 +156,54 @@ export function useMessagesConversationList(options) {
     return Math.max(56, Number(conversationRowHeightByKey.value[String(entry?.key || '')] || 0) || estimatedRowHeight)
   }
 
+  function getConversationListTotalHeight(items) {
+    return items.reduce((sum, entry) => sum + getMeasuredConversationRowHeight(entry), 0)
+  }
+
   const visibleConversationListWindow = computed(() => {
     const items = conversationListItems.value
+    const viewportHeight = Math.max(0, Number(conversationListViewportHeight.value || 0))
+    if (!items.length || viewportHeight <= 0) {
+      return {
+        items,
+        topPadding: 0,
+        bottomPadding: 0,
+      }
+    }
+
+    const scrollTop = Math.max(0, Number(conversationListScrollTop.value || 0))
+    const overscan = Math.max(0, Number(overscanPx || 0))
+    const visibleTop = Math.max(0, scrollTop - overscan)
+    const visibleBottom = scrollTop + viewportHeight + overscan
+    const totalHeight = getConversationListTotalHeight(items)
+    let topPadding = 0
+    let startIndex = 0
+
+    while (startIndex < items.length) {
+      const rowHeight = getMeasuredConversationRowHeight(items[startIndex])
+      if (topPadding + rowHeight >= visibleTop) {
+        break
+      }
+      topPadding += rowHeight
+      startIndex += 1
+    }
+
+    let endIndex = startIndex
+    let consumedHeight = topPadding
+    while (endIndex < items.length && consumedHeight <= visibleBottom) {
+      consumedHeight += getMeasuredConversationRowHeight(items[endIndex])
+      endIndex += 1
+    }
+
+    if (endIndex < items.length) {
+      endIndex += 1
+      consumedHeight += getMeasuredConversationRowHeight(items[endIndex - 1])
+    }
+
     return {
-      items,
-      topPadding: 0,
-      bottomPadding: 0,
+      items: items.slice(startIndex, endIndex),
+      topPadding,
+      bottomPadding: Math.max(0, totalHeight - consumedHeight),
     }
   })
 
@@ -139,6 +218,9 @@ export function useMessagesConversationList(options) {
 
   function setConversationListScroller(element) {
     conversationListScroller.value = element
+    if (element instanceof HTMLElement) {
+      nextTick(() => updateConversationListMetrics())
+    }
   }
 
   function ensureConversationRowResizeObserver() {
@@ -193,6 +275,7 @@ export function useMessagesConversationList(options) {
 
   return {
     directConversationRows,
+    orderedChannelsSource,
     channelScrollerRows,
     scrollerEntryModels,
     conversationHasEntries,

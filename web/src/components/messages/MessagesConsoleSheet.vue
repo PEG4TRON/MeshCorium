@@ -46,7 +46,6 @@ const filterModel = computed({
           </div>
           <div class="mc-console-header-actions">
             <button
-              v-tooltip="{ content: t('common.save'), theme: 'meshcorium-tooltip', placement: 'left' }"
               class="mc-button mc-button--ghost"
               type="button"
               @click="emit('save')"
@@ -100,7 +99,6 @@ const filterModel = computed({
                 </label>
                 <div class="mc-console-tool-row">
                   <button
-                    v-tooltip="{ content: t('console.live'), theme: 'meshcorium-tooltip' }"
                     class="mc-button mc-button--ghost"
                     :class="{ active: model.autoScroll }"
                     type="button"
@@ -116,7 +114,6 @@ const filterModel = computed({
                     :min-width="210"
                   />
                   <button
-                    v-tooltip="{ content: t('common.clear'), theme: 'meshcorium-tooltip', placement: 'left' }"
                     class="mc-button mc-button--ghost"
                     type="button"
                     @click="emit('clear')"

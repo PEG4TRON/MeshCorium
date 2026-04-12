@@ -6,11 +6,21 @@ import { useRoute, useRouter } from 'vue-router'
 
 import MessagesConfirmSheet from '../components/messages/MessagesConfirmSheet.vue'
 import PluginDropdown from '../components/ui/PluginDropdown.vue'
+import SyncIcon from '../components/ui/SyncIcon.vue'
 import ShellPageFrame from '../components/layout/ShellPageFrame.vue'
 import ShellPhonebar from '../components/layout/ShellPhonebar.vue'
+import {
+  batteryProfileForNode,
+  estimateBatteryPercentFromMillivolts,
+  normalizeBatteryProfile,
+  normalizeBatteryProfileMap,
+  resolveDisplayedBatteryPercent,
+} from '../lib/batteryProfile'
+import { extractValidGeoPoint } from '../lib/geo'
 import { useLocale } from '../composables/useLocale'
 import { logFrontendDiagnostic } from '../lib/frontendDiagnostics'
 import { resolveNodePreviewUrl } from '../lib/nodePreview'
+import { filterStatusTextForTransport } from '../lib/statusText'
 import { useSessionStore } from '../stores/session'
 
 const session = useSessionStore()
@@ -67,7 +77,37 @@ const meshcoreParamsRegionGpsDraft = ref({
 })
 const settingsWorkspaceRef = ref(null)
 const wallpaperFileInput = ref(null)
+const dataTransferFileInput = ref(null)
 const uploadingWallpaper = ref(false)
+const exportingDataTransfer = ref(false)
+const previewingDataTransfer = ref(false)
+const importingDataTransfer = ref(false)
+const syncingMeshcoriumChannels = ref(false)
+const updatingAccessAllMeshcoriumMessages = ref(false)
+const channelSyncProgress = ref({
+  visible: false,
+  operationId: '',
+  operation: 'enable',
+  status: 'idle',
+  phase: '',
+  current: 0,
+  total: 0,
+  channelIdx: -1,
+  channelName: '',
+  attempt: 0,
+  attempts: 0,
+  message: '',
+})
+const dataTransferFileName = ref('')
+const dataTransferPackagePayload = ref(null)
+const dataTransferPreviewPayload = ref(null)
+const dataTransferCategorySelection = useStorage('meshcorium_data_transfer_categories', {
+  contacts: true,
+  channel_dialogs: true,
+  direct_dialogs: true,
+  known_nodes: true,
+  signal_metrics: false,
+})
 const backgroundBlurDraftPx = ref(14)
 const contactDebugPayload = ref(null)
 const contactDebugLoading = ref(false)
@@ -80,10 +120,26 @@ const nodeCompanionSaving = ref(false)
 const nodeCompanionSyncingTime = ref(false)
 const nodeCompanionRefreshingContacts = ref(false)
 const nodeCompanionSendingAdvert = ref(false)
+const nodeCompanionBatteryProfileSaving = ref(false)
+const nodeCompanionPortsRefreshing = ref(false)
 const nodeCompanionListenerSource = ref(null)
+const channelSyncProgressSource = ref(null)
 const signalMetricsPayload = ref(null)
 const signalMetricsLoading = ref(false)
 const signalMetricsHoverIndex = ref(-1)
+const batteryHistoryPayload = ref(null)
+const batteryHistoryLoading = ref(false)
+const batteryHistoryRangePreset = useStorage('meshcorium_battery_history_range_preset', '1d')
+const batteryHistoryCustomStart = useStorage('meshcorium_battery_history_custom_start', '')
+const batteryHistoryCustomEnd = useStorage('meshcorium_battery_history_custom_end', '')
+const batteryHistoryDensityDraft = useStorage('meshcorium_battery_history_density', '')
+const batteryHistoryShowSunlight = useStorage('meshcorium_battery_history_show_sunlight', false)
+const batteryHistoryStartInputRef = ref(null)
+const batteryHistoryEndInputRef = ref(null)
+const nodeBatteryProfileModeDraft = ref('preset')
+const nodeBatteryChemistryDraft = ref('nmc')
+const nodeBatteryMinMvDraft = ref(3000)
+const nodeBatteryMaxMvDraft = ref(4200)
 const signalMetricsRangeSeconds = useStorage('meshcorium_signal_metrics_range_seconds', 86400)
 const signalMetricsShowSnr = useStorage('meshcorium_signal_metrics_show_snr', true)
 const signalMetricsShowNoise = useStorage('meshcorium_signal_metrics_show_noise', true)
@@ -101,6 +157,7 @@ const nodeCompanionSwitchTiming = ref({
 })
 let signalMetricsLiveTimer = null
 let clearMessageDbUnlockTimer = null
+let nodeCompanionListenerKey = ''
 const confirmDialog = ref({
   open: false,
   title: '',
@@ -120,24 +177,42 @@ const chatBackgroundPresetOptions = [
   { value: 'chat-backplane-blue', labelKey: 'settings.meshcorium.chatBackground.options.blue' },
 ]
 const baudrateOptions = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600]
+const meshcoreRadioBandwidthCatalog = Object.freeze([
+  { value: 7.8, label: '7.8 kHz' },
+  { value: 10.4, label: '10.4 kHz' },
+  { value: 15.6, label: '15.6 kHz' },
+  { value: 20.8, label: '20.8 kHz' },
+  { value: 31.25, label: '31.25 kHz' },
+  { value: 41.7, label: '41.7 kHz' },
+  { value: 62.5, label: '62.5 kHz' },
+  { value: 125, label: '125 kHz' },
+  { value: 250, label: '250 kHz' },
+  { value: 500, label: '500 kHz' },
+])
+const meshcoreRadioPresetCatalog = [
+  { id: 'australia', label: 'Australia', freqMhz: 915.8, bwKhz: 250, sf: 10, cr: 5, txPowerDbm: 20 },
+  { id: 'australia-narrow', label: 'Australia (Narrow)', freqMhz: 916.575, bwKhz: 62.5, sf: 7, cr: 5, txPowerDbm: 20 },
+  { id: 'australia-sa-wa-qld', label: 'Australia SA, WA, QLD', freqMhz: 923.125, bwKhz: 62.5, sf: 8, cr: 5, txPowerDbm: 20 },
+  { id: 'czech-republic', label: 'Czech Republic', freqMhz: 869.432, bwKhz: 62.5, sf: 7, cr: 5, txPowerDbm: 14 },
+  { id: 'eu-433', label: 'EU 433MHz', freqMhz: 433.65, bwKhz: 250, sf: 11, cr: 5, txPowerDbm: 20 },
+  { id: 'eu-uk-long-range', label: 'EU/UK (Long Range)', freqMhz: 869.525, bwKhz: 250, sf: 11, cr: 5, txPowerDbm: 14 },
+  { id: 'eu-uk-medium-range', label: 'EU/UK (Medium Range)', freqMhz: 869.525, bwKhz: 250, sf: 10, cr: 5, txPowerDbm: 14 },
+  { id: 'eu-uk-narrow', label: 'EU/UK (Narrow)', freqMhz: 869.618, bwKhz: 62.5, sf: 8, cr: 5, txPowerDbm: 14 },
+  { id: 'new-zealand', label: 'New Zealand', freqMhz: 917.375, bwKhz: 250, sf: 11, cr: 5, txPowerDbm: 20 },
+  { id: 'new-zealand-narrow', label: 'New Zealand (Narrow)', freqMhz: 917.375, bwKhz: 62.5, sf: 7, cr: 5, txPowerDbm: 20 },
+  { id: 'portugal-433', label: 'Portugal 433', freqMhz: 433.375, bwKhz: 62.5, sf: 9, cr: 5, txPowerDbm: 20 },
+  { id: 'portugal-869', label: 'Portugal 869', freqMhz: 869.618, bwKhz: 62.5, sf: 7, cr: 5, txPowerDbm: 14 },
+  { id: 'russia', label: 'Russia', freqMhz: 868.731018, bwKhz: 62.5, sf: 7, cr: 7, txPowerDbm: 14, useNodeMaxTxPower: true },
+  { id: 'switzerland', label: 'Switzerland', freqMhz: 869.618, bwKhz: 62.5, sf: 8, cr: 5, txPowerDbm: 14 },
+  { id: 'usa-arizona', label: 'USA Arizona', freqMhz: 908.205, bwKhz: 62.5, sf: 10, cr: 5, txPowerDbm: 20 },
+  { id: 'usa-canada', label: 'USA/Canada', freqMhz: 910.525, bwKhz: 62.5, sf: 7, cr: 5, txPowerDbm: 20 },
+  { id: 'vietnam', label: 'Vietnam', freqMhz: 920.25, bwKhz: 250, sf: 11, cr: 5, txPowerDbm: 20 },
+  { id: 'off-grid-433', label: 'Off-Grid 433', freqMhz: 433, bwKhz: 250, sf: 11, cr: 5, txPowerDbm: 20 },
+  { id: 'off-grid-869', label: 'Off-Grid 869', freqMhz: 869, bwKhz: 250, sf: 11, cr: 5, txPowerDbm: 14 },
+  { id: 'off-grid-918', label: 'Off-Grid 918', freqMhz: 918, bwKhz: 250, sf: 11, cr: 5, txPowerDbm: 20 },
+]
 const meshcoriumBrandLogoUrl = '/icons/Meshcorium3.png'
 const meshcoriumDisplayVersion = 'v0.5.3'
-
-function getBatteryPercentage(millivolts) {
-  const numeric = Number(millivolts)
-  if (!Number.isFinite(numeric) || numeric <= 0) {
-    return null
-  }
-  const minVoltage = 3300
-  const maxVoltage = 4150
-  if (numeric <= minVoltage) {
-    return 0
-  }
-  if (numeric >= maxVoltage) {
-    return 100
-  }
-  return Math.floor(((numeric - minVoltage) / (maxVoltage - minVoltage)) * 100)
-}
 
 function formatJsonPayload(value) {
   return JSON.stringify(value ?? null, null, 2)
@@ -190,6 +265,94 @@ function formatDurationCompact(totalSeconds) {
   }
   return parts.join(' ')
 }
+
+function formatMeshcoreRadioPresetNumber(value, maxFractionDigits = 3) {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) {
+    return ''
+  }
+  return numeric.toFixed(maxFractionDigits).replace(/\.?0+$/, '')
+}
+
+function normalizeMeshcoreRadioDraftNumber(value, { integer = false } = {}) {
+  if (value == null) {
+    return null
+  }
+  const normalized = typeof value === 'string' ? value.trim() : value
+  if (normalized === '') {
+    return null
+  }
+  const parsed = integer ? Number.parseInt(normalized, 10) : Number(normalized)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function toMeshcoreRadioUiCrValue(value) {
+  const parsed = normalizeMeshcoreRadioDraftNumber(value, { integer: true })
+  if (parsed == null) {
+    return 5
+  }
+  return parsed <= 4 ? parsed + 4 : parsed
+}
+
+function toMeshcoreRadioDeviceCrValue(uiValue, currentDeviceCr) {
+  const parsedUi = normalizeMeshcoreRadioDraftNumber(uiValue, { integer: true })
+  if (parsedUi == null) {
+    return 5
+  }
+  const parsedCurrent = normalizeMeshcoreRadioDraftNumber(currentDeviceCr, { integer: true })
+  if (parsedCurrent != null && parsedCurrent <= 4) {
+    return parsedUi - 4
+  }
+  return parsedUi
+}
+
+function normalizeMeshcoreBandwidthOptionValue(value) {
+  const parsed = normalizeMeshcoreRadioDraftNumber(value)
+  if (parsed == null) {
+    return null
+  }
+  const matched = meshcoreRadioBandwidthCatalog.find((option) => Math.abs(parsed - option.value) < 0.001)
+  return matched?.value ?? parsed
+}
+
+function meshcoreRadioPresetMatches(preset, draft) {
+  const freqMhz = normalizeMeshcoreRadioDraftNumber(draft?.freq_mhz)
+  const bwKhz = normalizeMeshcoreBandwidthOptionValue(draft?.bw_khz)
+  const sf = normalizeMeshcoreRadioDraftNumber(draft?.sf, { integer: true })
+  const cr = toMeshcoreRadioUiCrValue(draft?.cr)
+  const txPowerDbm = normalizeMeshcoreRadioDraftNumber(draft?.tx_power_dbm, { integer: true })
+  const expectedTxPowerDbm = resolveMeshcoreRadioPresetTxPower(preset)
+  if ([freqMhz, bwKhz, sf, cr, txPowerDbm].some((value) => value == null)) {
+    return false
+  }
+  return Math.abs(freqMhz - preset.freqMhz) < 0.001
+    && Math.abs(bwKhz - preset.bwKhz) < 0.001
+    && sf === preset.sf
+    && cr === preset.cr
+    && txPowerDbm === expectedTxPowerDbm
+}
+
+const meshcoreRadioSelectedPresetId = computed(() => {
+  const matchedPreset = meshcoreRadioPresetCatalog.find((preset) => meshcoreRadioPresetMatches(preset, meshcoreParamsRadioDraft.value))
+  return matchedPreset?.id || '__custom__'
+})
+
+const meshcoreRadioPresetOptions = computed(() => {
+  const customLabel = t('settings.nodeCompanion.meshcoreParams.fields.radioPresetCustom')
+  return [
+    {
+      value: '__custom__',
+      label: customLabel,
+      triggerLabel: customLabel,
+    },
+    ...meshcoreRadioPresetCatalog.map((preset) => ({
+      value: preset.id,
+      label: preset.label,
+      triggerLabel: preset.label,
+      meta: `${formatMeshcoreRadioPresetNumber(preset.freqMhz)} MHz · ${formatMeshcoreRadioPresetNumber(preset.bwKhz)} kHz · SF${preset.sf} · 4/${preset.cr} · ${resolveMeshcoreRadioPresetTxPowerLabel(preset)}`,
+    })),
+  ]
+})
 
 function resolveSettingsOptionLabel(options, value) {
   const numericValue = Number(value)
@@ -247,6 +410,10 @@ const serviceStatusCopy = computed(() => {
   return t('settings.status.disconnected')
 })
 
+const scrollerFooterStatus = computed(() => {
+  return filterStatusTextForTransport(session.statusText, session.selectedTransportType) || serviceStatusCopy.value
+})
+
 const isDebugSettingsMode = computed(() => activeSettingsSectionId.value === 'debug')
 const isNodeCompanionSettingsMode = computed(() => activeSettingsSectionId.value === 'node')
 const isMeshcoreParamsSettingsMode = computed(() => (
@@ -279,6 +446,11 @@ const nodeCompanionSections = computed(() => {
       id: 'connection',
       title: t('settings.nodeCompanion.sections.connection.title'),
       subtitle: t('settings.nodeCompanion.sections.connection.subtitle'),
+    },
+    {
+      id: 'battery',
+      title: t('settings.nodeCompanion.sections.battery.title'),
+      subtitle: t('settings.nodeCompanion.sections.battery.subtitle'),
     },
     {
       id: 'meshcore-params',
@@ -361,6 +533,9 @@ const activeNodeCompanionSectionTitle = computed(() => {
   if (activeNodeCompanionSectionId.value === 'connection') {
     return t('settings.nodeCompanion.sections.connection.title')
   }
+  if (activeNodeCompanionSectionId.value === 'battery') {
+    return t('settings.nodeCompanion.sections.battery.title')
+  }
   return activeNodeCompanionSectionId.value === 'signal-metrics'
     ? t('settings.nodeCompanion.sections.signalMetrics.title')
     : t('settings.nodeCompanion.sections.general.title')
@@ -372,6 +547,9 @@ const activeNodeCompanionSectionSubtitle = computed(() => {
   }
   if (activeNodeCompanionSectionId.value === 'connection') {
     return t('settings.nodeCompanion.sections.connection.subtitle')
+  }
+  if (activeNodeCompanionSectionId.value === 'battery') {
+    return t('settings.nodeCompanion.sections.battery.subtitle')
   }
   return activeNodeCompanionSectionId.value === 'signal-metrics'
     ? t('settings.nodeCompanion.sections.signalMetrics.subtitle')
@@ -405,28 +583,40 @@ function meshcoreParamsTranslationGroupId(sectionId) {
 const batteryDebugPayload = computed(() => {
   const telemetry = session.selfTelemetry || {}
   const batteryInfo = session.batteryInfo || {}
+  const activeProfile = session.currentNodeBatteryProfile
   const batteryMv = telemetry?.battery_mv == null ? null : Number(telemetry.battery_mv)
   const voltage = telemetry?.voltage == null ? null : Number(telemetry.voltage)
   const telemetryPercent = telemetry?.battery_percent == null
     ? null
     : Math.max(0, Math.min(100, Number(telemetry.battery_percent)))
-  const infoLevel = batteryInfo?.level == null
+  const infoBatteryMv = batteryInfo?.battery_mv == null
     ? null
-    : Math.max(0, Math.min(100, Number(batteryInfo.level)))
-  const fallbackPercent = batteryMv == null ? null : getBatteryPercentage(batteryMv)
-  const displayedPercent = telemetryPercent == null
-    ? (infoLevel == null ? fallbackPercent : infoLevel)
-    : telemetryPercent
+    : Number(batteryInfo.battery_mv)
+  const infoPercent = batteryInfo?.battery_percent == null
+    ? null
+    : Math.max(0, Math.min(100, Number(batteryInfo.battery_percent)))
+  const fallbackPercent = batteryMv == null ? null : resolveDisplayedBatteryPercent({
+    telemetry: { battery_mv: batteryMv },
+    batteryInfo: {},
+    profile: activeProfile,
+  })
+  const displayedPercent = resolveDisplayedBatteryPercent({
+    telemetry,
+    batteryInfo,
+    profile: activeProfile,
+  })
   const displayedVoltage = voltage == null ? null : Number(voltage.toFixed(3))
   return {
     connected: session.connected,
+    battery_profile: activeProfile,
     telemetry: {
       battery_mv: batteryMv,
       voltage,
       battery_percent: telemetryPercent,
     },
     battery_info: {
-      level: infoLevel,
+      battery_mv: infoBatteryMv,
+      battery_percent: infoPercent,
       used_kb: batteryInfo?.used_kb ?? null,
       total_kb: batteryInfo?.total_kb ?? null,
     },
@@ -525,9 +715,11 @@ const nodeCompanionChannelSummary = computed(() => {
 const nodeCompanionStatusSummary = computed(() => {
   const uptimeSecs = session.radioStats?.uptime_secs ?? session.selfTelemetry?.uptime_secs ?? null
   const uptimeLabel = formatDurationCompact(uptimeSecs)
-  const batteryLevel = session.batteryInfo?.level == null
-    ? (session.selfTelemetry?.battery_mv == null ? null : getBatteryPercentage(session.selfTelemetry.battery_mv))
-    : Math.max(0, Math.min(100, Number(session.batteryInfo.level)))
+  const batteryLevel = resolveDisplayedBatteryPercent({
+    telemetry: session.selfTelemetry || {},
+    batteryInfo: session.batteryInfo || {},
+    profile: session.currentNodeBatteryProfile,
+  })
   return batteryLevel == null ? `${uptimeLabel}; ${t('common.na')}` : `${uptimeLabel}; ${batteryLevel}%`
 })
 
@@ -593,6 +785,170 @@ const startupProfileOptions = computed(() => {
 const startupUseLastSuccessful = computed(() => Boolean(session.settingsPayload?.settings?.startup_use_last_successful))
 const autoConnectOnServiceStart = computed(() => Boolean(session.settingsPayload?.settings?.auto_connect_on_service_start))
 const accessAllMeshcoriumContacts = computed(() => Boolean(session.settingsPayload?.settings?.access_all_meshcorium_contacts !== false))
+const accessAllMeshcoriumMessages = computed(() => Boolean(session.settingsPayload?.settings?.access_all_meshcorium_messages !== false))
+const accessAllMeshcoriumChannels = computed(() => {
+  const channels = Array.isArray(session.channels) ? session.channels : []
+  return channels.some((channel) => Boolean(channel?.access_all_messages_enabled))
+})
+const nodeBatteryProfileNodeId = computed(() => String(session.selfPublicKey || '').trim().toLowerCase())
+const nodeBatteryProfilesByNodeId = computed(() => normalizeBatteryProfileMap(session.settingsPayload?.settings?.battery_profile_by_node_id))
+const currentNodeBatteryProfile = computed(() => batteryProfileForNode(session.settingsPayload?.settings, nodeBatteryProfileNodeId.value))
+const batteryChemistryOptions = computed(() => ([
+  { value: 'nmc', label: t('settings.nodeCompanion.batteryProfile.chemistryOptions.nmc') },
+  { value: 'lipo', label: t('settings.nodeCompanion.batteryProfile.chemistryOptions.lipo') },
+  { value: 'lifepo4', label: t('settings.nodeCompanion.batteryProfile.chemistryOptions.lifepo4') },
+]))
+const batteryHistoryRangeOptions = computed(() => ([
+  { value: '6h', label: t('settings.nodeCompanion.batteryGraph.rangeOptions.hours6') },
+  { value: '12h', label: t('settings.nodeCompanion.batteryGraph.rangeOptions.hours12') },
+  { value: '1d', label: t('settings.nodeCompanion.batteryGraph.rangeOptions.day1') },
+  { value: '1w', label: t('settings.nodeCompanion.batteryGraph.rangeOptions.week1') },
+  { value: '1m', label: t('settings.nodeCompanion.batteryGraph.rangeOptions.month1') },
+  { value: 'custom', label: t('settings.nodeCompanion.batteryGraph.rangeOptions.custom') },
+]))
+const batteryHistoryRetentionDays = computed(() => {
+  const value = Number(session.settingsPayload?.settings?.battery_history_retention_days || 30) || 30
+  return [7, 30, 90, 180, 365].includes(value) ? value : 30
+})
+const batteryHistoryRetentionOptions = computed(() => ([
+  { value: 7, label: t('settings.nodeCompanion.batteryGraph.retentionOptions.days7') },
+  { value: 30, label: t('settings.nodeCompanion.batteryGraph.retentionOptions.month1') },
+  { value: 90, label: t('settings.nodeCompanion.batteryGraph.retentionOptions.month3') },
+  { value: 180, label: t('settings.nodeCompanion.batteryGraph.retentionOptions.month6') },
+  { value: 365, label: t('settings.nodeCompanion.batteryGraph.retentionOptions.year1') },
+]))
+const nodeBatteryEffectiveRange = computed(() => {
+  const normalized = normalizeBatteryProfile({
+    mode: nodeBatteryProfileModeDraft.value,
+    chemistry: nodeBatteryChemistryDraft.value,
+    min_mv: nodeBatteryMinMvDraft.value,
+    max_mv: nodeBatteryMaxMvDraft.value,
+  })
+  return `${normalized.min_mv}-${normalized.max_mv} mV`
+})
+const batteryHistoryUsingCustomRange = computed(() => batteryHistoryRangePreset.value === 'custom')
+const batteryHistoryNodeGeoPoint = computed(() => {
+  const point = extractValidGeoPoint({
+    lat: session.self?.lat,
+    lon: session.self?.lon,
+  })
+  if (!point) {
+    return null
+  }
+  if (Math.abs(Number(point.lat || 0)) < 1e-9 && Math.abs(Number(point.lon || 0)) < 1e-9) {
+    return null
+  }
+  return point
+})
+const batteryHistorySunlightAvailable = computed(() => Boolean(batteryHistoryNodeGeoPoint.value))
+const batteryHistorySunlightSubtitle = computed(() => (
+  batteryHistorySunlightAvailable.value
+    ? t('settings.nodeCompanion.batteryGraph.sunlightSubtitle')
+    : t('settings.nodeCompanion.batteryGraph.sunlightUnavailable')
+))
+
+function defaultBatteryHistoryDensityValue() {
+  if (batteryHistoryUsingCustomRange.value) {
+    const startAt = fromDateTimeLocalValue(batteryHistoryCustomStart.value)
+    const endAt = fromDateTimeLocalValue(batteryHistoryCustomEnd.value)
+    if (startAt != null && endAt != null && (endAt - startAt) >= (30 * 86400)) {
+      return 50
+    }
+    return 100
+  }
+  return batteryHistoryRangePreset.value === '1m' ? 50 : 100
+}
+
+const batteryHistoryDensityValue = computed(() => {
+  const numeric = Number(batteryHistoryDensityDraft.value)
+  if (Number.isFinite(numeric)) {
+    return Math.max(0, Math.min(100, Math.round(numeric)))
+  }
+  return defaultBatteryHistoryDensityValue()
+})
+
+function batteryHistoryPresetToSeconds(preset) {
+  if (preset === '6h') return 6 * 3600
+  if (preset === '12h') return 12 * 3600
+  if (preset === '1w') return 7 * 86400
+  if (preset === '1m') return 30 * 86400
+  return 86400
+}
+
+function toDateTimeLocalValue(epochSeconds) {
+  const numeric = Number(epochSeconds || 0)
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return ''
+  }
+  const date = new Date(numeric * 1000)
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  return `${year}-${month}-${day}T${hours}:${minutes}`
+}
+
+function fromDateTimeLocalValue(value) {
+  const normalized = String(value || '').trim()
+  if (!normalized) {
+    return null
+  }
+  const timestamp = Date.parse(normalized)
+  if (!Number.isFinite(timestamp)) {
+    return null
+  }
+  return Math.floor(timestamp / 1000)
+}
+
+function formatBatteryHistoryDateLabel(value) {
+  const epochSeconds = fromDateTimeLocalValue(value)
+  if (!epochSeconds) {
+    return t('settings.nodeCompanion.batteryGraph.pickDate')
+  }
+  const locale = String(activeLocale.value || 'en').toLowerCase().startsWith('ru') ? 'ru-RU' : 'en-US'
+  return new Date(epochSeconds * 1000).toLocaleString(locale, {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+const channelSyncProgressPercent = computed(() => {
+  const total = Number(channelSyncProgress.value.total || 0)
+  if (total <= 0) {
+    return channelSyncProgress.value.visible ? 8 : 0
+  }
+  const current = Math.max(0, Number(channelSyncProgress.value.current || 0))
+  return Math.max(4, Math.min(100, Math.round((current / total) * 100)))
+})
+const channelSyncProgressText = computed(() => {
+  const progress = channelSyncProgress.value
+  const channelName = String(progress.channelName || '').trim()
+  const channelLabel = channelName || (Number(progress.channelIdx || -1) >= 0 ? `IDX ${progress.channelIdx}` : '')
+  const key = `settings.meshcorium.channelSync.progress.${progress.status || 'progress'}`
+  const fallbackKey = progress.operation === 'disable'
+    ? 'settings.meshcorium.channelSync.progress.removing'
+    : 'settings.meshcorium.channelSync.progress.adding'
+  return t(key, {
+    channel: channelLabel,
+    idx: Number(progress.channelIdx || 0),
+    current: Number(progress.current || 0),
+    total: Number(progress.total || 0),
+    attempt: Number(progress.attempt || 0),
+    attempts: Number(progress.attempts || 0),
+    message: String(progress.message || ''),
+  }, t(fallbackKey, {
+    channel: channelLabel,
+    idx: Number(progress.channelIdx || 0),
+    current: Number(progress.current || 0),
+    total: Number(progress.total || 0),
+    attempt: Number(progress.attempt || 0),
+    attempts: Number(progress.attempts || 0),
+    message: String(progress.message || ''),
+  }))
+})
 const selectedStartupConnectionKey = computed(() => String(session.settingsPayload?.settings?.startup_connection_key || ''))
 const regularNotificationSoundFile = computed(() => String(session.settingsPayload?.settings?.notification_regular_sound_file || ''))
 const mentionNotificationSoundFile = computed(() => String(session.settingsPayload?.settings?.notification_mention_sound_file || ''))
@@ -857,6 +1213,24 @@ const meshcoreParamsCapabilities = computed(() => meshcoreParamsPayload.value?.c
 const meshcoreParamsCompanionCliRescueOnly = computed(() => Boolean(meshcoreParamsCapabilities.value?.companion_cli_rescue_physical_only))
 const meshcoreParamsConstraints = computed(() => meshcoreParamsPayload.value?.constraints || {})
 const meshcoreParamsRadioConstraints = computed(() => meshcoreParamsConstraints.value?.radio || {})
+const meshcoreCurrentRadioUiCr = computed(() => toMeshcoreRadioUiCrValue(meshcoreParamsRadio.value?.cr))
+const meshcoreRadioBandwidthOptions = computed(() => {
+  const optionMap = new Map(meshcoreRadioBandwidthCatalog.map((option) => [String(option.value), option]))
+  for (const candidate of [meshcoreParamsRadio.value?.bw_khz, meshcoreParamsRadioDraft.value?.bw_khz]) {
+    const normalized = normalizeMeshcoreBandwidthOptionValue(candidate)
+    if (normalized == null) {
+      continue
+    }
+    const key = String(normalized)
+    if (!optionMap.has(key)) {
+      optionMap.set(key, {
+        value: normalized,
+        label: `${formatMeshcoreRadioPresetNumber(normalized)} kHz`,
+      })
+    }
+  }
+  return Array.from(optionMap.values()).sort((left, right) => Number(left.value) - Number(right.value))
+})
 const meshcoreParamsIdentityConstraints = computed(() => meshcoreParamsConstraints.value?.identity || {})
 const meshcoreParamsRoutingConstraints = computed(() => meshcoreParamsConstraints.value?.routing || {})
 const meshcoreParamsSecurityConstraints = computed(() => meshcoreParamsConstraints.value?.security || {})
@@ -970,6 +1344,40 @@ function setOptionalNumberField(target, key, value, { integer = false } = {}) {
   target[key] = parsed
 }
 
+function resolveMeshcoreRadioPresetTxPower(preset) {
+  if (preset?.useNodeMaxTxPower) {
+    return Number(meshcoreParamsRadio.value?.max_tx_power || preset?.txPowerDbm || 14)
+  }
+  return Number(preset?.txPowerDbm || 0)
+}
+
+function resolveMeshcoreRadioPresetTxPowerLabel(preset) {
+  const txPowerDbm = resolveMeshcoreRadioPresetTxPower(preset)
+  if (preset?.useNodeMaxTxPower && meshcoreParamsRadio.value?.max_tx_power != null) {
+    return `${txPowerDbm} dBm max`
+  }
+  return `${txPowerDbm} dBm`
+}
+
+function applyMeshcoreRadioPreset(presetId) {
+  const normalizedPresetId = String(presetId || '').trim()
+  if (!normalizedPresetId || normalizedPresetId === '__custom__') {
+    return
+  }
+  const preset = meshcoreRadioPresetCatalog.find((entry) => entry.id === normalizedPresetId)
+  if (!preset) {
+    return
+  }
+  meshcoreParamsRadioDraft.value = {
+    ...meshcoreParamsRadioDraft.value,
+    freq_mhz: formatMeshcoreRadioPresetNumber(preset.freqMhz),
+    bw_khz: normalizeMeshcoreBandwidthOptionValue(preset.bwKhz) ?? formatMeshcoreRadioPresetNumber(preset.bwKhz),
+    sf: preset.sf,
+    cr: preset.cr,
+    tx_power_dbm: String(resolveMeshcoreRadioPresetTxPower(preset)),
+  }
+}
+
 function resetMeshcoreParamsDrafts() {
   meshcoreParamsRadioDraft.value = {
     freq_mhz: '',
@@ -1019,9 +1427,9 @@ function populateMeshcoreParamsDrafts(payload) {
   const regionGps = payload?.region_gps || {}
   meshcoreParamsRadioDraft.value = {
     freq_mhz: radio?.freq_mhz ?? '',
-    bw_khz: radio?.bw_khz ?? '',
+    bw_khz: normalizeMeshcoreBandwidthOptionValue(radio?.bw_khz) ?? '',
     sf: Number(radio?.sf || 7) || 7,
-    cr: Number(radio?.cr || 5) || 5,
+    cr: toMeshcoreRadioUiCrValue(radio?.cr),
     tx_power_dbm: radio?.tx_power_dbm ?? '',
     client_repeat: Boolean(radio?.client_repeat),
   }
@@ -1057,6 +1465,14 @@ function populateMeshcoreParamsDrafts(payload) {
 }
 
 async function loadMeshcoreParams({ silent = false } = {}) {
+  if (!session.connected || !session.sessionSnapshot?.active) {
+    meshcoreParamsPayload.value = null
+    resetMeshcoreParamsDrafts()
+    if (!silent) {
+      session.setStatus(t('settings.nodeCompanion.status.connectionRequired'), true)
+    }
+    return null
+  }
   const config = buildNodeCompanionConfig()
   if (!config) {
     meshcoreParamsPayload.value = null
@@ -1126,14 +1542,47 @@ async function applyMeshcoreParamsGroup(group, patch) {
 }
 
 async function applyMeshcoreRadioParams() {
-  const patch = {
-    client_repeat: Boolean(meshcoreParamsRadioDraft.value.client_repeat),
-    sf: Number(meshcoreParamsRadioDraft.value.sf),
-    cr: Number(meshcoreParamsRadioDraft.value.cr),
+  const patch = {}
+  const currentRadio = meshcoreParamsRadio.value || {}
+  const nextFreqMhz = normalizeMeshcoreRadioDraftNumber(meshcoreParamsRadioDraft.value.freq_mhz)
+  const currentFreqMhz = normalizeMeshcoreRadioDraftNumber(currentRadio?.freq_mhz)
+  const nextBwKhz = normalizeMeshcoreBandwidthOptionValue(meshcoreParamsRadioDraft.value.bw_khz)
+  const currentBwKhz = normalizeMeshcoreBandwidthOptionValue(currentRadio?.bw_khz)
+  const nextSf = normalizeMeshcoreRadioDraftNumber(meshcoreParamsRadioDraft.value.sf, { integer: true })
+  const currentSf = normalizeMeshcoreRadioDraftNumber(currentRadio?.sf, { integer: true })
+  const nextCrUi = toMeshcoreRadioUiCrValue(meshcoreParamsRadioDraft.value.cr)
+  const currentCrUi = meshcoreCurrentRadioUiCr.value
+  const nextClientRepeat = Boolean(meshcoreParamsRadioDraft.value.client_repeat)
+  const currentClientRepeat = Boolean(currentRadio?.client_repeat)
+  const radioTupleChanged = (
+    (nextFreqMhz != null && currentFreqMhz != null && Math.abs(nextFreqMhz - currentFreqMhz) >= 0.001)
+    || nextBwKhz !== currentBwKhz
+    || nextSf !== currentSf
+    || nextCrUi !== currentCrUi
+    || nextClientRepeat !== currentClientRepeat
+  )
+  if (radioTupleChanged) {
+    if (nextFreqMhz != null) {
+      patch.freq_mhz = nextFreqMhz
+    }
+    if (nextBwKhz != null) {
+      patch.bw_khz = nextBwKhz
+    }
+    if (nextSf != null) {
+      patch.sf = nextSf
+    }
+    patch.cr = nextCrUi
+    patch.client_repeat = nextClientRepeat
   }
-  setOptionalNumberField(patch, 'freq_mhz', meshcoreParamsRadioDraft.value.freq_mhz)
-  setOptionalNumberField(patch, 'bw_khz', meshcoreParamsRadioDraft.value.bw_khz)
-  setOptionalNumberField(patch, 'tx_power_dbm', meshcoreParamsRadioDraft.value.tx_power_dbm, { integer: true })
+  const nextTxPowerDbm = normalizeMeshcoreRadioDraftNumber(meshcoreParamsRadioDraft.value.tx_power_dbm, { integer: true })
+  const currentTxPowerDbm = normalizeMeshcoreRadioDraftNumber(currentRadio?.tx_power_dbm, { integer: true })
+  if (nextTxPowerDbm != null && nextTxPowerDbm !== currentTxPowerDbm) {
+    patch.tx_power_dbm = nextTxPowerDbm
+  }
+  if (!Object.keys(patch).length) {
+    session.setStatus(t('settings.status.noChanges'))
+    return null
+  }
   await applyMeshcoreParamsGroup('radio', patch)
 }
 
@@ -1147,22 +1596,101 @@ async function applyMeshcoreIdentityParams() {
 }
 
 async function applyMeshcoreRoutingParams() {
-  const patch = {
-    multi_acks: Number(meshcoreParamsRoutingDraft.value.multi_acks),
-    manual_add_only: Boolean(meshcoreParamsRoutingDraft.value.manual_add_only),
-    telemetry_mode_base: Number(meshcoreParamsRoutingDraft.value.telemetry_mode_base),
-    telemetry_mode_loc: Number(meshcoreParamsRoutingDraft.value.telemetry_mode_loc),
-    telemetry_mode_env: Number(meshcoreParamsRoutingDraft.value.telemetry_mode_env),
-    path_hash_mode: Number(meshcoreParamsRoutingDraft.value.path_hash_mode),
-    autoadd_overwrite_oldest: Boolean(meshcoreParamsRoutingDraft.value.autoadd_overwrite_oldest),
-    autoadd_chat: Boolean(meshcoreParamsRoutingDraft.value.autoadd_chat),
-    autoadd_repeater: Boolean(meshcoreParamsRoutingDraft.value.autoadd_repeater),
-    autoadd_room_server: Boolean(meshcoreParamsRoutingDraft.value.autoadd_room_server),
-    autoadd_sensor: Boolean(meshcoreParamsRoutingDraft.value.autoadd_sensor),
+  const patch = {}
+  const currentRouting = meshcoreParamsRouting.value || {}
+  const currentTelemetry = currentRouting?.telemetry_modes || {}
+
+  const nextMultiAcks = normalizeMeshcoreRadioDraftNumber(meshcoreParamsRoutingDraft.value.multi_acks, { integer: true })
+  const currentMultiAcks = normalizeMeshcoreRadioDraftNumber(currentRouting?.multi_acks, { integer: true })
+  if (nextMultiAcks != null && nextMultiAcks !== currentMultiAcks) {
+    patch.multi_acks = nextMultiAcks
   }
-  setOptionalNumberField(patch, 'rx_delay_base', meshcoreParamsRoutingDraft.value.rx_delay_base)
-  setOptionalNumberField(patch, 'airtime_factor', meshcoreParamsRoutingDraft.value.airtime_factor)
-  setOptionalNumberField(patch, 'autoadd_max_hops', meshcoreParamsRoutingDraft.value.autoadd_max_hops, { integer: true })
+
+  const nextManualAddOnly = Boolean(meshcoreParamsRoutingDraft.value.manual_add_only)
+  const currentManualAddOnly = Boolean(currentRouting?.manual_add_only)
+  if (nextManualAddOnly !== currentManualAddOnly) {
+    patch.manual_add_only = nextManualAddOnly
+  }
+
+  const nextTelemetryBase = Number(meshcoreParamsRoutingDraft.value.telemetry_mode_base)
+  const currentTelemetryBase = Number(currentTelemetry?.base || 0)
+  if (nextTelemetryBase !== currentTelemetryBase) {
+    patch.telemetry_mode_base = nextTelemetryBase
+  }
+
+  const nextTelemetryLoc = Number(meshcoreParamsRoutingDraft.value.telemetry_mode_loc)
+  const currentTelemetryLoc = Number(currentTelemetry?.location || 0)
+  if (nextTelemetryLoc !== currentTelemetryLoc) {
+    patch.telemetry_mode_loc = nextTelemetryLoc
+  }
+
+  const nextTelemetryEnv = Number(meshcoreParamsRoutingDraft.value.telemetry_mode_env)
+  const currentTelemetryEnv = Number(currentTelemetry?.environment || 0)
+  if (nextTelemetryEnv !== currentTelemetryEnv) {
+    patch.telemetry_mode_env = nextTelemetryEnv
+  }
+
+  const nextPathHashMode = Number(meshcoreParamsRoutingDraft.value.path_hash_mode)
+  const currentPathHashMode = Number(currentRouting?.path_hash_mode || 0)
+  if (nextPathHashMode !== currentPathHashMode) {
+    patch.path_hash_mode = nextPathHashMode
+  }
+
+  const nextAutoaddOverwriteOldest = Boolean(meshcoreParamsRoutingDraft.value.autoadd_overwrite_oldest)
+  if (nextAutoaddOverwriteOldest !== Boolean(currentRouting?.autoadd_overwrite_oldest)) {
+    patch.autoadd_overwrite_oldest = nextAutoaddOverwriteOldest
+  }
+
+  const nextAutoaddChat = Boolean(meshcoreParamsRoutingDraft.value.autoadd_chat)
+  if (nextAutoaddChat !== Boolean(currentRouting?.autoadd_chat)) {
+    patch.autoadd_chat = nextAutoaddChat
+  }
+
+  const nextAutoaddRepeater = Boolean(meshcoreParamsRoutingDraft.value.autoadd_repeater)
+  if (nextAutoaddRepeater !== Boolean(currentRouting?.autoadd_repeater)) {
+    patch.autoadd_repeater = nextAutoaddRepeater
+  }
+
+  const nextAutoaddRoomServer = Boolean(meshcoreParamsRoutingDraft.value.autoadd_room_server)
+  if (nextAutoaddRoomServer !== Boolean(currentRouting?.autoadd_room_server)) {
+    patch.autoadd_room_server = nextAutoaddRoomServer
+  }
+
+  const nextAutoaddSensor = Boolean(meshcoreParamsRoutingDraft.value.autoadd_sensor)
+  if (nextAutoaddSensor !== Boolean(currentRouting?.autoadd_sensor)) {
+    patch.autoadd_sensor = nextAutoaddSensor
+  }
+
+  const nextRxDelayBase = normalizeMeshcoreRadioDraftNumber(meshcoreParamsRoutingDraft.value.rx_delay_base)
+  const currentRxDelayBase = normalizeMeshcoreRadioDraftNumber(currentRouting?.rx_delay_base)
+  if (
+    nextRxDelayBase != null
+    && currentRxDelayBase != null
+    && Math.abs(nextRxDelayBase - currentRxDelayBase) >= 0.001
+  ) {
+    patch.rx_delay_base = nextRxDelayBase
+  }
+
+  const nextAirtimeFactor = normalizeMeshcoreRadioDraftNumber(meshcoreParamsRoutingDraft.value.airtime_factor)
+  const currentAirtimeFactor = normalizeMeshcoreRadioDraftNumber(currentRouting?.airtime_factor)
+  if (
+    nextAirtimeFactor != null
+    && currentAirtimeFactor != null
+    && Math.abs(nextAirtimeFactor - currentAirtimeFactor) >= 0.001
+  ) {
+    patch.airtime_factor = nextAirtimeFactor
+  }
+
+  const nextAutoaddMaxHops = normalizeMeshcoreRadioDraftNumber(meshcoreParamsRoutingDraft.value.autoadd_max_hops, { integer: true })
+  const currentAutoaddMaxHops = normalizeMeshcoreRadioDraftNumber(currentRouting?.autoadd_max_hops, { integer: true })
+  if (nextAutoaddMaxHops != null && nextAutoaddMaxHops !== currentAutoaddMaxHops) {
+    patch.autoadd_max_hops = nextAutoaddMaxHops
+  }
+
+  if (!Object.keys(patch).length) {
+    session.setStatus(t('settings.status.noChanges'))
+    return null
+  }
   await applyMeshcoreParamsGroup('routing', patch)
 }
 
@@ -1275,6 +1803,248 @@ function updateAccessAllMeshcoriumContacts(value) {
   })()
 }
 
+function updateAccessAllMeshcoriumMessages(value) {
+  void (async () => {
+    const nextValue = Boolean(value)
+    if (!session.connected || !session.selectedPort) {
+      session.setStatus(t('settings.nodeCompanion.status.connectionRequired'), true)
+      return
+    }
+    updatingAccessAllMeshcoriumMessages.value = true
+    try {
+      if (nextValue) {
+        await session.updateClientSettings({
+          access_all_meshcorium_messages: true,
+        })
+        await syncMeshcoriumChannelsToNode({ mode: 'enable', markAccessAllMessages: true })
+      } else {
+        await syncMeshcoriumChannelsToNode({ mode: 'disable' })
+        await session.updateClientSettings({
+          access_all_meshcorium_messages: false,
+        })
+      }
+      await session.loadUnreadSummary({
+        port: String(session.selectedPort || ''),
+        mentionName: String(session.selfName || ''),
+      }).catch(() => {})
+    } catch (error) {
+      session.setStatus(error instanceof Error ? error.message : String(error || t('settings.status.saveFailed')), true)
+    } finally {
+      updatingAccessAllMeshcoriumMessages.value = false
+    }
+  })()
+}
+
+function openSyncMeshcoriumChannelsDialog() {
+  if (!session.connected || !session.selectedPort) {
+    session.setStatus(t('settings.nodeCompanion.status.connectionRequired'), true)
+    return
+  }
+  confirmDialog.value = {
+    open: true,
+    title: t('settings.meshcorium.channelSync.dialogTitle'),
+    message: t('settings.meshcorium.channelSync.dialogMessage'),
+    note: t('settings.meshcorium.channelSync.dialogNote'),
+    confirmLabel: t('settings.meshcorium.channelSync.action'),
+    confirmDisabled: false,
+    action: syncMeshcoriumChannelsToNode,
+  }
+}
+
+function handleMeshcoriumChannelSyncToggle(nextValue) {
+  if (!nextValue) {
+    void syncMeshcoriumChannelsToNode({ mode: 'disable' })
+    return
+  }
+  openSyncMeshcoriumChannelsDialog()
+}
+
+function buildChannelSyncOperationId() {
+  if (window.crypto?.randomUUID) {
+    return window.crypto.randomUUID()
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+}
+
+function closeChannelSyncProgressListener() {
+  if (channelSyncProgressSource.value) {
+    channelSyncProgressSource.value.close()
+    channelSyncProgressSource.value = null
+  }
+}
+
+function updateChannelSyncProgress(payload = {}) {
+  channelSyncProgress.value = {
+    ...channelSyncProgress.value,
+    visible: true,
+    operationId: String(payload.operation_id || channelSyncProgress.value.operationId || ''),
+    operation: String(payload.operation || channelSyncProgress.value.operation || 'enable'),
+    status: String(payload.status || 'progress'),
+    phase: String(payload.phase || ''),
+    current: Math.max(0, Number(payload.current || 0)),
+    total: Math.max(0, Number(payload.total || 0)),
+    channelIdx: Number(payload.channel_idx ?? -1),
+    channelName: String(payload.channel_name || ''),
+    attempt: Math.max(0, Number(payload.attempt || 0)),
+    attempts: Math.max(0, Number(payload.attempts || 0)),
+    message: String(payload.message || ''),
+  }
+}
+
+function startChannelSyncProgress(operation = 'enable') {
+  const operationId = buildChannelSyncOperationId()
+  closeChannelSyncProgressListener()
+  channelSyncProgress.value = {
+    visible: true,
+    operationId,
+    operation,
+    status: 'started',
+    phase: 'prepare',
+    current: 0,
+    total: 0,
+    channelIdx: -1,
+    channelName: '',
+    attempt: 0,
+    attempts: 0,
+    message: '',
+  }
+  const port = String(session.selectedPort || '').trim()
+  if (!port) {
+    return operationId
+  }
+  const query = new URLSearchParams({
+    port,
+    baudrate: String(session.selectedBaudrate || 0),
+    timeout: String(session.selectedConnection?.timeout || 4),
+  })
+  const source = new EventSource(`/api/events?${query.toString()}`)
+  channelSyncProgressSource.value = source
+  source.onmessage = (event) => {
+    let payload = {}
+    try {
+      payload = JSON.parse(String(event.data || '{}'))
+    } catch {
+      return
+    }
+    if (payload.event !== 'channel-sync-progress') {
+      return
+    }
+    if (String(payload.operation_id || '') !== operationId) {
+      return
+    }
+    updateChannelSyncProgress(payload)
+  }
+  source.onerror = () => {
+    updateChannelSyncProgress({
+      operation_id: operationId,
+      operation,
+      status: 'listener-reconnecting',
+      message: t('settings.meshcorium.channelSync.progress.listenerReconnecting'),
+    })
+  }
+  return operationId
+}
+
+function finishChannelSyncProgress({ operationId, operation, failed = false } = {}) {
+  closeChannelSyncProgressListener()
+  channelSyncProgress.value = {
+    ...channelSyncProgress.value,
+    visible: true,
+    operationId: String(operationId || channelSyncProgress.value.operationId || ''),
+    operation: String(operation || channelSyncProgress.value.operation || 'enable'),
+    status: failed ? 'failed' : 'completed',
+    current: Number(channelSyncProgress.value.total || 0) || Number(channelSyncProgress.value.current || 0),
+  }
+  window.setTimeout(() => {
+    if (String(channelSyncProgress.value.operationId || '') === String(operationId || '')) {
+      channelSyncProgress.value = {
+        ...channelSyncProgress.value,
+        visible: false,
+      }
+    }
+  }, failed ? 2600 : 1400)
+}
+
+async function syncMeshcoriumChannelsToNode({ mode = 'enable', markAccessAllMessages = false } = {}) {
+  if (!session.connected || !session.selectedPort) {
+    session.setStatus(t('settings.nodeCompanion.status.connectionRequired'), true)
+    throw new Error(t('settings.nodeCompanion.status.connectionRequired'))
+  }
+  const disableMode = String(mode) === 'disable'
+  const operation = disableMode ? 'disable' : 'enable'
+  const operationId = startChannelSyncProgress(operation)
+  syncingMeshcoriumChannels.value = true
+  session.setStatus(t(disableMode ? 'settings.meshcorium.channelSync.disableRunningStatus' : 'settings.meshcorium.channelSync.runningStatus'))
+  try {
+    const data = await session.api('/api/channels/sync-from-db', {
+      method: 'POST',
+      body: JSON.stringify({
+        ...session.configBody(),
+        mode: disableMode ? 'disable' : 'enable',
+        mark_access_all_messages: Boolean(markAccessAllMessages),
+        operation_id: operationId,
+      }),
+    })
+    const nextChannels = Array.isArray(data?.channels) ? data.channels : []
+    session.applySessionSnapshot({
+      channels: nextChannels,
+      channels_count: nextChannels.length,
+    })
+    await session.loadUnreadSummary({
+      port: String(session.selectedPort || ''),
+      mentionName: String(session.selfName || ''),
+    }).catch(() => {})
+    const summary = data?.summary || {}
+    const dbCandidates = Math.max(0, Number(summary?.db_candidates || 0))
+    const alreadyPresent = Math.max(0, Number(summary?.already_present || 0))
+    const added = Math.max(0, Number(summary?.added || 0))
+    const remapped = Math.max(0, Number(summary?.remapped || 0))
+    const noFreeSlots = Math.max(0, Number(summary?.no_free_slots || 0))
+    const duplicateSources = Math.max(0, Number(summary?.db_duplicate_sources || 0))
+    const failed = Math.max(0, Number(summary?.failed || 0))
+    const retryCount = Math.max(0, Number(summary?.retry_count || 0))
+    const verifiedAfterEmptyResponse = Math.max(0, Number(summary?.verified_after_empty_response || 0))
+    const marked = Math.max(0, Number(summary?.marked || 0))
+    const removed = Math.max(0, Number(summary?.removed || 0))
+    const skippedMissing = Math.max(0, Number(summary?.skipped_missing || 0))
+    const skippedMismatch = Math.max(0, Number(summary?.skipped_mismatch || 0))
+    if (disableMode) {
+      session.setStatus(t('settings.meshcorium.channelSync.disableCompleted', {
+        marked,
+        removed,
+        skippedMissing,
+        skippedMismatch,
+      }))
+      finishChannelSyncProgress({ operationId, operation })
+      return data
+    }
+    if (dbCandidates <= 0) {
+      session.setStatus(t('settings.meshcorium.channelSync.empty'))
+      finishChannelSyncProgress({ operationId, operation })
+      return data
+    }
+    session.setStatus(t('settings.meshcorium.channelSync.completed', {
+      added,
+      alreadyPresent,
+      remapped,
+      noFreeSlots,
+      duplicateSources,
+      failed,
+      retryCount,
+      verifiedAfterEmptyResponse,
+      marked,
+    }))
+    finishChannelSyncProgress({ operationId, operation })
+    return data
+  } catch (error) {
+    session.setStatus(error instanceof Error ? error.message : String(error || t('settings.meshcorium.channelSync.failed')), true)
+    finishChannelSyncProgress({ operationId, operation, failed: true })
+    throw error
+  } finally {
+    syncingMeshcoriumChannels.value = false
+  }
+}
+
 function updateStartupConnectionKey(value) {
   void updateNodeCompanionClientSettings({
     startup_use_last_successful: false,
@@ -1369,11 +2139,58 @@ function updateSignalMetricsRetention(value) {
 }
 
 async function refreshNodeCompanionPorts() {
+  if (nodeCompanionPortsRefreshing.value || session.loadingPorts) {
+    return
+  }
+  nodeCompanionPortsRefreshing.value = true
   try {
     await session.refreshPorts()
     session.setStatus(t('settings.status.refreshed'))
   } catch (error) {
     session.setStatus(error instanceof Error ? error.message : String(error || t('settings.status.loadFailed')), true)
+  } finally {
+    nodeCompanionPortsRefreshing.value = false
+  }
+}
+
+function syncNodeBatteryProfileDraft() {
+  const profile = currentNodeBatteryProfile.value
+  nodeBatteryProfileModeDraft.value = profile.mode
+  nodeBatteryChemistryDraft.value = profile.chemistry
+  nodeBatteryMinMvDraft.value = profile.min_mv
+  nodeBatteryMaxMvDraft.value = profile.max_mv
+}
+
+async function saveNodeBatteryProfile() {
+  const nodeId = nodeBatteryProfileNodeId.value
+  if (!nodeId) {
+    session.setStatus(t('settings.nodeCompanion.status.connectionRequired'), true)
+    return
+  }
+  if (nodeCompanionBatteryProfileSaving.value) {
+    return
+  }
+  nodeCompanionBatteryProfileSaving.value = true
+  try {
+    const nextProfiles = {
+      ...nodeBatteryProfilesByNodeId.value,
+      [nodeId]: normalizeBatteryProfile({
+        mode: nodeBatteryProfileModeDraft.value,
+        chemistry: nodeBatteryChemistryDraft.value,
+        min_mv: nodeBatteryMinMvDraft.value,
+        max_mv: nodeBatteryMaxMvDraft.value,
+      }),
+    }
+    await session.updateClientSettings({
+      battery_profile_by_node_id: nextProfiles,
+    })
+    session.setStatus(t('settings.nodeCompanion.batteryProfile.saved', {
+      node: String(session.self?.name || session.selfPublicKey || t('common.na')).trim() || t('common.na'),
+    }))
+  } catch (error) {
+    session.setStatus(error instanceof Error ? error.message : String(error || t('settings.status.saveFailed')), true)
+  } finally {
+    nodeCompanionBatteryProfileSaving.value = false
   }
 }
 
@@ -1419,6 +2236,7 @@ function stopNodeCompanionListener({ silent = false } = {}) {
     nodeCompanionListenerSource.value.close()
     nodeCompanionListenerSource.value = null
   }
+  nodeCompanionListenerKey = ''
   if (!silent) {
     session.setStatus(t('settings.nodeCompanion.status.listenerStopped'))
   }
@@ -1427,6 +2245,15 @@ function stopNodeCompanionListener({ silent = false } = {}) {
 function startNodeCompanionListener() {
   const config = buildNodeCompanionConfig()
   if (!config) {
+    stopNodeCompanionListener({ silent: true })
+    return
+  }
+  const nextListenerKey = [
+    String(config.port || ''),
+    String(config.baudrate || ''),
+    String(config.timeout || ''),
+  ].join('|')
+  if (nodeCompanionListenerSource.value && nodeCompanionListenerKey === nextListenerKey) {
     return
   }
   stopNodeCompanionListener({ silent: true })
@@ -1437,6 +2264,7 @@ function startNodeCompanionListener() {
   })
   const source = new EventSource(`/api/events?${query.toString()}`)
   nodeCompanionListenerSource.value = source
+  nodeCompanionListenerKey = nextListenerKey
   source.onopen = () => {
     session.setStatus(t('messages.status.listenerActive'))
   }
@@ -2021,6 +2849,360 @@ async function applySignalMetricsSettings() {
   }
 }
 
+const batteryHistoryPoints = computed(() => {
+  const points = Array.isArray(batteryHistoryPayload.value?.points) ? batteryHistoryPayload.value.points : []
+  return points.map((point) => {
+    const batteryMv = point?.battery_mv == null ? null : Number(point.battery_mv)
+    return {
+      ...point,
+      battery_mv: batteryMv,
+      battery_percent: batteryMv == null ? null : estimateBatteryPercentFromMillivolts(batteryMv, currentNodeBatteryProfile.value),
+    }
+  }).filter((point) => point.battery_percent != null)
+})
+
+function averageBatteryHistoryChunk(points) {
+  if (!points.length) {
+    return null
+  }
+  return {
+    ts: Math.round(points.reduce((sum, point) => sum + Number(point.ts || 0), 0) / points.length),
+    battery_mv: Math.round(points.reduce((sum, point) => sum + Number(point.battery_mv || 0), 0) / points.length),
+    battery_percent: Math.round(points.reduce((sum, point) => sum + Number(point.battery_percent || 0), 0) / points.length),
+  }
+}
+
+const batteryHistoryRenderedPoints = computed(() => {
+  const points = batteryHistoryPoints.value
+  if (points.length <= 2) {
+    return points
+  }
+  const density = batteryHistoryDensityValue.value
+  if (density >= 100) {
+    return points
+  }
+  const minPoints = Math.min(points.length, 12)
+  const targetPoints = Math.max(2, Math.round(minPoints + ((points.length - minPoints) * (density / 100))))
+  if (targetPoints >= points.length) {
+    return points
+  }
+  const head = points[0]
+  const tail = points[points.length - 1]
+  const middle = points.slice(1, -1)
+  const middleTargetPoints = Math.max(0, targetPoints - 2)
+  if (!middle.length || middleTargetPoints <= 0) {
+    return [head, tail]
+  }
+  const chunkSize = Math.max(1, Math.ceil(middle.length / middleTargetPoints))
+  const reduced = []
+  for (let index = 0; index < middle.length; index += chunkSize) {
+    const averaged = averageBatteryHistoryChunk(middle.slice(index, index + chunkSize))
+    if (averaged) {
+      reduced.push(averaged)
+    }
+  }
+  return [head, ...reduced, tail]
+})
+
+const batteryHistoryDensityLabel = computed(() => {
+  if (batteryHistoryDensityValue.value >= 100) {
+    return t('settings.nodeCompanion.batteryGraph.densityValueAll', {
+      count: batteryHistoryPoints.value.length,
+    })
+  }
+  return t('settings.nodeCompanion.batteryGraph.densityValueAvg', {
+    count: batteryHistoryRenderedPoints.value.length,
+  })
+})
+
+function formatBatteryHistoryBucketLabel(epoch, bucketSecs) {
+  const locale = String(activeLocale.value || 'en').toLowerCase().startsWith('ru') ? 'ru-RU' : 'en-US'
+  const date = new Date(Number(epoch || 0) * 1000)
+  if (Number(bucketSecs || 0) >= 86400) {
+    return date.toLocaleDateString(locale, { day: '2-digit', month: '2-digit' })
+  }
+  if (Number(bucketSecs || 0) >= 21600) {
+    return date.toLocaleDateString(locale, { day: '2-digit', month: '2-digit' }) + ' ' + date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
+  }
+  return date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
+}
+
+function normalizeDegrees(value) {
+  let numeric = Number(value || 0)
+  while (numeric < 0) numeric += 360
+  while (numeric >= 360) numeric -= 360
+  return numeric
+}
+
+function solarElevationDegrees(epochSeconds, lat, lon) {
+  const date = new Date(Number(epochSeconds || 0) * 1000)
+  const utcHours = (
+    date.getUTCHours()
+    + (date.getUTCMinutes() / 60)
+    + (date.getUTCSeconds() / 3600)
+    + (date.getUTCMilliseconds() / 3600000)
+  )
+  const year = date.getUTCFullYear()
+  const month = date.getUTCMonth() + 1
+  const day = date.getUTCDate()
+  const a = Math.floor((14 - month) / 12)
+  const y = year + 4800 - a
+  const m = month + (12 * a) - 3
+  const julianDay = day + Math.floor(((153 * m) + 2) / 5) + (365 * y) + Math.floor(y / 4) - Math.floor(y / 100) + Math.floor(y / 400) - 32045
+  const julianDate = julianDay + ((utcHours - 12) / 24)
+  const n = julianDate - 2451545.0
+  const meanLongitude = normalizeDegrees(280.46 + (0.9856474 * n))
+  const meanAnomaly = normalizeDegrees(357.528 + (0.9856003 * n))
+  const meanAnomalyRad = (meanAnomaly * Math.PI) / 180
+  const eclipticLongitude = normalizeDegrees(
+    meanLongitude + (1.915 * Math.sin(meanAnomalyRad)) + (0.02 * Math.sin(2 * meanAnomalyRad)),
+  )
+  const eclipticLongitudeRad = (eclipticLongitude * Math.PI) / 180
+  const obliquityRad = ((23.439 - (0.0000004 * n)) * Math.PI) / 180
+  const rightAscensionRad = Math.atan2(
+    Math.cos(obliquityRad) * Math.sin(eclipticLongitudeRad),
+    Math.cos(eclipticLongitudeRad),
+  )
+  const declinationRad = Math.asin(Math.sin(obliquityRad) * Math.sin(eclipticLongitudeRad))
+  const meanLongitudeRad = (meanLongitude * Math.PI) / 180
+  let equationTimeRad = meanLongitudeRad - rightAscensionRad
+  while (equationTimeRad < -Math.PI) equationTimeRad += 2 * Math.PI
+  while (equationTimeRad > Math.PI) equationTimeRad -= 2 * Math.PI
+  const equationTimeMinutes = equationTimeRad * (180 / Math.PI) * 4
+  const solarTimeMinutes = (utcHours * 60) + equationTimeMinutes + (4 * Number(lon || 0))
+  const hourAngleRad = ((solarTimeMinutes / 4) - 180) * (Math.PI / 180)
+  const latRad = Number(lat || 0) * (Math.PI / 180)
+  const elevationRad = Math.asin(
+    (Math.sin(latRad) * Math.sin(declinationRad))
+      + (Math.cos(latRad) * Math.cos(declinationRad) * Math.cos(hourAngleRad)),
+  )
+  return elevationRad * (180 / Math.PI)
+}
+
+function sunlightIntensityFromElevation(elevationDegrees) {
+  const elevation = Number(elevationDegrees || 0)
+  if (elevation <= -12) {
+    return 0
+  }
+  if (elevation <= -6) {
+    return 0.06 + (((elevation + 12) / 6) * 0.08)
+  }
+  if (elevation <= 0) {
+    return 0.14 + (((elevation + 6) / 6) * 0.22)
+  }
+  if (elevation <= 45) {
+    return 0.36 + ((elevation / 45) * 0.44)
+  }
+  if (elevation <= 70) {
+    return 0.8 + (((elevation - 45) / 25) * 0.2)
+  }
+  return 1
+}
+
+function sunlightColorForIntensity(intensity) {
+  const normalized = Math.max(0, Math.min(1, Number(intensity || 0)))
+  const dark = { r: 58, g: 62, b: 68 }
+  const light = { r: 248, g: 249, b: 251 }
+  const r = Math.round(dark.r + ((light.r - dark.r) * normalized))
+  const g = Math.round(dark.g + ((light.g - dark.g) * normalized))
+  const b = Math.round(dark.b + ((light.b - dark.b) * normalized))
+  return `rgb(${r}, ${g}, ${b})`
+}
+
+function buildBatteryHistorySvg(points, { bucketSecs, startAt, endAt, showSunlight, geoPoint }) {
+  const width = 920
+  const baseHeight = 308
+  const padLeft = 18
+  const padRight = 14
+  const padTop = 18
+  const stripHeight = showSunlight && geoPoint ? 12 : 0
+  const stripGap = stripHeight > 0 ? 10 : 0
+  const extraFooter = stripHeight > 0 ? stripHeight + stripGap + 8 : 0
+  const height = baseHeight + extraFooter
+  const padBottom = 34 + extraFooter
+  const plotWidth = width - padLeft - padRight
+  const plotHeight = height - padTop - padBottom
+  const yFor = (value) => padTop + ((100 - Math.max(0, Math.min(100, Number(value || 0)))) / 100) * plotHeight
+  const rangeStart = Number(startAt || points[0]?.ts || 0)
+  const rangeEnd = Math.max(rangeStart + 1, Number(endAt || points[points.length - 1]?.ts || 0))
+  const rangeSpan = Math.max(1, rangeEnd - rangeStart)
+  const xForTs = (epoch) => {
+    const numeric = Number(epoch || rangeStart)
+    const ratio = Math.max(0, Math.min(1, (numeric - rangeStart) / rangeSpan))
+    return padLeft + (plotWidth * ratio)
+  }
+  const plotBottomY = height - padBottom
+  const labelY = stripHeight > 0 ? height - (stripHeight + 12) : height - 10
+  const stripY = stripHeight > 0 ? height - stripHeight - 4 : 0
+  const linePath = points.map((point, index) => {
+    const x = xForTs(point.ts)
+    const y = yFor(point.battery_percent)
+    return `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`
+  }).join(' ')
+  const areaPath = points.length
+    ? `${linePath} L ${xForTs(points[points.length - 1]?.ts).toFixed(2)} ${plotBottomY.toFixed(2)} L ${xForTs(points[0]?.ts).toFixed(2)} ${plotBottomY.toFixed(2)} Z`
+    : ''
+  const grid = [0, 25, 50, 75, 100].map((tick) => {
+    const y = yFor(tick)
+    return `
+      <line x1="${padLeft}" y1="${y.toFixed(2)}" x2="${(width - padRight).toFixed(2)}" y2="${y.toFixed(2)}" stroke="rgba(210,232,224,0.08)" stroke-width="1" />
+      <text x="${padLeft}" y="${(y - 6).toFixed(2)}" fill="rgba(210,232,224,0.54)" font-size="10">${tick}%</text>
+    `
+  }).join('')
+  const labelTimestamps = [rangeStart, rangeStart + (rangeSpan / 3), rangeStart + ((rangeSpan * 2) / 3), rangeEnd]
+  const labels = labelTimestamps.map((timestamp) => {
+    const x = xForTs(timestamp)
+    return `<text x="${x.toFixed(2)}" y="${labelY}" text-anchor="middle" fill="rgba(224,232,243,0.68)" font-size="10">${escapeHtml(formatBatteryHistoryBucketLabel(timestamp, bucketSecs))}</text>`
+  }).join('')
+  const sunlightStrip = (() => {
+    if (!showSunlight || !geoPoint || stripHeight <= 0) {
+      return ''
+    }
+    const segments = Math.max(48, Math.min(160, Math.round(plotWidth / 8)))
+    const segmentWidth = plotWidth / segments
+    return Array.from({ length: segments }, (_, index) => {
+      const segmentStart = rangeStart + ((rangeSpan * index) / segments)
+      const segmentEnd = rangeStart + ((rangeSpan * (index + 1)) / segments)
+      const midTs = (segmentStart + segmentEnd) / 2
+      const intensity = sunlightIntensityFromElevation(
+        solarElevationDegrees(midTs, geoPoint.lat, geoPoint.lon),
+      )
+      const x = padLeft + (segmentWidth * index)
+      return `<rect x="${x.toFixed(2)}" y="${stripY.toFixed(2)}" width="${(segmentWidth + 0.6).toFixed(2)}" height="${stripHeight}" rx="2" ry="2" fill="${sunlightColorForIntensity(intensity)}" opacity="0.98"></rect>`
+    }).join('')
+  })()
+  return `
+    <svg class="mc-settings-battery-graph-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" aria-label="${escapeHtml(t('settings.nodeCompanion.batteryGraph.title'))}">
+      ${grid}
+      <path d="${areaPath}" fill="url(#mcBatteryFill)" />
+      <path d="${linePath}" fill="none" stroke="#87f39a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+      ${sunlightStrip}
+      ${labels}
+      <defs>
+        <linearGradient id="mcBatteryFill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="rgba(135,243,154,0.34)" />
+          <stop offset="100%" stop-color="rgba(135,243,154,0.02)" />
+        </linearGradient>
+      </defs>
+    </svg>
+  `
+}
+
+const batteryHistoryChartMarkup = computed(() => {
+  const points = batteryHistoryRenderedPoints.value
+  if (!points.length) {
+    return ''
+  }
+  return buildBatteryHistorySvg(points, {
+    bucketSecs: Number(batteryHistoryPayload.value?.bucket_secs || 3600),
+    startAt: Number(batteryHistoryPayload.value?.start_at || 0),
+    endAt: Number(batteryHistoryPayload.value?.end_at || 0),
+    showSunlight: Boolean(batteryHistoryShowSunlight.value && batteryHistorySunlightAvailable.value),
+    geoPoint: batteryHistoryNodeGeoPoint.value,
+  })
+})
+
+const batteryHistorySummaryItems = computed(() => {
+  const payload = batteryHistoryPayload.value || {}
+  const points = batteryHistoryPoints.value
+  const latestPoint = points.length ? points[points.length - 1] : null
+  const avgPercent = points.length
+    ? Math.round(points.reduce((sum, point) => sum + Number(point.battery_percent || 0), 0) / points.length)
+    : null
+  const minPercent = points.length ? Math.min(...points.map((point) => Number(point.battery_percent || 0))) : null
+  const maxPercent = points.length ? Math.max(...points.map((point) => Number(point.battery_percent || 0))) : null
+  const retentionLabel = batteryHistoryRetentionOptions.value.find((entry) => entry.value === Number(payload?.retention_days || 0))?.label
+  return [
+    `${t('settings.nodeCompanion.batteryGraph.summary.period')}: ${batteryHistoryUsingCustomRange.value ? t('settings.nodeCompanion.batteryGraph.rangeOptions.custom') : batteryHistoryRangeOptions.value.find((entry) => entry.value === batteryHistoryRangePreset.value)?.label}`,
+    `${t('settings.nodeCompanion.batteryGraph.summary.points')}: ${points.length}`,
+    latestPoint ? `${t('settings.nodeCompanion.batteryGraph.summary.latest')}: ${latestPoint.battery_percent}% / ${latestPoint.battery_mv} mV` : '',
+    avgPercent == null ? '' : `${t('settings.nodeCompanion.batteryGraph.summary.average')}: ${avgPercent}%`,
+    minPercent == null ? '' : `${t('settings.nodeCompanion.batteryGraph.summary.min')}: ${minPercent}%`,
+    maxPercent == null ? '' : `${t('settings.nodeCompanion.batteryGraph.summary.max')}: ${maxPercent}%`,
+    retentionLabel ? `${t('settings.nodeCompanion.batteryGraph.summary.retention')}: ${retentionLabel}` : '',
+  ].filter(Boolean)
+})
+
+function ensureBatteryHistoryCustomRangeInitialized() {
+  if (batteryHistoryCustomStart.value && batteryHistoryCustomEnd.value) {
+    return
+  }
+  const endAt = Math.floor(Date.now() / 1000)
+  batteryHistoryCustomEnd.value = toDateTimeLocalValue(endAt)
+  batteryHistoryCustomStart.value = toDateTimeLocalValue(endAt - 86400)
+}
+
+function openBatteryHistoryDatePicker(which) {
+  const input = which === 'end' ? batteryHistoryEndInputRef.value : batteryHistoryStartInputRef.value
+  if (!input) {
+    return
+  }
+  if (typeof input.showPicker === 'function') {
+    input.showPicker()
+    return
+  }
+  input.focus()
+  input.click()
+}
+
+function updateBatteryHistoryRangePreset(value) {
+  const nextValue = String(value || '').trim()
+  batteryHistoryRangePreset.value = ['6h', '12h', '1d', '1w', '1m', 'custom'].includes(nextValue) ? nextValue : '1d'
+  if (batteryHistoryRangePreset.value === 'custom') {
+    ensureBatteryHistoryCustomRangeInitialized()
+  }
+}
+
+function updateBatteryHistoryRetention(value) {
+  const numeric = Number(value)
+  const nextValue = [7, 30, 90, 180, 365].includes(numeric) ? numeric : 30
+  void updateNodeCompanionClientSettings({
+    battery_history_retention_days: nextValue,
+  })
+  void loadBatteryHistoryPayload({ quiet: true })
+}
+
+function updateBatteryHistoryDensity(value) {
+  const numeric = Number(value)
+  batteryHistoryDensityDraft.value = String(
+    Number.isFinite(numeric) ? Math.max(0, Math.min(100, Math.round(numeric))) : defaultBatteryHistoryDensityValue(),
+  )
+}
+
+async function loadBatteryHistoryPayload(options = {}) {
+  const showLoadingState = options.quiet !== true || !batteryHistoryPayload.value
+  if (showLoadingState) {
+    batteryHistoryLoading.value = true
+  }
+  try {
+    const params = new URLSearchParams()
+    if (session.selectedPort) {
+      params.set('port', String(session.selectedPort))
+    }
+    if (batteryHistoryUsingCustomRange.value) {
+      ensureBatteryHistoryCustomRangeInitialized()
+      const startAt = fromDateTimeLocalValue(batteryHistoryCustomStart.value)
+      const endAt = fromDateTimeLocalValue(batteryHistoryCustomEnd.value)
+      if (startAt != null) {
+        params.set('start_at', String(startAt))
+      }
+      if (endAt != null) {
+        params.set('end_at', String(endAt))
+      }
+    } else {
+      params.set('range_seconds', String(batteryHistoryPresetToSeconds(batteryHistoryRangePreset.value)))
+    }
+    const data = await session.api(`/api/battery-history?${params.toString()}`)
+    batteryHistoryPayload.value = data || null
+  } catch (error) {
+    session.setStatus(error instanceof Error ? error.message : String(error || t('settings.status.loadFailed')), true)
+  } finally {
+    if (showLoadingState) {
+      batteryHistoryLoading.value = false
+    }
+  }
+}
+
 function clearSignalMetricsLiveTimer() {
   if (signalMetricsLiveTimer != null) {
     window.clearInterval(signalMetricsLiveTimer)
@@ -2302,6 +3484,48 @@ const localeDropdownOptions = computed(() => {
   }))
 })
 
+const dataTransferCategoryOptions = computed(() => {
+  return [
+    {
+      id: 'contacts',
+      title: t('settings.meshcorium.dataTransfer.categories.contacts.title'),
+      subtitle: t('settings.meshcorium.dataTransfer.categories.contacts.subtitle'),
+    },
+    {
+      id: 'channel_dialogs',
+      title: t('settings.meshcorium.dataTransfer.categories.channelDialogs.title'),
+      subtitle: t('settings.meshcorium.dataTransfer.categories.channelDialogs.subtitle'),
+    },
+    {
+      id: 'direct_dialogs',
+      title: t('settings.meshcorium.dataTransfer.categories.directDialogs.title'),
+      subtitle: t('settings.meshcorium.dataTransfer.categories.directDialogs.subtitle'),
+    },
+    {
+      id: 'known_nodes',
+      title: t('settings.meshcorium.dataTransfer.categories.knownNodes.title'),
+      subtitle: t('settings.meshcorium.dataTransfer.categories.knownNodes.subtitle'),
+    },
+    {
+      id: 'signal_metrics',
+      title: t('settings.meshcorium.dataTransfer.categories.signalMetrics.title'),
+      subtitle: t('settings.meshcorium.dataTransfer.categories.signalMetrics.subtitle'),
+    },
+  ]
+})
+
+const dataTransferHasSelectedCategories = computed(() => {
+  return dataTransferCategoryOptions.value.some((entry) => Boolean(dataTransferCategorySelection.value?.[entry.id]))
+})
+
+const dataTransferPreviewConflicts = computed(() => {
+  return Array.isArray(dataTransferPreviewPayload.value?.conflicts) ? dataTransferPreviewPayload.value.conflicts : []
+})
+
+const dataTransferPreviewWarnings = computed(() => {
+  return Array.isArray(dataTransferPreviewPayload.value?.warnings) ? dataTransferPreviewPayload.value.warnings : []
+})
+
 const wallpaperEntries = computed(() => {
   return Array.isArray(session.settingsPayload?.wallpaper_files) ? session.settingsPayload.wallpaper_files : []
 })
@@ -2409,6 +3633,192 @@ function readFileAsDataUrl(file) {
     reader.onload = () => resolve(String(reader.result || ''))
     reader.readAsDataURL(file)
   })
+}
+
+function readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(reader.error || new Error('read failed'))
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.readAsText(file)
+  })
+}
+
+function downloadTextFile(filename, payload) {
+  const blob = new Blob([payload], { type: 'application/json;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
+function clearDataTransferPreview() {
+  dataTransferFileName.value = ''
+  dataTransferPackagePayload.value = null
+  dataTransferPreviewPayload.value = null
+}
+
+function selectedDataTransferCategories() {
+  return dataTransferCategoryOptions.value
+    .map((entry) => entry.id)
+    .filter((id) => Boolean(dataTransferCategorySelection.value?.[id]))
+}
+
+function setDataTransferCategorySelected(categoryId, value) {
+  dataTransferCategorySelection.value = {
+    ...(dataTransferCategorySelection.value || {}),
+    [categoryId]: Boolean(value),
+  }
+}
+
+function openDataTransferPicker() {
+  dataTransferFileInput.value?.click?.()
+}
+
+async function exportDataTransferPackage() {
+  const categories = selectedDataTransferCategories()
+  if (!categories.length) {
+    session.setStatus(t('settings.meshcorium.dataTransfer.selectCategoryRequired'), true)
+    return
+  }
+  exportingDataTransfer.value = true
+  try {
+    const data = await session.api('/api/data-transfer/export', {
+      method: 'POST',
+      body: JSON.stringify({
+        categories,
+      }),
+    })
+    const filename = String(data?.filename || `meshcorium-export-${new Date().toISOString().replace(/[:.]/g, '-')}.json`)
+    const payload = JSON.stringify(data?.package || {}, null, 2)
+    downloadTextFile(filename, payload)
+    session.setStatus(t('settings.meshcorium.dataTransfer.exported', {
+      count: Number(
+        data?.summary?.contacts
+        || 0,
+      ) + Number(data?.summary?.channel_dialogs || 0)
+        + Number(data?.summary?.direct_dialogs || 0)
+        + Number(data?.summary?.known_nodes || 0)
+        + Number(data?.summary?.signal_metrics || 0),
+    }))
+  } catch (error) {
+    session.setStatus(error instanceof Error ? error.message : String(error || t('settings.meshcorium.dataTransfer.exportFailed')), true)
+  } finally {
+    exportingDataTransfer.value = false
+  }
+}
+
+async function previewDataTransferPackage(file) {
+  const categories = selectedDataTransferCategories()
+  if (!categories.length) {
+    session.setStatus(t('settings.meshcorium.dataTransfer.selectCategoryRequired'), true)
+    return
+  }
+  const rawPayload = await readFileAsText(file)
+  let parsedPayload = null
+  try {
+    parsedPayload = JSON.parse(rawPayload)
+  } catch (error) {
+    throw new Error(t('settings.meshcorium.dataTransfer.invalidFile'))
+  }
+  previewingDataTransfer.value = true
+  try {
+    const data = await session.api('/api/data-transfer/preview', {
+      method: 'POST',
+      body: JSON.stringify({
+        categories,
+        package: parsedPayload,
+      }),
+    })
+    dataTransferFileName.value = file.name
+    dataTransferPackagePayload.value = parsedPayload
+    dataTransferPreviewPayload.value = data?.preview || null
+    session.setStatus(t('settings.meshcorium.dataTransfer.previewReady', {
+      count: Number(data?.preview?.summary?.incoming_rows || 0),
+    }))
+  } finally {
+    previewingDataTransfer.value = false
+  }
+}
+
+async function handleDataTransferImportChange(event) {
+  const input = event?.target
+  const file = input?.files?.[0]
+  if (!file || previewingDataTransfer.value || importingDataTransfer.value) {
+    return
+  }
+  try {
+    await previewDataTransferPackage(file)
+  } catch (error) {
+    clearDataTransferPreview()
+    session.setStatus(error instanceof Error ? error.message : String(error || t('settings.meshcorium.dataTransfer.previewFailed')), true)
+  } finally {
+    if (input) {
+      input.value = ''
+    }
+  }
+}
+
+function requestDataTransferImport(overwriteConflicts) {
+  if (!dataTransferPackagePayload.value) {
+    session.setStatus(t('settings.meshcorium.dataTransfer.importFileRequired'), true)
+    return
+  }
+  const conflicts = Number(dataTransferPreviewPayload.value?.summary?.conflicts || 0)
+  if (conflicts <= 0) {
+    void executeDataTransferImport(overwriteConflicts)
+    return
+  }
+  confirmDialog.value = {
+    open: true,
+    title: t('settings.meshcorium.dataTransfer.confirmTitle'),
+    message: overwriteConflicts
+      ? t('settings.meshcorium.dataTransfer.confirmOverwriteBody', { count: conflicts })
+      : t('settings.meshcorium.dataTransfer.confirmSkipBody', { count: conflicts }),
+    note: t('settings.meshcorium.dataTransfer.confirmNote'),
+    confirmLabel: overwriteConflicts
+      ? t('settings.meshcorium.dataTransfer.importOverwrite')
+      : t('settings.meshcorium.dataTransfer.importSkipConflicts'),
+    confirmDisabled: false,
+    action: async () => executeDataTransferImport(overwriteConflicts),
+  }
+}
+
+async function executeDataTransferImport(overwriteConflicts) {
+  if (!dataTransferPackagePayload.value || importingDataTransfer.value) {
+    return
+  }
+  const categories = selectedDataTransferCategories()
+  if (!categories.length) {
+    session.setStatus(t('settings.meshcorium.dataTransfer.selectCategoryRequired'), true)
+    return
+  }
+  importingDataTransfer.value = true
+  try {
+    const data = await session.api('/api/data-transfer/import', {
+      method: 'POST',
+      body: JSON.stringify({
+        categories,
+        package: dataTransferPackagePayload.value,
+        overwrite_conflicts: Boolean(overwriteConflicts),
+      }),
+    })
+    await session.loadClientSettings().catch(() => {})
+    session.setStatus(t('settings.meshcorium.dataTransfer.imported', {
+      imported: Number(data?.result?.summary?.imported_rows || 0),
+      overwritten: Number(data?.result?.summary?.overwritten_rows || 0),
+      skipped: Number(data?.result?.summary?.skipped_conflicts || 0),
+    }))
+    clearDataTransferPreview()
+  } catch (error) {
+    session.setStatus(error instanceof Error ? error.message : String(error || t('settings.meshcorium.dataTransfer.importFailed')), true)
+  } finally {
+    importingDataTransfer.value = false
+  }
 }
 
 async function handleWallpaperUpload(event) {
@@ -2711,7 +4121,9 @@ function normalizeNodeCompanionSettingsSectionId(value) {
     ? 'signal-metrics'
     : (normalized === 'meshcore-params'
         ? 'meshcore-params'
-        : (normalized === 'connection' ? 'connection' : 'general'))
+        : (normalized === 'connection'
+            ? 'connection'
+            : (normalized === 'battery' ? 'battery' : 'general')))
 }
 
 function normalizeRootSettingsSectionId(value) {
@@ -2720,7 +4132,7 @@ function normalizeRootSettingsSectionId(value) {
   return VALID_ROOT_SETTINGS_SECTIONS.has(normalizedRoot) ? normalizedRoot : 'meshcorium'
 }
 
-function normalizeSettingsRouteState(sectionParam, subsectionParam) {
+function normalizeSettingsRouteState(sectionParam, subsectionParam, detailParam) {
   const rootSectionId = normalizeRootSettingsSectionId(sectionParam)
   const debugSectionId = rootSectionId === 'debug'
     ? normalizeDebugSettingsSectionId(subsectionParam)
@@ -2728,14 +4140,18 @@ function normalizeSettingsRouteState(sectionParam, subsectionParam) {
   const nodeSectionId = rootSectionId === 'node'
     ? normalizeNodeCompanionSettingsSectionId(subsectionParam)
     : 'general'
+  const meshcoreParamsSectionId = rootSectionId === 'node' && nodeSectionId === 'meshcore-params'
+    ? normalizeMeshcoreParamsSectionId(detailParam)
+    : 'radio'
   return {
     rootSectionId,
     debugSectionId,
     nodeSectionId,
+    meshcoreParamsSectionId,
   }
 }
 
-function buildSettingsRouteLocation(rootSectionId, nestedSectionId = '') {
+function buildSettingsRouteLocation(rootSectionId, nestedSectionId = '', detailSectionId = '') {
   const normalizedRoot = normalizeRootSettingsSectionId(rootSectionId)
   const params = {
     section: normalizedRoot,
@@ -2750,6 +4166,9 @@ function buildSettingsRouteLocation(rootSectionId, nestedSectionId = '') {
     if (normalizedNode !== 'general') {
       params.subsection = normalizedNode
     }
+    if (normalizedNode === 'meshcore-params') {
+      params.detail = normalizeMeshcoreParamsSectionId(detailSectionId)
+    }
   }
   return {
     name: 'settings',
@@ -2757,9 +4176,9 @@ function buildSettingsRouteLocation(rootSectionId, nestedSectionId = '') {
   }
 }
 
-function navigateToSettingsSection(rootSectionId, nestedSectionId = '', { replace = false } = {}) {
+function navigateToSettingsSection(rootSectionId, nestedSectionId = '', detailSectionId = '', { replace = false } = {}) {
   const navigate = replace ? router.replace : router.push
-  return navigate(buildSettingsRouteLocation(rootSectionId, nestedSectionId))
+  return navigate(buildSettingsRouteLocation(rootSectionId, nestedSectionId, detailSectionId))
 }
 
 activeSettingsSectionId.value = normalizeRootSettingsSectionId(activeSettingsSectionId.value)
@@ -2858,6 +4277,11 @@ function leaveDebugSettingsMode() {
 
 function selectNodeCompanionSection(sectionId) {
   const normalized = normalizeNodeCompanionSettingsSectionId(sectionId)
+  if (normalized === 'meshcore-params') {
+    const activeMeshcoreSectionId = normalizeMeshcoreParamsSectionId(activeMeshcoreParamsSectionId.value)
+    void navigateToSettingsSection('node', 'meshcore-params', activeMeshcoreSectionId)
+    return
+  }
   void navigateToSettingsSection('node', normalized === 'general' ? '' : normalized)
 }
 
@@ -2866,7 +4290,8 @@ function leaveNodeCompanionSettingsMode() {
 }
 
 function selectMeshcoreParamsSection(sectionId) {
-  activeMeshcoreParamsSectionId.value = normalizeMeshcoreParamsSectionId(sectionId)
+  const normalized = normalizeMeshcoreParamsSectionId(sectionId)
+  void navigateToSettingsSection('node', 'meshcore-params', normalized)
 }
 
 function leaveMeshcoreParamsMode() {
@@ -2962,6 +4387,14 @@ watch(() => session.self?.name, (value) => {
   nodeCompanionNameDraft.value = String(value || '').trim()
 }, { immediate: true })
 
+watch(
+  () => [nodeBatteryProfileNodeId.value, currentNodeBatteryProfile.value],
+  () => {
+    syncNodeBatteryProfileDraft()
+  },
+  { immediate: true, deep: true },
+)
+
 watch(signalMetricsRetentionDays, (value) => {
   signalMetricsRetentionDraft.value = value
 }, { immediate: true })
@@ -2976,15 +4409,18 @@ watch(() => session.settingsPayload?.settings, (settings) => {
 }, { immediate: true, deep: true })
 
 watch(
-  () => [route.params.section, route.params.subsection],
-  ([sectionParam, subsectionParam]) => {
+  () => [route.params.section, route.params.subsection, route.params.detail],
+  ([sectionParam, subsectionParam, detailParam]) => {
     const previousRootSectionId = normalizeRootSettingsSectionId(activeSettingsSectionId.value)
-    const normalizedRoute = normalizeSettingsRouteState(sectionParam, subsectionParam)
+    const normalizedRoute = normalizeSettingsRouteState(sectionParam, subsectionParam, detailParam)
     const canonicalTarget = buildSettingsRouteLocation(
       normalizedRoute.rootSectionId,
       normalizedRoute.rootSectionId === 'debug'
         ? normalizedRoute.debugSectionId
         : normalizedRoute.nodeSectionId,
+      normalizedRoute.rootSectionId === 'node' && normalizedRoute.nodeSectionId === 'meshcore-params'
+        ? normalizedRoute.meshcoreParamsSectionId
+        : '',
     )
     const canonicalPath = router.resolve(canonicalTarget).path
     if (route.path !== canonicalPath) {
@@ -3005,6 +4441,7 @@ watch(
     activeSettingsSectionId.value = normalizedRoute.rootSectionId
     activeDebugSectionId.value = normalizedRoute.debugSectionId
     activeNodeCompanionSectionId.value = normalizedRoute.nodeSectionId
+    activeMeshcoreParamsSectionId.value = normalizedRoute.meshcoreParamsSectionId
   },
   { immediate: true },
 )
@@ -3155,6 +4592,16 @@ watch(
   { immediate: true },
 )
 
+watch(
+  () => [activeSettingsSectionId.value, activeNodeCompanionSectionId.value, session.selectedPort, batteryHistoryRangePreset.value, batteryHistoryCustomStart.value, batteryHistoryCustomEnd.value],
+  async ([sectionId, nodeSection]) => {
+    if (sectionId === 'node' && nodeSection === 'battery') {
+      await loadBatteryHistoryPayload({ quiet: true }).catch(() => {})
+    }
+  },
+  { immediate: true },
+)
+
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleSettingsEscape)
   if (clearMessageDbUnlockTimer != null) {
@@ -3165,6 +4612,7 @@ onBeforeUnmount(() => {
   stopNotificationSoundPreview('mention')
   stopNotificationSoundPreview('direct')
   stopNodeCompanionListener({ silent: true })
+  closeChannelSyncProgressListener()
   clearSignalMetricsLiveTimer()
   pauseAutoRefresh()
 })
@@ -3279,7 +4727,7 @@ onBeforeUnmount(() => {
 
     <template #scroller-footer>
       <div class="mc-status" :class="{ 'is-error': session.statusError }">
-        {{ session.statusText || serviceStatusCopy }}
+        {{ scrollerFooterStatus }}
       </div>
     </template>
 
@@ -3330,6 +4778,40 @@ onBeforeUnmount(() => {
                     :checked="accessAllMeshcoriumContacts"
                     @change="updateAccessAllMeshcoriumContacts($event.target.checked)"
                   />
+                </div>
+              </div>
+            </div>
+
+            <div class="mc-settings-row">
+              <div class="mc-settings-row-label">
+                <strong>{{ t('settings.meshcorium.accessAllMessages.title') }}</strong>
+                <span>{{ t('settings.meshcorium.accessAllMessages.subtitle') }}</span>
+              </div>
+              <div class="mc-settings-row-control">
+                <div class="mc-settings-checkbox">
+	                  <input
+	                    type="checkbox"
+	                    :checked="accessAllMeshcoriumMessages"
+	                    :disabled="updatingAccessAllMeshcoriumMessages || syncingMeshcoriumChannels"
+	                    @change="updateAccessAllMeshcoriumMessages($event.target.checked)"
+	                  />
+                </div>
+              </div>
+            </div>
+
+            <div class="mc-settings-row">
+              <div class="mc-settings-row-label">
+                <strong>{{ t('settings.meshcorium.channelSync.title') }}</strong>
+                <span>{{ t('settings.meshcorium.channelSync.subtitle') }}</span>
+              </div>
+              <div class="mc-settings-row-control">
+                <div class="mc-settings-checkbox">
+	                  <input
+	                    type="checkbox"
+	                    :checked="accessAllMeshcoriumChannels"
+	                    :disabled="syncingMeshcoriumChannels || !session.connected || !session.selectedPort"
+	                    @change="handleMeshcoriumChannelSyncToggle($event.target.checked)"
+	                  />
                 </div>
               </div>
             </div>
@@ -3605,6 +5087,144 @@ onBeforeUnmount(() => {
           </div>
         </section>
 
+        <section class="mc-settings-panel">
+          <div class="mc-settings-panel-copy">
+            <h3>{{ t('settings.meshcorium.dataTransfer.title') }}</h3>
+            <p>{{ t('settings.meshcorium.dataTransfer.subtitle') }}</p>
+          </div>
+
+          <div class="mc-settings-transfer-categories">
+            <label
+              v-for="category in dataTransferCategoryOptions"
+              :key="category.id"
+              class="mc-settings-transfer-category"
+            >
+              <input
+                :checked="Boolean(dataTransferCategorySelection?.[category.id])"
+                type="checkbox"
+                @change="setDataTransferCategorySelected(category.id, $event.target.checked)"
+              />
+              <span class="mc-settings-transfer-category-copy">
+                <strong>{{ category.title }}</strong>
+                <span>{{ category.subtitle }}</span>
+              </span>
+            </label>
+          </div>
+
+          <div class="mc-settings-actions-row">
+            <button
+              class="mc-button mc-button--ghost"
+              type="button"
+              :disabled="exportingDataTransfer || previewingDataTransfer || importingDataTransfer || !dataTransferHasSelectedCategories"
+              @click="exportDataTransferPackage"
+            >
+              {{ exportingDataTransfer ? t('settings.meshcorium.dataTransfer.exporting') : t('settings.meshcorium.dataTransfer.exportAction') }}
+            </button>
+            <button
+              class="mc-button mc-button--ghost"
+              type="button"
+              :disabled="previewingDataTransfer || importingDataTransfer || !dataTransferHasSelectedCategories"
+              @click="openDataTransferPicker"
+            >
+              {{ previewingDataTransfer ? t('settings.meshcorium.dataTransfer.previewing') : t('settings.meshcorium.dataTransfer.importAction') }}
+            </button>
+            <button
+              v-if="dataTransferPackagePayload"
+              class="mc-button mc-button--ghost"
+              type="button"
+              :disabled="previewingDataTransfer || importingDataTransfer"
+              @click="clearDataTransferPreview"
+            >
+              {{ t('common.clear') }}
+            </button>
+          </div>
+
+          <input
+            ref="dataTransferFileInput"
+            type="file"
+            accept=".json,application/json"
+            hidden
+            @change="handleDataTransferImportChange"
+          />
+
+          <div v-if="dataTransferFileName" class="mc-settings-inline-hint">
+            {{ t('settings.meshcorium.dataTransfer.selectedFile', { name: dataTransferFileName }) }}
+          </div>
+
+          <div v-if="dataTransferPreviewPayload" class="mc-settings-transfer-preview">
+            <div class="mc-settings-transfer-summary">
+              <span class="mc-settings-signal-chip">{{ t('settings.meshcorium.dataTransfer.summaryIncoming', { count: Number(dataTransferPreviewPayload?.summary?.incoming_rows || 0) }) }}</span>
+              <span class="mc-settings-signal-chip">{{ t('settings.meshcorium.dataTransfer.summaryNew', { count: Number(dataTransferPreviewPayload?.summary?.new_rows || 0) }) }}</span>
+              <span class="mc-settings-signal-chip">{{ t('settings.meshcorium.dataTransfer.summaryExact', { count: Number(dataTransferPreviewPayload?.summary?.exact_duplicates || 0) }) }}</span>
+              <span class="mc-settings-signal-chip">{{ t('settings.meshcorium.dataTransfer.summaryConflicts', { count: Number(dataTransferPreviewPayload?.summary?.conflicts || 0) }) }}</span>
+              <span class="mc-settings-signal-chip">{{ t('settings.meshcorium.dataTransfer.summaryWarnings', { count: Number(dataTransferPreviewPayload?.summary?.warnings || 0) }) }}</span>
+            </div>
+
+            <div v-if="dataTransferPreviewWarnings.length" class="mc-settings-transfer-block">
+              <h4>{{ t('settings.meshcorium.dataTransfer.warningsTitle') }}</h4>
+              <article
+                v-for="(warning, index) in dataTransferPreviewWarnings"
+                :key="`warning-${index}-${warning.code}`"
+                class="mc-settings-transfer-warning"
+              >
+                <strong>{{ warning.category }}</strong>
+                <span>{{ warning.message }}</span>
+              </article>
+            </div>
+
+            <div v-if="dataTransferPreviewConflicts.length" class="mc-settings-transfer-block">
+              <h4>{{ t('settings.meshcorium.dataTransfer.conflictsTitle') }}</h4>
+              <p v-if="Number(dataTransferPreviewPayload?.conflicts_truncated || 0) > 0" class="mc-settings-inline-hint">
+                {{ t('settings.meshcorium.dataTransfer.conflictsTruncated', { count: Number(dataTransferPreviewPayload?.conflicts_truncated || 0) }) }}
+              </p>
+              <article
+                v-for="(conflict, index) in dataTransferPreviewConflicts"
+                :key="`conflict-${index}-${conflict.key}`"
+                class="mc-settings-transfer-conflict"
+              >
+                <div class="mc-settings-transfer-conflict-head">
+                  <strong>{{ conflict.item_type }}</strong>
+                  <span>{{ conflict.key }}</span>
+                </div>
+                <p v-if="conflict.note" class="mc-settings-inline-hint">{{ conflict.note }}</p>
+                <div class="mc-settings-transfer-diff-list">
+                  <div
+                    v-for="entry in conflict.diff"
+                    :key="`${conflict.key}:${entry.field}`"
+                    class="mc-settings-transfer-diff-row"
+                  >
+                    <strong>{{ entry.field }}</strong>
+                    <div class="mc-settings-transfer-diff-values">
+                      <pre class="mc-settings-json-block">{{ formatJsonPayload(entry.existing) }}</pre>
+                      <pre class="mc-settings-json-block">{{ formatJsonPayload(entry.incoming) }}</pre>
+                    </div>
+                  </div>
+                </div>
+              </article>
+            </div>
+
+            <div class="mc-settings-actions-row">
+              <button
+                class="mc-button mc-button--primary"
+                type="button"
+                :disabled="importingDataTransfer"
+                @click="requestDataTransferImport(false)"
+              >
+                {{ importingDataTransfer ? t('settings.meshcorium.dataTransfer.importing') : (dataTransferPreviewConflicts.length ? t('settings.meshcorium.dataTransfer.importSkipConflicts') : t('settings.meshcorium.dataTransfer.importConfirm')) }}
+              </button>
+              <button
+                v-if="dataTransferPreviewConflicts.length"
+                class="mc-button mc-button--ghost"
+                type="button"
+                :disabled="importingDataTransfer"
+                @click="requestDataTransferImport(true)"
+              >
+                {{ t('settings.meshcorium.dataTransfer.importOverwrite') }}
+              </button>
+            </div>
+          </div>
+        </section>
+
         </div>
       </template>
 
@@ -3738,6 +5358,238 @@ onBeforeUnmount(() => {
         </div>
 
         <div
+          v-else-if="activeNodeCompanionSectionId === 'battery'"
+          key="node-battery"
+          class="mc-settings-section-stack"
+          data-node-companion-section="battery"
+        >
+          <section class="mc-settings-panel mc-settings-panel--battery-graph">
+            <div class="mc-settings-panel-copy">
+              <h3>{{ t('settings.nodeCompanion.batteryGraph.title') }}</h3>
+              <p>{{ t('settings.nodeCompanion.batteryGraph.subtitle') }}</p>
+            </div>
+
+            <label class="mc-settings-row">
+              <div class="mc-settings-row-label">
+                <strong>{{ t('settings.nodeCompanion.batteryGraph.retentionTitle') }}</strong>
+                <span>{{ t('settings.nodeCompanion.batteryGraph.retentionSubtitle') }}</span>
+              </div>
+              <div class="mc-settings-row-control">
+                <select
+                  class="mc-settings-native-select"
+                  :value="batteryHistoryRetentionDays"
+                  @change="updateBatteryHistoryRetention($event.target.value)"
+                >
+                  <option
+                    v-for="option in batteryHistoryRetentionOptions"
+                    :key="option.value"
+                    :value="option.value"
+                  >
+                    {{ option.label }}
+                  </option>
+                </select>
+              </div>
+            </label>
+
+            <div class="mc-settings-toggle-card" :class="{ 'mc-settings-toggle-card--disabled': !batteryHistorySunlightAvailable }">
+              <input
+                v-model="batteryHistoryShowSunlight"
+                type="checkbox"
+                :disabled="!batteryHistorySunlightAvailable"
+              />
+              <span class="mc-settings-toggle-copy">
+                <strong>{{ t('settings.nodeCompanion.batteryGraph.sunlightTitle') }}</strong>
+                <span>{{ batteryHistorySunlightSubtitle }}</span>
+              </span>
+            </div>
+
+            <label class="mc-settings-row">
+              <div class="mc-settings-row-label">
+                <strong>{{ t('settings.nodeCompanion.batteryGraph.densityTitle') }}</strong>
+                <span>{{ t('settings.nodeCompanion.batteryGraph.densitySubtitle') }}</span>
+              </div>
+              <div class="mc-settings-row-control mc-settings-row-control--stack">
+                <div class="mc-settings-range-wrap">
+                  <div class="mc-settings-range-meta">
+                    <span>{{ t('settings.nodeCompanion.batteryGraph.densityMin') }}</span>
+                    <strong>{{ batteryHistoryDensityLabel }}</strong>
+                    <span>{{ t('settings.nodeCompanion.batteryGraph.densityMax') }}</span>
+                  </div>
+                  <input
+                    class="mc-settings-range"
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="1"
+                    :value="batteryHistoryDensityValue"
+                    @input="updateBatteryHistoryDensity($event.target.value)"
+                  />
+                </div>
+              </div>
+            </label>
+
+            <div class="mc-settings-battery-range-row">
+              <div class="mc-settings-battery-range-presets">
+                <button
+                  v-for="option in batteryHistoryRangeOptions"
+                  :key="option.value"
+                  class="mc-settings-battery-range-chip"
+                  :class="{ active: option.value === batteryHistoryRangePreset }"
+                  type="button"
+                  @click="updateBatteryHistoryRangePreset(option.value)"
+                >
+                  {{ option.label }}
+                </button>
+              </div>
+
+              <div v-if="batteryHistoryUsingCustomRange" class="mc-settings-battery-range-custom">
+                <input
+                  ref="batteryHistoryStartInputRef"
+                  v-model="batteryHistoryCustomStart"
+                  class="mc-settings-battery-range-input"
+                  type="datetime-local"
+                />
+                <button class="mc-settings-battery-date-button" type="button" @click="openBatteryHistoryDatePicker('start')">
+                  <span class="mc-settings-battery-date-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24"><path d="M7 2h2v2h6V2h2v2h2a2 2 0 0 1 2 2v12a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V6a2 2 0 0 1 2-2h2V2Zm12 8H5v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8ZM7 6H5v2h14V6h-2v2h-2V6H9v2H7V6Z" fill="currentColor"/></svg>
+                  </span>
+                  <span>{{ t('settings.nodeCompanion.batteryGraph.fromLabel') }}: {{ formatBatteryHistoryDateLabel(batteryHistoryCustomStart) }}</span>
+                </button>
+                <input
+                  ref="batteryHistoryEndInputRef"
+                  v-model="batteryHistoryCustomEnd"
+                  class="mc-settings-battery-range-input"
+                  type="datetime-local"
+                />
+                <button class="mc-settings-battery-date-button" type="button" @click="openBatteryHistoryDatePicker('end')">
+                  <span class="mc-settings-battery-date-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24"><path d="M7 2h2v2h6V2h2v2h2a2 2 0 0 1 2 2v12a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V6a2 2 0 0 1 2-2h2V2Zm12 8H5v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8ZM7 6H5v2h14V6h-2v2h-2V6H9v2H7V6Z" fill="currentColor"/></svg>
+                  </span>
+                  <span>{{ t('settings.nodeCompanion.batteryGraph.toLabel') }}: {{ formatBatteryHistoryDateLabel(batteryHistoryCustomEnd) }}</span>
+                </button>
+              </div>
+            </div>
+
+            <div v-if="batteryHistoryLoading" class="mc-settings-signal-empty">
+              {{ t('settings.nodeCompanion.batteryGraph.loading') }}
+            </div>
+            <div v-else-if="!batteryHistoryChartMarkup" class="mc-settings-signal-empty">
+              {{ t('settings.nodeCompanion.batteryGraph.empty') }}
+            </div>
+            <div v-else class="mc-settings-battery-graph-shell">
+              <div class="mc-settings-battery-graph-surface" v-html="batteryHistoryChartMarkup"></div>
+            </div>
+
+            <div class="mc-settings-signal-summary">
+              <span v-for="item in batteryHistorySummaryItems" :key="item" class="mc-settings-signal-chip">{{ item }}</span>
+            </div>
+          </section>
+
+          <section class="mc-settings-panel mc-settings-panel--node-battery">
+            <div class="mc-settings-panel-copy">
+              <h3>{{ t('settings.nodeCompanion.batteryProfile.title') }}</h3>
+              <p>{{ t('settings.nodeCompanion.batteryProfile.subtitle') }}</p>
+            </div>
+
+            <label class="mc-settings-row">
+              <div class="mc-settings-row-label">
+                <strong>{{ t('settings.nodeCompanion.batteryProfile.modeTitle') }}</strong>
+                <span>{{ t('settings.nodeCompanion.batteryProfile.modeSubtitle') }}</span>
+              </div>
+              <div class="mc-settings-row-control mc-settings-row-control--stack">
+                <label class="mc-settings-inline-toggle">
+                  <input
+                    v-model="nodeBatteryProfileModeDraft"
+                    type="radio"
+                    name="node-battery-profile-mode"
+                    value="preset"
+                    :disabled="!nodeBatteryProfileNodeId || nodeCompanionBatteryProfileSaving"
+                  />
+                  <span>{{ t('settings.nodeCompanion.batteryProfile.modePreset') }}</span>
+                </label>
+                <label class="mc-settings-inline-toggle">
+                  <input
+                    v-model="nodeBatteryProfileModeDraft"
+                    type="radio"
+                    name="node-battery-profile-mode"
+                    value="custom"
+                    :disabled="!nodeBatteryProfileNodeId || nodeCompanionBatteryProfileSaving"
+                  />
+                  <span>{{ t('settings.nodeCompanion.batteryProfile.modeCustom') }}</span>
+                </label>
+              </div>
+            </label>
+
+            <label class="mc-settings-row">
+              <div class="mc-settings-row-label">
+                <strong>{{ t('settings.nodeCompanion.batteryProfile.chemistryTitle') }}</strong>
+                <span>{{ t('settings.nodeCompanion.batteryProfile.chemistrySubtitle') }}</span>
+              </div>
+              <div class="mc-settings-row-control">
+                <select
+                  v-model="nodeBatteryChemistryDraft"
+                  class="mc-settings-native-select"
+                  :disabled="!nodeBatteryProfileNodeId || nodeCompanionBatteryProfileSaving"
+                >
+                  <option
+                    v-for="option in batteryChemistryOptions"
+                    :key="option.value"
+                    :value="option.value"
+                  >
+                    {{ option.label }}
+                  </option>
+                </select>
+              </div>
+            </label>
+
+            <label v-if="nodeBatteryProfileModeDraft === 'custom'" class="mc-settings-row">
+              <div class="mc-settings-row-label">
+                <strong>{{ t('settings.nodeCompanion.batteryProfile.customRangeTitle') }}</strong>
+                <span>{{ t('settings.nodeCompanion.batteryProfile.customRangeSubtitle') }}</span>
+              </div>
+              <div class="mc-settings-row-control mc-settings-row-control--stack">
+                <div class="mc-settings-node-battery-range">
+                  <input
+                    v-model.number="nodeBatteryMinMvDraft"
+                    class="mc-settings-text-input mc-settings-text-input--narrow"
+                    type="number"
+                    min="1000"
+                    max="6000"
+                    step="1"
+                    :disabled="!nodeBatteryProfileNodeId || nodeCompanionBatteryProfileSaving"
+                  />
+                  <input
+                    v-model.number="nodeBatteryMaxMvDraft"
+                    class="mc-settings-text-input mc-settings-text-input--narrow"
+                    type="number"
+                    min="1000"
+                    max="6000"
+                    step="1"
+                    :disabled="!nodeBatteryProfileNodeId || nodeCompanionBatteryProfileSaving"
+                  />
+                </div>
+              </div>
+            </label>
+
+            <div class="mc-settings-node-battery-meta">
+              <span>{{ t('settings.nodeCompanion.batteryProfile.currentNode', { node: session.self?.name || session.selfPublicKey || t('common.na') }) }}</span>
+              <span>{{ t('settings.nodeCompanion.batteryProfile.effectiveRange', { range: nodeBatteryEffectiveRange }) }}</span>
+            </div>
+
+            <div class="mc-settings-node-actions mc-settings-node-actions--single">
+              <button
+                class="mc-button mc-button--primary"
+                type="button"
+                :disabled="!nodeBatteryProfileNodeId || nodeCompanionBatteryProfileSaving"
+                @click="saveNodeBatteryProfile"
+              >
+                {{ nodeCompanionBatteryProfileSaving ? t('settings.nodeCompanion.actions.applying') : t('settings.nodeCompanion.batteryProfile.apply') }}
+              </button>
+            </div>
+          </section>
+        </div>
+
+        <div
           v-else-if="activeNodeCompanionSectionId === 'connection'"
           key="node-connection"
           class="mc-settings-section-stack"
@@ -3772,8 +5624,14 @@ onBeforeUnmount(() => {
                         {{ option.triggerLabel || option.label }}
                       </option>
                     </select>
-                    <button class="mc-icon-button" type="button" :aria-label="t('common.refreshPorts')" @click="refreshNodeCompanionPorts">
-                      ↻
+                    <button
+                      class="mc-icon-button"
+                      type="button"
+                      :aria-label="t('common.refreshPorts')"
+                      :disabled="nodeCompanionPortsRefreshing || session.loadingPorts"
+                      @click="refreshNodeCompanionPorts"
+                    >
+                      <SyncIcon class="mc-icon-button-glyph" :spinning="nodeCompanionPortsRefreshing || session.loadingPorts" />
                     </button>
                   </div>
                 </div>
@@ -3900,7 +5758,7 @@ onBeforeUnmount(() => {
                   <span>{{ t(`settings.nodeCompanion.meshcoreParams.groups.${meshcoreParamsGroupKey}.previewBody`) }}</span>
                 </div>
                 <div class="mc-settings-row-control">
-                  <button class="mc-secondary-button" type="button" :disabled="meshcoreParamsLoading || !meshcoreParamsAvailable" @click="loadMeshcoreParams()">
+                  <button class="mc-button mc-button--ghost" type="button" :disabled="meshcoreParamsLoading || !meshcoreParamsAvailable" @click="loadMeshcoreParams()">
                     {{ meshcoreParamsLoading ? t('settings.nodeCompanion.meshcoreParams.loading') : t('settings.nodeCompanion.meshcoreParams.refresh') }}
                   </button>
                 </div>
@@ -3922,6 +5780,21 @@ onBeforeUnmount(() => {
                 <p>{{ t('settings.nodeCompanion.meshcoreParams.cards.radio.body') }}</p>
               </div>
               <div class="mc-settings-rows">
+                <label class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.radioPreset') }}</strong>
+                    <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.radioPresetHint') }}</span>
+                  </div>
+                  <div class="mc-settings-row-control">
+                    <PluginDropdown
+                      :model-value="meshcoreRadioSelectedPresetId"
+                      :options="meshcoreRadioPresetOptions"
+                      :min-width="280"
+                      :disabled="meshcoreParamsBusyMode === 'radio'"
+                      @update:model-value="applyMeshcoreRadioPreset"
+                    />
+                  </div>
+                </label>
                 <label class="mc-settings-row">
                   <div class="mc-settings-row-label">
                     <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.frequency') }}</strong>
@@ -3952,14 +5825,15 @@ onBeforeUnmount(() => {
                     </span>
                   </div>
                   <div class="mc-settings-row-control">
-                    <input
-                      v-model="meshcoreParamsRadioDraft.bw_khz"
-                      class="mc-settings-native-select"
-                      type="number"
-                      :min="meshcoreParamsRadioConstraints.bw_khz_min ?? 7"
-                      :max="meshcoreParamsRadioConstraints.bw_khz_max ?? 500"
-                      step="0.1"
-                    />
+                    <select v-model="meshcoreParamsRadioDraft.bw_khz" class="mc-settings-native-select">
+                      <option
+                        v-for="option in meshcoreRadioBandwidthOptions"
+                        :key="`bw-${option.value}`"
+                        :value="option.value"
+                      >
+                        {{ option.label }}
+                      </option>
+                    </select>
                   </div>
                 </label>
                 <label class="mc-settings-row">
@@ -4010,7 +5884,7 @@ onBeforeUnmount(() => {
                 </label>
               </div>
               <div class="mc-settings-card-actions">
-                <button class="mc-primary-button" type="button" :disabled="meshcoreParamsBusyMode === 'radio'" @click="applyMeshcoreRadioParams">
+                <button class="mc-button mc-button--primary" type="button" :disabled="meshcoreParamsBusyMode === 'radio'" @click="applyMeshcoreRadioParams">
                   {{ meshcoreParamsBusyMode === 'radio' ? t('settings.nodeCompanion.actions.applying') : t('settings.nodeCompanion.actions.apply') }}
                 </button>
               </div>
@@ -4082,7 +5956,7 @@ onBeforeUnmount(() => {
                 </div>
               </div>
               <div class="mc-settings-card-actions">
-                <button class="mc-primary-button" type="button" :disabled="meshcoreParamsBusyMode === 'identity'" @click="applyMeshcoreIdentityParams">
+                <button class="mc-button mc-button--primary" type="button" :disabled="meshcoreParamsBusyMode === 'identity'" @click="applyMeshcoreIdentityParams">
                   {{ meshcoreParamsBusyMode === 'identity' ? t('settings.nodeCompanion.actions.applying') : t('settings.nodeCompanion.actions.apply') }}
                 </button>
                 <button
@@ -4129,7 +6003,7 @@ onBeforeUnmount(() => {
                       class="mc-settings-native-select"
                       type="number"
                       :min="meshcoreParamsRoutingConstraints.multi_acks_min ?? 0"
-                      :max="meshcoreParamsRoutingConstraints.multi_acks_max ?? 1"
+                      :max="meshcoreParamsRoutingConstraints.multi_acks_max ?? 2"
                       step="1"
                     />
                     <label class="mc-settings-inline-toggle">
@@ -4219,7 +6093,7 @@ onBeforeUnmount(() => {
                 </div>
               </div>
               <div class="mc-settings-card-actions">
-                <button class="mc-primary-button" type="button" :disabled="meshcoreParamsBusyMode === 'routing'" @click="applyMeshcoreRoutingParams">
+                <button class="mc-button mc-button--primary" type="button" :disabled="meshcoreParamsBusyMode === 'routing'" @click="applyMeshcoreRoutingParams">
                   {{ meshcoreParamsBusyMode === 'routing' ? t('settings.nodeCompanion.actions.applying') : t('settings.nodeCompanion.actions.apply') }}
                 </button>
               </div>
@@ -4249,7 +6123,7 @@ onBeforeUnmount(() => {
                 </label>
               </div>
               <div class="mc-settings-card-actions">
-                <button class="mc-primary-button" type="button" :disabled="meshcoreParamsBusyMode === 'security'" @click="applyMeshcoreSecurityParams">
+                <button class="mc-button mc-button--primary" type="button" :disabled="meshcoreParamsBusyMode === 'security'" @click="applyMeshcoreSecurityParams">
                   {{ meshcoreParamsBusyMode === 'security' ? t('settings.nodeCompanion.actions.applying') : t('settings.nodeCompanion.actions.apply') }}
                 </button>
               </div>
@@ -4294,7 +6168,7 @@ onBeforeUnmount(() => {
                 </label>
               </div>
               <div class="mc-settings-card-actions">
-                <button class="mc-primary-button" type="button" :disabled="meshcoreParamsBusyMode === 'region-gps'" @click="applyMeshcoreRegionGpsParams">
+                <button class="mc-button mc-button--primary" type="button" :disabled="meshcoreParamsBusyMode === 'region-gps'" @click="applyMeshcoreRegionGpsParams">
                   {{ meshcoreParamsBusyMode === 'region-gps' ? t('settings.nodeCompanion.actions.applying') : t('settings.nodeCompanion.actions.apply') }}
                 </button>
               </div>
@@ -4622,6 +6496,7 @@ onBeforeUnmount(() => {
             </aside>
           </div>
         </section>
+
         </div>
       </template>
 
@@ -4861,6 +6736,33 @@ onBeforeUnmount(() => {
       </div>
     </template>
   </ShellPageFrame>
+
+  <div
+    v-if="channelSyncProgress.visible"
+    class="mc-channel-sync-float"
+    role="status"
+    aria-live="polite"
+  >
+    <div class="mc-channel-sync-float__head">
+      <span class="mc-channel-sync-float__kicker">
+        {{ t(channelSyncProgress.operation === 'disable' ? 'settings.meshcorium.channelSync.progress.disableTitle' : 'settings.meshcorium.channelSync.progress.enableTitle') }}
+      </span>
+      <strong>{{ channelSyncProgressText }}</strong>
+    </div>
+    <div
+      class="mc-channel-sync-float__bar"
+      role="progressbar"
+      :aria-valuenow="channelSyncProgressPercent"
+      aria-valuemin="0"
+      aria-valuemax="100"
+    >
+      <span :style="{ width: `${channelSyncProgressPercent}%` }"></span>
+    </div>
+    <div class="mc-channel-sync-float__meta">
+      <span>{{ t('settings.meshcorium.channelSync.progress.counter', { current: Number(channelSyncProgress.current || 0), total: Number(channelSyncProgress.total || 0) }) }}</span>
+      <span v-if="channelSyncProgress.attempts > 1">{{ t('settings.meshcorium.channelSync.progress.attempt', { attempt: Number(channelSyncProgress.attempt || 0), attempts: Number(channelSyncProgress.attempts || 0) }) }}</span>
+    </div>
+  </div>
 
   <MessagesConfirmSheet
     :model="confirmSheetModel"

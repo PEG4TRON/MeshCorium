@@ -1,11 +1,43 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { defineAsyncComponent, defineComponent, h } from 'vue'
 
 import ConnectedShellLayout from '../components/layout/ConnectedShellLayout.vue'
+import ShellRouteLoadingView from '../components/layout/ShellRouteLoadingView.vue'
 import ConnectView from '../views/ConnectView.vue'
-import ContactsView from '../views/ContactsView.vue'
-import MapsView from '../views/MapsView.vue'
-import MessagesView from '../views/MessagesView.vue'
-import SettingsView from '../views/SettingsView.vue'
+function createRouteLoadingComponent(titleKey, messageKey) {
+  return defineComponent({
+    name: `RouteLoading${titleKey.replace(/[^a-z0-9]+/gi, '')}`,
+    render() {
+      return h(ShellRouteLoadingView, { titleKey, messageKey })
+    },
+  })
+}
+
+function createLazyRoute(loader, { titleKey, messageKey }) {
+  return defineAsyncComponent({
+    loader,
+    delay: 0,
+    suspensible: false,
+    loadingComponent: createRouteLoadingComponent(titleKey, messageKey),
+  })
+}
+
+const ContactsView = createLazyRoute(() => import('../views/ContactsView.vue'), {
+  titleKey: 'routes.contacts',
+  messageKey: 'contactsView.loading',
+})
+const MapsView = createLazyRoute(() => import('../views/MapsView.vue'), {
+  titleKey: 'routes.maps',
+  messageKey: 'maps.status.loadingSubtitle',
+})
+const MessagesView = createLazyRoute(() => import('../views/MessagesView.vue'), {
+  titleKey: 'routes.messages',
+  messageKey: 'messages.loading',
+})
+const SettingsView = createLazyRoute(() => import('../views/SettingsView.vue'), {
+  titleKey: 'routes.settings',
+  messageKey: 'settings.loading',
+})
 
 export const router = createRouter({
   history: createWebHistory('/'),
@@ -86,7 +118,7 @@ export const router = createRouter({
           },
         },
         {
-          path: 'settings/:section?/:subsection?',
+          path: 'settings/:section?/:subsection?/:detail?',
           name: 'settings',
           component: SettingsView,
           meta: {

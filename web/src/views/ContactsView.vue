@@ -10,6 +10,7 @@ import MessagesConfirmSheet from '../components/messages/MessagesConfirmSheet.vu
 import ShellPageFrame from '../components/layout/ShellPageFrame.vue'
 import ShellPhonebar from '../components/layout/ShellPhonebar.vue'
 import PluginDropdown from '../components/ui/PluginDropdown.vue'
+import { filterStatusTextForTransport } from '../lib/statusText'
 import {
   buildContactRouteInputFromContact,
   buildKnownRoutePublicKeys,
@@ -99,6 +100,8 @@ const groupsPayload = ref({
 })
 let routeTraceEventSource = null
 let routeTraceFailureTimer = 0
+let contactsEventSourceKey = ''
+let routeTraceEventSourceKey = ''
 
 const contactsOrder = useStorage('contacts_list_order', 'heard-recently')
 const contactsFilter = useStorage('contacts_list_filter', 'all')
@@ -512,7 +515,7 @@ const serviceStatusCopy = computed(() => {
 })
 
 const scrollerFooterStatus = computed(() => {
-  return String(session.statusText || '').trim() || serviceStatusCopy.value
+  return filterStatusTextForTransport(session.statusText, session.selectedTransportType) || serviceStatusCopy.value
 })
 
 const totalContactSummary = computed(() => {
@@ -3404,6 +3407,7 @@ function stopRouteTraceEventStream() {
     routeTraceEventSource.close()
     routeTraceEventSource = null
   }
+  routeTraceEventSourceKey = ''
 }
 
 function stopContactsEventStream() {
@@ -3411,12 +3415,31 @@ function stopContactsEventStream() {
     contactsEventSource.close()
     contactsEventSource = null
   }
+  contactsEventSourceKey = ''
+}
+
+function buildCurrentEventStreamKey() {
+  const port = String(session.selectedPort || '').trim()
+  if (!port) {
+    return ''
+  }
+  return [
+    port,
+    String(session.selectedBaudrate || session.DEFAULT_BAUDRATE),
+    String(session.DEFAULT_TIMEOUT),
+  ].join('|')
 }
 
 function ensureContactsEventStream() {
-  if (contactsEventSource || !session.connected || !session.selectedPort) {
+  if (!session.connected || !session.selectedPort) {
+    stopContactsEventStream()
     return
   }
+  const eventStreamKey = buildCurrentEventStreamKey()
+  if (contactsEventSource && contactsEventSourceKey === eventStreamKey) {
+    return
+  }
+  stopContactsEventStream()
   const query = new URLSearchParams({
     port: String(session.selectedPort || ''),
     baudrate: String(session.selectedBaudrate || session.DEFAULT_BAUDRATE),
@@ -3424,6 +3447,7 @@ function ensureContactsEventStream() {
   })
   const source = new EventSource(`/api/events?${query.toString()}`)
   contactsEventSource = source
+  contactsEventSourceKey = eventStreamKey
   source.onmessage = (event) => {
     const payload = JSON.parse(String(event.data || '{}'))
     if (payload?.event === 'heartbeat') {
@@ -3544,9 +3568,15 @@ function applyRouteTraceEventPayload(payload) {
 }
 
 function ensureRouteTraceEventStream() {
-  if (routeTraceEventSource || !session.connected) {
+  if (!session.connected) {
+    stopRouteTraceEventStream()
     return
   }
+  const eventStreamKey = buildCurrentEventStreamKey()
+  if (routeTraceEventSource && routeTraceEventSourceKey === eventStreamKey) {
+    return
+  }
+  stopRouteTraceEventStream()
   const query = new URLSearchParams({
     port: String(session.selectedPort || ''),
     baudrate: String(session.selectedBaudrate || session.DEFAULT_BAUDRATE),
@@ -3554,6 +3584,7 @@ function ensureRouteTraceEventStream() {
   })
   const source = new EventSource(`/api/events?${query.toString()}`)
   routeTraceEventSource = source
+  routeTraceEventSourceKey = eventStreamKey
   source.onmessage = (event) => {
     const payload = JSON.parse(String(event.data || '{}'))
     if (payload?.event === 'heartbeat') {
@@ -3745,8 +3776,20 @@ watch(
 
 watch(
   () => [session.selectedPort, session.selectedBaudrate, session.connected],
-  () => {
-    stopContactsEventStream()
+  ([nextPort, nextBaudrate, connected], [prevPort, prevBaudrate, prevConnected] = []) => {
+    const nextKey = connected && String(nextPort || '').trim()
+      ? [String(nextPort || '').trim(), String(nextBaudrate || session.DEFAULT_BAUDRATE), String(session.DEFAULT_TIMEOUT)].join('|')
+      : ''
+    const prevKey = prevConnected && String(prevPort || '').trim()
+      ? [String(prevPort || '').trim(), String(prevBaudrate || session.DEFAULT_BAUDRATE), String(session.DEFAULT_TIMEOUT)].join('|')
+      : ''
+    if (!connected) {
+      stopContactsEventStream()
+      return
+    }
+    if (nextKey !== prevKey) {
+      stopContactsEventStream()
+    }
     if (session.connected) {
       ensureContactsEventStream()
     }

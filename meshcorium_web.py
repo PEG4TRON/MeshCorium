@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import mimetypes
 import os
 import queue
@@ -31,6 +32,8 @@ from contact_backend import ContactBackend
 import contact_groups
 import contact_service
 import contact_store
+import known_nodes
+import meshcorium_data_transfer
 from mobile_push import (
     build_mobile_push_status,
     init_mobile_push_db_schema,
@@ -105,6 +108,7 @@ LEGACY_DB_PATH = DATA_DIR / "meshcore_messages.sqlite3"
 LEGACY_CONTACTS_DB_PATH = DATA_DIR / "meshcore_contacts.sqlite3"
 DB_PATH = DATA_DIR / "meshcorium_messages.sqlite3"
 CONTACTS_DB_PATH = DATA_DIR / "meshcorium_contacts.sqlite3"
+KNOWN_NODES_DB_PATH = DATA_DIR / "meshcorium_known_nodes.sqlite3"
 LEGACY_CLIENT_SETTINGS_PATH = DATA_DIR / "client_settings.json"
 CLIENT_SETTINGS_PATH = _path_from_env("MESHCORIUM_CLIENT_SETTINGS_PATH", CONFIG_DIR / "client_settings.json")
 ICONS_DIR = PROJECT_ROOT / "icons"
@@ -155,6 +159,9 @@ REPEATER_ACTIVE_TIMEOUT_SECS = 15 * 60
 CONTACT_EVICTION_SWEEP_INTERVAL_SECS = 60
 CONTACT_ACTIVE_TIMEOUT_MIN_SECS = 5 * 60
 CONTACT_ACTIVE_TIMEOUT_MAX_SECS = 7 * 24 * 60 * 60
+CHANNEL_SET_RETRY_COUNT = 3
+CHANNEL_SET_VERIFY_DELAY_SECS = 0.35
+CHANNEL_SET_RETRY_BASE_DELAY_SECS = 2.5
 REPEATER_ACTIVE_TIMEOUT_MIN_SECS = 60
 REPEATER_ACTIVE_TIMEOUT_MAX_SECS = 24 * 60 * 60
 CONTACT_EVICTION_SWEEP_INTERVAL_MIN_SECS = 15
@@ -162,6 +169,8 @@ CONTACT_EVICTION_SWEEP_INTERVAL_MAX_SECS = 60 * 60
 SIGNAL_METRICS_DEFAULT_RETENTION_DAYS = 7
 SIGNAL_METRICS_MIN_RETENTION_DAYS = 1
 SIGNAL_METRICS_MAX_RETENTION_DAYS = 365
+BATTERY_HISTORY_DEFAULT_RETENTION_DAYS = 30
+BATTERY_HISTORY_RETENTION_CHOICES = (7, 30, 90, 180, 365)
 SIGNAL_METRICS_DEFAULT_POLL_SECONDS = 15
 SIGNAL_METRICS_MIN_POLL_SECONDS = 5
 SIGNAL_METRICS_MAX_POLL_SECONDS = 300
@@ -192,6 +201,7 @@ def _default_client_settings() -> dict:
         "startup_use_last_successful": True,
         "startup_connection_key": "",
         "access_all_meshcorium_contacts": True,
+        "access_all_meshcorium_messages": True,
         "contact_active_timeout_secs": CONTACT_ACTIVE_TIMEOUT_SECS,
         "repeater_active_timeout_secs": REPEATER_ACTIVE_TIMEOUT_SECS,
         "contact_eviction_sweep_interval_secs": CONTACT_EVICTION_SWEEP_INTERVAL_SECS,
@@ -199,6 +209,7 @@ def _default_client_settings() -> dict:
         "contact_full_table_behavior": "evict_oldest",
         "signal_metrics_retention_days": SIGNAL_METRICS_DEFAULT_RETENTION_DAYS,
         "signal_metrics_poll_seconds": SIGNAL_METRICS_DEFAULT_POLL_SECONDS,
+        "battery_history_retention_days": BATTERY_HISTORY_DEFAULT_RETENTION_DAYS,
         "frontend_diagnostics_enabled": True,
         "notifications_sound_enabled": True,
         "notification_regular_sound_file": default_regular,
@@ -219,6 +230,7 @@ def _default_client_settings() -> dict:
         "last_successful_key": "",
         "last_successful_config": None,
         "self_location_overrides": {},
+        "battery_profile_by_node_id": {},
     }
 
 
@@ -236,6 +248,14 @@ def _normalize_signal_metrics_poll_seconds(value: object) -> int:
     except (TypeError, ValueError):
         seconds = SIGNAL_METRICS_DEFAULT_POLL_SECONDS
     return max(SIGNAL_METRICS_MIN_POLL_SECONDS, min(SIGNAL_METRICS_MAX_POLL_SECONDS, seconds))
+
+
+def _normalize_battery_history_retention_days(value: object) -> int:
+    try:
+        days = int(value)
+    except (TypeError, ValueError):
+        days = BATTERY_HISTORY_DEFAULT_RETENTION_DAYS
+    return days if days in BATTERY_HISTORY_RETENTION_CHOICES else BATTERY_HISTORY_DEFAULT_RETENTION_DAYS
 
 
 def _normalize_contact_active_timeout_secs(value: object) -> int:
@@ -426,6 +446,59 @@ def _normalize_self_location_overrides(value: object) -> dict[str, dict[str, flo
     return result
 
 
+def _normalize_battery_profile_chemistry(value: object) -> str:
+    chemistry = str(value or "").strip().lower()
+    if chemistry in {"lipo", "lifepo4"}:
+        return chemistry
+    return "nmc"
+
+
+def _battery_profile_range_for_chemistry(chemistry: str) -> tuple[int, int]:
+    normalized = _normalize_battery_profile_chemistry(chemistry)
+    if normalized == "lifepo4":
+        return (2600, 3650)
+    return (3000, 4200)
+
+
+def _normalize_battery_profile_millivolts(value: object, fallback: int) -> int:
+    try:
+        millivolts = int(value)
+    except (TypeError, ValueError):
+        millivolts = fallback
+    return max(1000, min(6000, millivolts))
+
+
+def _normalize_battery_profile_by_node_id(value: object) -> dict[str, dict[str, str | int]]:
+    if not isinstance(value, dict):
+        return {}
+    result: dict[str, dict[str, str | int]] = {}
+    for raw_node_id, raw_entry in value.items():
+        node_id = str(raw_node_id or "").strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", node_id):
+            continue
+        if not isinstance(raw_entry, dict):
+            continue
+        chemistry = _normalize_battery_profile_chemistry(raw_entry.get("chemistry"))
+        preset_min_mv, preset_max_mv = _battery_profile_range_for_chemistry(chemistry)
+        mode = "custom" if str(raw_entry.get("mode") or "").strip().lower() == "custom" else "preset"
+        min_mv = preset_min_mv
+        max_mv = preset_max_mv
+        if mode == "custom":
+            min_mv = _normalize_battery_profile_millivolts(raw_entry.get("min_mv"), preset_min_mv)
+            max_mv = _normalize_battery_profile_millivolts(raw_entry.get("max_mv"), preset_max_mv)
+            if min_mv >= max_mv:
+                mode = "preset"
+                min_mv = preset_min_mv
+                max_mv = preset_max_mv
+        result[node_id] = {
+            "mode": mode,
+            "chemistry": chemistry,
+            "min_mv": min_mv,
+            "max_mv": max_mv,
+        }
+    return result
+
+
 def _normalize_saved_connection(entry: object) -> dict | None:
     if not isinstance(entry, dict):
         return None
@@ -492,8 +565,9 @@ def _normalize_connection_config(config: object) -> dict | None:
         transport_type=descriptor.transport_type,
         transport_id=descriptor.transport_id,
         display_label=descriptor.display_label,
+        pin=descriptor.pin,
+        allow_ble_bond_repair=descriptor.allow_ble_bond_repair,
     )
-    normalized.pop("allow_ble_bond_repair", None)
     return normalized
 
 
@@ -525,6 +599,7 @@ def _normalize_client_settings(data: object) -> dict:
         "startup_use_last_successful": bool(raw.get("startup_use_last_successful", base["startup_use_last_successful"])),
         "startup_connection_key": str(raw.get("startup_connection_key") or "").strip(),
         "access_all_meshcorium_contacts": bool(raw.get("access_all_meshcorium_contacts", base["access_all_meshcorium_contacts"])),
+        "access_all_meshcorium_messages": bool(raw.get("access_all_meshcorium_messages", base["access_all_meshcorium_messages"])),
         "contact_active_timeout_secs": _normalize_contact_active_timeout_secs(raw.get("contact_active_timeout_secs", base["contact_active_timeout_secs"])),
         "repeater_active_timeout_secs": _normalize_repeater_active_timeout_secs(raw.get("repeater_active_timeout_secs", base["repeater_active_timeout_secs"])),
         "contact_eviction_sweep_interval_secs": _normalize_contact_eviction_sweep_interval_secs(raw.get("contact_eviction_sweep_interval_secs", base["contact_eviction_sweep_interval_secs"])),
@@ -532,6 +607,7 @@ def _normalize_client_settings(data: object) -> dict:
         "contact_full_table_behavior": _normalize_contact_full_table_behavior(raw.get("contact_full_table_behavior", base["contact_full_table_behavior"])),
         "signal_metrics_retention_days": _normalize_signal_metrics_retention_days(raw.get("signal_metrics_retention_days", base["signal_metrics_retention_days"])),
         "signal_metrics_poll_seconds": _normalize_signal_metrics_poll_seconds(raw.get("signal_metrics_poll_seconds", base["signal_metrics_poll_seconds"])),
+        "battery_history_retention_days": _normalize_battery_history_retention_days(raw.get("battery_history_retention_days", base["battery_history_retention_days"])),
         "frontend_diagnostics_enabled": bool(raw.get("frontend_diagnostics_enabled", base["frontend_diagnostics_enabled"])),
         "notifications_sound_enabled": bool(raw.get("notifications_sound_enabled", base["notifications_sound_enabled"])),
         "notification_regular_sound_file": _normalize_notification_sound_file(
@@ -564,6 +640,7 @@ def _normalize_client_settings(data: object) -> dict:
         "last_successful_key": str(raw.get("last_successful_key") or "").strip(),
         "last_successful_config": last_successful_config,
         "self_location_overrides": _normalize_self_location_overrides(raw.get("self_location_overrides", base["self_location_overrides"])),
+        "battery_profile_by_node_id": _normalize_battery_profile_by_node_id(raw.get("battery_profile_by_node_id", base["battery_profile_by_node_id"])),
     }
 
 
@@ -596,6 +673,146 @@ def _save_client_settings_unlocked(settings: dict) -> dict:
 def _get_client_settings() -> dict:
     with CLIENT_SETTINGS_LOCK:
         return _load_client_settings_unlocked()
+
+
+def init_known_nodes_db() -> None:
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with DB_LOCK, sqlite3.connect(KNOWN_NODES_DB_PATH) as conn:
+        known_nodes.init_schema(conn)
+    with CLIENT_SETTINGS_LOCK:
+        settings = _load_client_settings_unlocked()
+        legacy_connections = [
+            entry
+            for entry in list(settings.get("saved_connections") or [])
+            if isinstance(entry, dict) and _is_successful_saved_connection(entry)
+        ]
+        if not legacy_connections:
+            return
+        with DB_LOCK, sqlite3.connect(KNOWN_NODES_DB_PATH) as conn:
+            migrated = known_nodes.migrate_saved_connections(conn, legacy_connections)
+        settings["saved_connections"] = []
+        settings["last_successful_config"] = None
+        _save_client_settings_unlocked(settings)
+        logging.info("migrated saved connection history to known nodes db count=%s db=%s", migrated, _display_project_path(KNOWN_NODES_DB_PATH))
+
+
+def _list_known_successful_connections() -> list[dict]:
+    with DB_LOCK, sqlite3.connect(KNOWN_NODES_DB_PATH) as conn:
+        return known_nodes.list_successful_connections(conn)
+
+
+def _get_known_connection_config_by_key(key: object) -> dict | None:
+    with DB_LOCK, sqlite3.connect(KNOWN_NODES_DB_PATH) as conn:
+        return known_nodes.find_config_by_key(conn, key)
+
+
+def _get_latest_known_connection_config() -> dict | None:
+    with DB_LOCK, sqlite3.connect(KNOWN_NODES_DB_PATH) as conn:
+        return known_nodes.find_latest_successful_config(conn)
+
+
+def _get_known_ble_pin_for_address(address: object) -> str:
+    with DB_LOCK, sqlite3.connect(KNOWN_NODES_DB_PATH) as conn:
+        return known_nodes.get_ble_pin_for_address(conn, address)
+
+
+def _get_known_ble_pin(*, public_key: object = "", address: object = "") -> str:
+    with DB_LOCK, sqlite3.connect(KNOWN_NODES_DB_PATH) as conn:
+        return known_nodes.get_ble_pin(conn, public_key=public_key, address=address)
+
+
+def _get_known_ble_pin_custom(*, public_key: object = "", address: object = "") -> bool:
+    with DB_LOCK, sqlite3.connect(KNOWN_NODES_DB_PATH) as conn:
+        return known_nodes.is_ble_pin_custom(conn, public_key=public_key, address=address)
+
+
+def _normalize_ble_pin_value(value: object) -> str:
+    text = re.sub(r"\D+", "", str(value or "").strip())
+    if text == "0":
+        return ""
+    return text if len(text) == 6 else ""
+
+
+def _generate_ble_pin(excluding: set[str] | None = None) -> str:
+    blocked = {item for item in (excluding or set()) if item}
+    for _ in range(16):
+        candidate = f"{secrets.randbelow(900000) + 100000:06d}"
+        if candidate not in blocked:
+            return candidate
+    return f"{secrets.randbelow(900000) + 100000:06d}"
+
+
+def _set_connection_config_pin(config: dict, pin: str) -> None:
+    if not isinstance(config, dict) or str(config.get("transport_type") or "").lower() != BLE_TRANSPORT_TYPE:
+        return
+    connection = dict(config.get("connection") or {})
+    if pin:
+        connection["pin"] = pin
+        config["allow_ble_bond_repair"] = True
+    else:
+        connection.pop("pin", None)
+    config["connection"] = connection
+
+
+def _mark_known_ble_pin_custom(config: dict, self_info: dict | None, pin: object) -> None:
+    normalized_config = _normalize_connection_config(config)
+    if normalized_config is None or str(normalized_config.get("transport_type") or "").lower() != BLE_TRANSPORT_TYPE:
+        return
+    public_key = _normalize_owner_id((self_info or {}).get("public_key"))
+    if not public_key:
+        return
+    normalized_pin = _normalize_ble_pin_value(pin)
+    if normalized_pin:
+        _set_connection_config_pin(config, normalized_pin)
+    with DB_LOCK, sqlite3.connect(KNOWN_NODES_DB_PATH) as conn:
+        known_nodes.mark_ble_pin_custom(
+            conn,
+            public_key=public_key,
+            address=normalized_config.get("transport_id") or normalized_config.get("port"),
+            pin=normalized_pin,
+        )
+
+
+def _maybe_initialize_managed_ble_pin_after_first_success(
+    client: MeshCoreSerialClient,
+    config: dict,
+    self_info: dict | None,
+    device_info: dict | None,
+) -> str:
+    normalized_config = _normalize_connection_config(config)
+    if normalized_config is None or str(normalized_config.get("transport_type") or "").lower() != BLE_TRANSPORT_TYPE:
+        return ""
+    public_key = _normalize_owner_id((self_info or {}).get("public_key"))
+    address = str(normalized_config.get("transport_id") or normalized_config.get("port") or "").strip()
+    if not public_key or _get_known_ble_pin_custom(public_key=public_key, address=address):
+        return ""
+    current_pin = _normalize_ble_pin_value((config.get("connection") or {}).get("pin") if isinstance(config.get("connection"), dict) else "")
+    if not current_pin:
+        return ""
+    if _get_known_ble_pin(public_key=public_key, address=address):
+        return ""
+    next_pin = _generate_ble_pin({current_pin})
+    with DB_LOCK, sqlite3.connect(KNOWN_NODES_DB_PATH) as conn:
+        known_nodes.begin_ble_pin_rotation(conn, public_key=public_key, address=address, next_pin=next_pin)
+    try:
+        client.set_device_pin(int(next_pin))
+    except (MeshCoreError, SerialException, ValueError) as exc:
+        with DB_LOCK, sqlite3.connect(KNOWN_NODES_DB_PATH) as conn:
+            known_nodes.rollback_ble_pin_rotation(conn, public_key=public_key)
+        logging.warning(
+            "ble managed pin initialization failed address=%s owner_id=%s error=%s",
+            address,
+            public_key[:12],
+            exc,
+        )
+        return ""
+    with DB_LOCK, sqlite3.connect(KNOWN_NODES_DB_PATH) as conn:
+        known_nodes.commit_ble_pin_rotation(conn, public_key=public_key, next_pin=next_pin)
+    _set_connection_config_pin(config, next_pin)
+    if isinstance(device_info, dict):
+        device_info["ble_pin"] = int(next_pin)
+    logging.info("ble managed pin initialized address=%s owner_id=%s", address, public_key[:12])
+    return next_pin
 
 
 def _build_connection_key(config: dict) -> str:
@@ -680,6 +897,10 @@ def _get_access_all_meshcorium_contacts() -> bool:
     return bool(_get_client_settings().get("access_all_meshcorium_contacts", True))
 
 
+def _get_access_all_meshcorium_messages() -> bool:
+    return bool(_get_client_settings().get("access_all_meshcorium_messages", True))
+
+
 def _resolve_owner_id_for_port(port: str | None = None) -> str:
     normalized_port = _normalize_port_value(port)
     if normalized_port:
@@ -695,10 +916,9 @@ def _resolve_owner_id_for_port(port: str | None = None) -> str:
                 owner_id = _normalize_owner_id((session.self_info or {}).get("public_key"))
                 if owner_id:
                     return owner_id
-    settings = _get_client_settings()
     saved_connections = [
         entry
-        for entry in list(settings.get("saved_connections") or [])
+        for entry in _list_known_successful_connections()
         if _is_successful_saved_connection(entry)
     ]
     if normalized_port:
@@ -712,6 +932,7 @@ def _resolve_owner_id_for_port(port: str | None = None) -> str:
             owner_id = _normalize_owner_id((entry or {}).get("public_key"))
             if owner_id:
                 return owner_id
+    settings = _get_client_settings()
     startup_connection_key = str(settings.get("startup_connection_key") or "").strip()
     if startup_connection_key:
         for entry in saved_connections:
@@ -756,6 +977,20 @@ def _contact_owner_scope(
             access_all=resolved_access_all,
         ):
             yield resolved_owner_id
+
+
+@contextmanager
+def _messages_owner_scope(
+    port: str | None = None,
+    owner_id: str | None = None,
+    *,
+    access_all: bool | None = None,
+    channel_identity: str | None = None,
+):
+    resolved_owner_id = _normalize_owner_id(owner_id) or _resolve_owner_id_for_port(port)
+    resolved_access_all = _get_access_all_meshcorium_messages() if access_all is None else bool(access_all)
+    with _message_owner_scope(resolved_owner_id, resolved_access_all, channel_identity=channel_identity):
+        yield resolved_owner_id
 
 
 def _normalize_saved_connection_type(value: object) -> str:
@@ -820,70 +1055,30 @@ def _record_successful_connection(config: dict, self_info: dict | None = None, d
     normalized_config = _normalize_connection_config(config)
     if normalized_config is None:
         return _get_client_settings()
+    public_key = str((self_info or {}).get("public_key") or "").strip().lower()
+    if len(public_key) != 64:
+        public_key = ""
+    key = _build_saved_connection_history_key(normalized_config, public_key=public_key)
+    raw_connection = config.get("connection") if isinstance(config.get("connection"), dict) else {}
+    pin = str(raw_connection.get("pin") or config.get("pin") or "").strip()
+    with DB_LOCK, sqlite3.connect(KNOWN_NODES_DB_PATH) as conn:
+        known_nodes.record_successful_connection(
+            conn,
+            key=key,
+            config=normalized_config,
+            self_info=self_info,
+            device_info=device_info,
+            pin=pin,
+        )
     with CLIENT_SETTINGS_LOCK:
         settings = _load_client_settings_unlocked()
-        public_key = str((self_info or {}).get("public_key") or "").strip().lower()
-        if len(public_key) != 64:
-            public_key = ""
-        key = _build_saved_connection_history_key(normalized_config, public_key=public_key)
-        legacy_key = _build_connection_key(normalized_config)
-        now_ts = int(time.time())
-        next_saved = []
-        replaced = False
         startup_connection_key = str(settings.get("startup_connection_key") or "").strip()
-        for entry in settings["saved_connections"]:
-            entry_key = str(entry.get("key") or "").strip()
-            entry_public_key = str(entry.get("public_key") or "").strip().lower()
-            same_entry = (
-                entry_key == key
-                or (public_key and entry_public_key == public_key)
-                or (not public_key and entry_key == legacy_key)
-            )
-            if not same_entry:
-                next_saved.append(entry)
-                continue
-            updated = dict(entry)
-            updated.update(normalized_config)
-            updated["key"] = key
-            updated["last_connected_at"] = now_ts
-            updated["last_attempted_at"] = now_ts
-            updated["attempted_only"] = False
-            next_node_name = str((self_info or {}).get("name") or "").strip()
-            if _looks_like_hex_node_name(next_node_name):
-                next_node_name = str(entry.get("node_name") or "").strip()
-            updated["node_name"] = next_node_name
-            updated["public_key"] = public_key
-            updated["manufacturer_model"] = str((device_info or {}).get("manufacturer_model") or entry.get("manufacturer_model") or "").strip()
-            updated["connection_type"] = _normalize_saved_connection_type(
-                entry.get("connection_type")
-                or normalized_config.get("transport_type")
-                or _infer_saved_connection_type(normalized_config.get("port"))
-            )
-            next_saved.append(updated)
-            replaced = True
-            if startup_connection_key in {entry_key, entry_public_key}:
-                startup_connection_key = key
-        if not replaced:
-            next_node_name = str((self_info or {}).get("name") or "").strip()
-            if _looks_like_hex_node_name(next_node_name):
-                next_node_name = ""
-            next_saved.append({
-                "key": key,
-                **normalized_config,
-                "last_connected_at": now_ts,
-                "last_attempted_at": now_ts,
-                "attempted_only": False,
-                "node_name": next_node_name,
-                "public_key": public_key,
-                "manufacturer_model": str((device_info or {}).get("manufacturer_model") or "").strip(),
-                "connection_type": _normalize_saved_connection_type(
-                    normalized_config.get("transport_type") or _infer_saved_connection_type(normalized_config.get("port"))
-                ),
-            })
-        settings["saved_connections"] = next_saved
+        if startup_connection_key in {public_key, _build_connection_key(normalized_config)}:
+            startup_connection_key = key
+        settings["saved_connections"] = []
         settings["startup_connection_key"] = startup_connection_key
         settings["last_successful_key"] = key
-        settings["last_successful_config"] = normalized_config
+        settings["last_successful_config"] = None
         return _save_client_settings_unlocked(settings)
 
 
@@ -891,13 +1086,11 @@ def _forget_saved_connection(key: object) -> dict:
     normalized_key = str(key or "").strip()
     if not normalized_key:
         return _get_client_settings()
+    with DB_LOCK, sqlite3.connect(KNOWN_NODES_DB_PATH) as conn:
+        known_nodes.forget_connection(conn, normalized_key)
     with CLIENT_SETTINGS_LOCK:
         settings = _load_client_settings_unlocked()
-        settings["saved_connections"] = [
-            entry
-            for entry in list(settings.get("saved_connections") or [])
-            if str((entry or {}).get("key") or "").strip() != normalized_key
-        ]
+        settings["saved_connections"] = []
         if str(settings.get("startup_connection_key") or "").strip() == normalized_key:
             settings["startup_connection_key"] = ""
         if str(settings.get("last_successful_key") or "").strip() == normalized_key:
@@ -917,6 +1110,8 @@ def _update_client_settings(payload: dict) -> dict:
             settings["startup_connection_key"] = str(payload.get("startup_connection_key") or "").strip()
         if "access_all_meshcorium_contacts" in payload:
             settings["access_all_meshcorium_contacts"] = bool(payload.get("access_all_meshcorium_contacts"))
+        if "access_all_meshcorium_messages" in payload:
+            settings["access_all_meshcorium_messages"] = bool(payload.get("access_all_meshcorium_messages"))
         if "contact_active_timeout_secs" in payload:
             settings["contact_active_timeout_secs"] = _normalize_contact_active_timeout_secs(payload.get("contact_active_timeout_secs"))
         if "repeater_active_timeout_secs" in payload:
@@ -931,6 +1126,8 @@ def _update_client_settings(payload: dict) -> dict:
             settings["signal_metrics_retention_days"] = _normalize_signal_metrics_retention_days(payload.get("signal_metrics_retention_days"))
         if "signal_metrics_poll_seconds" in payload:
             settings["signal_metrics_poll_seconds"] = _normalize_signal_metrics_poll_seconds(payload.get("signal_metrics_poll_seconds"))
+        if "battery_history_retention_days" in payload:
+            settings["battery_history_retention_days"] = _normalize_battery_history_retention_days(payload.get("battery_history_retention_days"))
         if "frontend_diagnostics_enabled" in payload:
             settings["frontend_diagnostics_enabled"] = bool(payload.get("frontend_diagnostics_enabled"))
         if "notifications_sound_enabled" in payload:
@@ -987,6 +1184,8 @@ def _update_client_settings(payload: dict) -> dict:
                 settings["muted_conversations_updated_at"] = max(current_updated_at, incoming_updated_at)
         if "self_location_overrides" in payload:
             settings["self_location_overrides"] = _normalize_self_location_overrides(payload.get("self_location_overrides"))
+        if "battery_profile_by_node_id" in payload:
+            settings["battery_profile_by_node_id"] = _normalize_battery_profile_by_node_id(payload.get("battery_profile_by_node_id"))
         auth_username_present = "auth_username" in payload
         auth_enabled_present = "auth_enabled" in payload
         auth_password_present = "auth_password" in payload
@@ -1012,10 +1211,39 @@ def _update_client_settings(payload: dict) -> dict:
                 settings["auth_session_secret"] = _generate_auth_session_secret()
         normalized = _save_client_settings_unlocked(settings)
     _prune_signal_metrics(_normalize_signal_metrics_retention_days(normalized.get("signal_metrics_retention_days")))
+    _prune_battery_history(_normalize_battery_history_retention_days(normalized.get("battery_history_retention_days")))
     return normalized
 
 
-def _resolve_startup_connection_config(settings: dict) -> dict | None:
+def _with_known_ble_pin(config: dict | None) -> dict | None:
+    normalized_config = _normalize_connection_config(config)
+    if normalized_config is None:
+        return None
+    if str(normalized_config.get("transport_type") or "").lower() != BLE_TRANSPORT_TYPE:
+        return normalized_config
+    connection = dict(normalized_config.get("connection") or {})
+    if str(connection.get("pin") or "").strip():
+        normalized_config["allow_ble_bond_repair"] = True
+        return normalized_config
+    saved_pin = _get_known_ble_pin_for_address(normalized_config.get("transport_id") or normalized_config.get("port"))
+    if saved_pin:
+        connection["pin"] = saved_pin
+        normalized_config["connection"] = connection
+        normalized_config["allow_ble_bond_repair"] = True
+    return normalized_config
+
+
+def _redact_connection_config(config: dict | None) -> dict | None:
+    if not isinstance(config, dict):
+        return None
+    payload = dict(config)
+    connection = dict(payload.get("connection") or {})
+    connection.pop("pin", None)
+    payload["connection"] = connection
+    return payload
+
+
+def _resolve_startup_connection_config(settings: dict, *, include_secrets: bool = False) -> dict | None:
     normalized = _normalize_client_settings(settings)
     if not normalized["auto_connect_on_service_start"]:
         return None
@@ -1029,7 +1257,7 @@ def _resolve_startup_connection_config(settings: dict) -> dict | None:
         available_connection_ids = set()
 
     def _validate_available(config: dict | None) -> dict | None:
-        normalized_config = _normalize_connection_config(config)
+        normalized_config = _with_known_ble_pin(config) if include_secrets else _normalize_connection_config(config)
         if normalized_config is None:
             return None
         target_id = str(normalized_config.get("transport_id") or normalized_config.get("port") or "").strip()
@@ -1040,18 +1268,21 @@ def _resolve_startup_connection_config(settings: dict) -> dict | None:
                 normalized_config.get("baudrate"),
             )
             return None
-        return normalized_config
+        return normalized_config if include_secrets else _redact_connection_config(normalized_config)
 
     if normalized["startup_use_last_successful"]:
-        return _validate_available(normalized.get("last_successful_config"))
+        return _validate_available(_get_latest_known_connection_config() or normalized.get("last_successful_config"))
     selected_key = str(normalized.get("startup_connection_key") or "").strip()
     if not selected_key:
         return None
-    for entry in normalized["saved_connections"]:
+    for entry in _list_known_successful_connections():
         if not _is_successful_saved_connection(entry):
             continue
         if str(entry.get("key")) == selected_key:
             return _validate_available(entry)
+    config = _get_known_connection_config_by_key(selected_key)
+    if config is not None:
+        return _validate_available(config)
     return None
 
 
@@ -1410,6 +1641,11 @@ def _list_recovering_sessions() -> list[dict]:
 def _build_client_settings_payload() -> dict:
     settings = _get_client_settings()
     resolved = _resolve_startup_connection_config(settings)
+    saved_connections = _list_known_successful_connections()
+    last_successful_key = str(settings.get("last_successful_key") or "")
+    last_successful_config = _get_known_connection_config_by_key(last_successful_key) if last_successful_key else None
+    if last_successful_config is None:
+        last_successful_config = _get_latest_known_connection_config()
     sound_files = _list_sound_files()
     wallpaper_files = _list_wallpaper_files()
     return {
@@ -1418,6 +1654,7 @@ def _build_client_settings_payload() -> dict:
             "startup_use_last_successful": bool(settings.get("startup_use_last_successful")),
             "startup_connection_key": str(settings.get("startup_connection_key") or ""),
             "access_all_meshcorium_contacts": bool(settings.get("access_all_meshcorium_contacts", True)),
+            "access_all_meshcorium_messages": bool(settings.get("access_all_meshcorium_messages", True)),
             "contact_active_timeout_secs": _normalize_contact_active_timeout_secs(settings.get("contact_active_timeout_secs")),
             "repeater_active_timeout_secs": _normalize_repeater_active_timeout_secs(settings.get("repeater_active_timeout_secs")),
             "contact_eviction_sweep_interval_secs": _normalize_contact_eviction_sweep_interval_secs(settings.get("contact_eviction_sweep_interval_secs")),
@@ -1425,6 +1662,7 @@ def _build_client_settings_payload() -> dict:
             "contact_full_table_behavior": _normalize_contact_full_table_behavior(settings.get("contact_full_table_behavior")),
             "signal_metrics_retention_days": _normalize_signal_metrics_retention_days(settings.get("signal_metrics_retention_days")),
             "signal_metrics_poll_seconds": _normalize_signal_metrics_poll_seconds(settings.get("signal_metrics_poll_seconds")),
+            "battery_history_retention_days": _normalize_battery_history_retention_days(settings.get("battery_history_retention_days")),
             "frontend_diagnostics_enabled": bool(settings.get("frontend_diagnostics_enabled", True)),
             "notifications_sound_enabled": bool(settings.get("notifications_sound_enabled")),
             "notification_regular_sound_file": _normalize_notification_sound_file(settings.get("notification_regular_sound_file"), sound_files),
@@ -1437,6 +1675,7 @@ def _build_client_settings_payload() -> dict:
             "muted_conversations": _normalize_muted_conversations(settings.get("muted_conversations")),
             "muted_conversations_updated_at": _normalize_muted_conversations_updated_at(settings.get("muted_conversations_updated_at")),
             "self_location_overrides": _normalize_self_location_overrides(settings.get("self_location_overrides")),
+            "battery_profile_by_node_id": _normalize_battery_profile_by_node_id(settings.get("battery_profile_by_node_id")),
             "auth_enabled": bool(settings.get("auth_enabled")),
             "auth_username": _normalize_auth_username(settings.get("auth_username")),
             "auth_password_configured": bool(settings.get("auth_password_hash")),
@@ -1466,11 +1705,11 @@ def _build_client_settings_payload() -> dict:
                 "last_attempted_at": int(entry.get("last_attempted_at") or 0),
                 "attempted_only": bool(entry.get("attempted_only", False)),
             }
-            for entry in settings.get("saved_connections", [])
+            for entry in saved_connections
             if _is_successful_saved_connection(entry)
         ],
-        "last_successful_key": str(settings.get("last_successful_key") or ""),
-        "last_successful_config": settings.get("last_successful_config"),
+        "last_successful_key": last_successful_key,
+        "last_successful_config": _redact_connection_config(last_successful_config),
         "resolved_startup_connection": resolved,
         "active_sessions": _list_active_sessions(),
         "recovering_sessions": _list_recovering_sessions(),
@@ -1874,7 +2113,7 @@ def _get_contact_full_table_behavior() -> str:
 
 def _attempt_service_startup_auto_connect() -> None:
     settings = _get_client_settings()
-    config = _resolve_startup_connection_config(settings)
+    config = _resolve_startup_connection_config(settings, include_secrets=True)
     if config is None:
         logging.info("service startup auto-connect disabled")
         return
@@ -1935,8 +2174,10 @@ class BackgroundCompanionSession:
     radio_stats: dict | None = None
     self_telemetry: dict | None = None
     battery_info: dict | None = None
+    meshcore_params: dict | None = None
     repeater_tracker: RepeaterRuntimeTracker = field(default_factory=RepeaterRuntimeTracker)
     last_contact_auto_sync_at: float = 0.0
+    last_meshcore_params_snapshot_at: float = 0.0
     queue_drain_in_progress: bool = False
     queue_drain_requested: bool = False
     queue_last_reason: str = ""
@@ -2229,6 +2470,24 @@ def init_message_db() -> None:
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS battery_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_id TEXT NOT NULL DEFAULT '',
+                recorded_at INTEGER NOT NULL,
+                battery_mv INTEGER NOT NULL,
+                battery_percent INTEGER,
+                source TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_battery_history_recorded_at
+            ON battery_history(owner_id, recorded_at)
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS node_channel_slots (
                 owner_id TEXT NOT NULL,
                 channel_idx INTEGER NOT NULL,
@@ -2238,6 +2497,9 @@ def init_message_db() -> None:
                 channel_identity TEXT NOT NULL,
                 is_public INTEGER NOT NULL DEFAULT 0,
                 last_seen_at INTEGER NOT NULL DEFAULT 0,
+                access_all_messages_enabled INTEGER NOT NULL DEFAULT 0,
+                access_all_messages_enabled_at INTEGER NOT NULL DEFAULT 0,
+                access_all_messages_source_owner_id TEXT NOT NULL DEFAULT '',
                 PRIMARY KEY (owner_id, channel_idx)
             )
             """
@@ -2270,6 +2532,9 @@ def init_message_db() -> None:
         _ensure_column(conn, "contact_messages", "is_read", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "contact_messages", "is_mention_read", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "contact_messages", "path_hashes", "TEXT")
+        _ensure_column(conn, "node_channel_slots", "access_all_messages_enabled", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "node_channel_slots", "access_all_messages_enabled_at", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "node_channel_slots", "access_all_messages_source_owner_id", "TEXT NOT NULL DEFAULT ''")
         conn.execute("UPDATE messages SET is_read = 1 WHERE from_self = 1 AND COALESCE(is_read, 0) = 0")
         conn.execute("UPDATE contact_messages SET is_read = 1 WHERE from_self = 1 AND COALESCE(is_read, 0) = 0")
         conn.execute("UPDATE messages SET is_mention_read = 1 WHERE from_self = 1 AND COALESCE(is_mention_read, 0) = 0")
@@ -2303,6 +2568,10 @@ def init_message_db() -> None:
         _prune_signal_metrics_locked(
             conn,
             _normalize_signal_metrics_retention_days(_get_client_settings().get("signal_metrics_retention_days")),
+        )
+        _prune_battery_history_locked(
+            conn,
+            _normalize_battery_history_retention_days(_get_client_settings().get("battery_history_retention_days")),
         )
         conn.commit()
 
@@ -2763,9 +3032,79 @@ def _prune_signal_metrics_locked(conn: sqlite3.Connection, retention_days: int) 
     conn.execute("DELETE FROM signal_metrics WHERE recorded_at < ?", (cutoff,))
 
 
+def _prune_battery_history_locked(conn: sqlite3.Connection, retention_days: int) -> None:
+    cutoff = utc_now_epoch() - (_normalize_battery_history_retention_days(retention_days) * 86400)
+    conn.execute("DELETE FROM battery_history WHERE recorded_at < ?", (cutoff,))
+
+
 def _prune_signal_metrics(retention_days: int) -> None:
     with DB_LOCK, sqlite3.connect(DB_PATH) as conn:
         _prune_signal_metrics_locked(conn, retention_days)
+
+
+def _prune_battery_history(retention_days: int) -> None:
+    with DB_LOCK, sqlite3.connect(DB_PATH) as conn:
+        _prune_battery_history_locked(conn, retention_days)
+
+
+def _select_battery_history_sample(
+    radio_stats: dict | None,
+    self_telemetry: dict | None,
+    battery_info: dict | None,
+) -> tuple[int | None, int | None, str]:
+    if isinstance(battery_info, dict):
+        battery_mv = battery_info.get("battery_mv")
+        if battery_mv is not None:
+            return int(battery_mv), (
+                None if battery_info.get("battery_percent") is None else int(battery_info.get("battery_percent"))
+            ), "battery_info"
+    if isinstance(self_telemetry, dict):
+        battery_mv = self_telemetry.get("battery_mv")
+        if battery_mv is not None:
+            return int(battery_mv), (
+                None if self_telemetry.get("battery_percent") is None else int(self_telemetry.get("battery_percent"))
+            ), "self_telemetry"
+    if isinstance(radio_stats, dict):
+        for key in ("core_battery_mv", "battery_mv"):
+            battery_mv = radio_stats.get(key)
+            if battery_mv is not None:
+                return int(battery_mv), None, "radio_stats"
+    return None, None, ""
+
+
+def _record_battery_history_sample(
+    radio_stats: dict | None,
+    self_telemetry: dict | None,
+    battery_info: dict | None,
+    recorded_at: int | None = None,
+    *,
+    owner_id: str | None = None,
+) -> None:
+    normalized_owner_id, _ = _resolve_owner_scope(owner_id, False)
+    if not normalized_owner_id:
+        return
+    battery_mv, battery_percent, source = _select_battery_history_sample(radio_stats, self_telemetry, battery_info)
+    if battery_mv is None:
+        return
+    with DB_LOCK, sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO battery_history (owner_id, recorded_at, battery_mv, battery_percent, source)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                normalized_owner_id,
+                int(recorded_at or utc_now_epoch()),
+                int(battery_mv),
+                None if battery_percent is None else int(battery_percent),
+                str(source or ""),
+            ),
+        )
+        _prune_battery_history_locked(
+            conn,
+            _normalize_battery_history_retention_days(_get_client_settings().get("battery_history_retention_days")),
+        )
+        conn.commit()
         conn.commit()
 
 
@@ -3117,6 +3456,167 @@ def get_signal_metrics_chart(
     }
 
 
+def get_battery_history_chart(
+    range_seconds: int | None = None,
+    *,
+    start_at: int | None = None,
+    end_at: int | None = None,
+    owner_id: str | None = None,
+) -> dict:
+    settings = _get_client_settings()
+    retention_days = _normalize_battery_history_retention_days(settings.get("battery_history_retention_days"))
+    retention_seconds = retention_days * 86400
+    now_epoch = utc_now_epoch()
+    try:
+        requested_end_at = int(end_at) if end_at is not None else now_epoch
+    except (TypeError, ValueError):
+        requested_end_at = now_epoch
+    requested_end_at = max(0, min(now_epoch, requested_end_at))
+    if start_at is not None:
+        try:
+            requested_start_at = int(start_at)
+        except (TypeError, ValueError):
+            requested_start_at = requested_end_at - 86400
+        requested_start_at = max(requested_end_at - retention_seconds, min(requested_start_at, requested_end_at - 60))
+        selected_range_seconds = max(60, requested_end_at - requested_start_at)
+        selected_start_at = requested_start_at
+        selected_end_at = requested_end_at
+        custom_range = True
+    else:
+        try:
+            requested_seconds = retention_seconds if range_seconds is None else int(range_seconds)
+        except (TypeError, ValueError):
+            requested_seconds = retention_seconds
+        selected_range_seconds = max(3600, min(retention_seconds, requested_seconds))
+        selected_end_at = requested_end_at
+        selected_start_at = max(0, selected_end_at - selected_range_seconds)
+        custom_range = False
+    owner_where, owner_params = _message_owner_clause(owner_id, False)
+    with DB_LOCK, sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            f"""
+            SELECT recorded_at, battery_mv, battery_percent, source
+            FROM battery_history
+            WHERE {owner_where} AND recorded_at >= ? AND recorded_at <= ?
+            ORDER BY recorded_at ASC
+            """,
+            owner_params + (selected_start_at, selected_end_at),
+        ).fetchall()
+    if selected_range_seconds <= 21600:
+        target_points = 120
+    elif selected_range_seconds <= 43200:
+        target_points = 132
+    elif selected_range_seconds <= 86400:
+        target_points = 144
+    elif selected_range_seconds <= 3 * 86400:
+        target_points = 168
+    elif selected_range_seconds <= 7 * 86400:
+        target_points = 180
+    elif selected_range_seconds <= 30 * 86400:
+        target_points = 210
+    elif selected_range_seconds <= 90 * 86400:
+        target_points = 240
+    else:
+        target_points = 270
+    if len(rows) > 1:
+        actual_span_seconds = max(60, int(rows[-1]["recorded_at"] or 0) - int(rows[0]["recorded_at"] or 0))
+    else:
+        actual_span_seconds = selected_range_seconds
+    bucket_basis_seconds = min(selected_range_seconds, max(60, actual_span_seconds))
+    raw_bucket_secs = max(15, int(math.ceil(bucket_basis_seconds / max(1, target_points))))
+    bucket_secs = next(
+        (
+            candidate
+            for candidate in (
+                15,
+                20,
+                30,
+                45,
+                60,
+                90,
+                120,
+                180,
+                300,
+                600,
+                900,
+                1200,
+                1800,
+                3600,
+                7200,
+                10800,
+                14400,
+                21600,
+                43200,
+                86400,
+                172800,
+                259200,
+                345600,
+                604800,
+            )
+            if candidate >= raw_bucket_secs
+        ),
+        604800,
+    )
+    buckets: dict[int, dict] = {}
+    for row in rows:
+        recorded_at = int(row["recorded_at"] or 0)
+        bucket_at = (recorded_at // bucket_secs) * bucket_secs
+        bucket = buckets.setdefault(
+            bucket_at,
+            {
+                "battery_mv_sum": 0.0,
+                "battery_mv_count": 0,
+                "battery_mv_min": None,
+                "battery_mv_max": None,
+                "battery_percent_sum": 0.0,
+                "battery_percent_count": 0,
+                "battery_percent_min": None,
+                "battery_percent_max": None,
+            },
+        )
+        battery_mv = int(row["battery_mv"])
+        bucket["battery_mv_sum"] += battery_mv
+        bucket["battery_mv_count"] += 1
+        bucket["battery_mv_min"] = battery_mv if bucket["battery_mv_min"] is None else min(int(bucket["battery_mv_min"]), battery_mv)
+        bucket["battery_mv_max"] = battery_mv if bucket["battery_mv_max"] is None else max(int(bucket["battery_mv_max"]), battery_mv)
+        if row["battery_percent"] is not None:
+            battery_percent = int(row["battery_percent"])
+            bucket["battery_percent_sum"] += battery_percent
+            bucket["battery_percent_count"] += 1
+            bucket["battery_percent_min"] = battery_percent if bucket["battery_percent_min"] is None else min(int(bucket["battery_percent_min"]), battery_percent)
+            bucket["battery_percent_max"] = battery_percent if bucket["battery_percent_max"] is None else max(int(bucket["battery_percent_max"]), battery_percent)
+    points = [
+        {
+            "ts": bucket_at,
+            "battery_mv": None if not data["battery_mv_count"] else int(round(data["battery_mv_sum"] / max(1, data["battery_mv_count"]))),
+            "battery_mv_count": int(data["battery_mv_count"]),
+            "battery_mv_min": None if data["battery_mv_min"] is None else int(data["battery_mv_min"]),
+            "battery_mv_max": None if data["battery_mv_max"] is None else int(data["battery_mv_max"]),
+            "battery_percent_raw": None if not data["battery_percent_count"] else int(round(data["battery_percent_sum"] / max(1, data["battery_percent_count"]))),
+            "battery_percent_raw_min": None if data["battery_percent_min"] is None else int(data["battery_percent_min"]),
+            "battery_percent_raw_max": None if data["battery_percent_max"] is None else int(data["battery_percent_max"]),
+        }
+        for bucket_at, data in sorted(buckets.items())
+    ]
+    battery_mv_values = [int(point["battery_mv"]) for point in points if point["battery_mv"] is not None]
+    latest_index = max([index for index, point in enumerate(points) if point["battery_mv"] is not None], default=-1)
+    latest_point = points[latest_index] if latest_index >= 0 else None
+    return {
+        "custom_range": custom_range,
+        "range_seconds": selected_range_seconds,
+        "start_at": selected_start_at,
+        "end_at": selected_end_at,
+        "retention_days": retention_days,
+        "bucket_secs": bucket_secs,
+        "points": points,
+        "battery_mv_latest_value": None if latest_point is None else latest_point["battery_mv"],
+        "battery_mv_min_value": None if not battery_mv_values else int(min(battery_mv_values)),
+        "battery_mv_max_value": None if not battery_mv_values else int(max(battery_mv_values)),
+        "battery_mv_avg_value": None if not battery_mv_values else int(round(sum(battery_mv_values) / len(battery_mv_values))),
+    }
+
+
 def _get_connection_lock(descriptor: ConnectionDescriptor) -> threading.Lock:
     with CONNECTION_RUNTIME_GUARD:
         lock = CONNECTION_LOCKS.get(descriptor.lock_key)
@@ -3229,6 +3729,26 @@ def _broadcast_global_event(payload: dict) -> None:
                 sink.put_nowait(payload)
             except queue.Full:
                 continue
+
+
+def _broadcast_channel_sync_progress(port: str, payload: dict) -> None:
+    _broadcast_event(
+        port,
+        {
+            "event": "channel-sync-progress",
+            "operation_id": str(payload.get("operation_id") or ""),
+            "operation": str(payload.get("operation") or "enable"),
+            "status": str(payload.get("status") or "progress"),
+            "phase": str(payload.get("phase") or ""),
+            "current": int(payload.get("current") or 0),
+            "total": int(payload.get("total") or 0),
+            "channel_idx": int(payload.get("channel_idx") or -1),
+            "channel_name": str(payload.get("channel_name") or ""),
+            "attempt": int(payload.get("attempt") or 0),
+            "attempts": int(payload.get("attempts") or 0),
+            "message": str(payload.get("message") or ""),
+        },
+    )
 
 
 def _clone_route_trace_payload(value: dict | None) -> dict | None:
@@ -3347,6 +3867,7 @@ def _build_session_snapshot(
             "radio_stats": session.radio_stats,
             "self_telemetry": session.self_telemetry,
             "battery_info": session.battery_info,
+            "meshcore_params": dict(session.meshcore_params or {}) if session.meshcore_params else None,
             "queue_state": {
                 "drain_in_progress": bool(session.queue_drain_in_progress),
                 "drain_requested": bool(session.queue_drain_requested),
@@ -3387,6 +3908,19 @@ def _build_session_snapshot(
     if include_contacts:
         snapshot["contacts"] = _compact_contacts_for_client(contacts_snapshot)
     return snapshot
+
+
+def _build_cached_meshcore_params_snapshot(session: BackgroundCompanionSession) -> dict:
+    with session.snapshot_lock:
+        return {
+            "ok": True,
+            "device": dict(session.device or {}),
+            "self": dict(session.self_info or {}),
+            "radio_stats": dict(session.radio_stats or {}) if isinstance(session.radio_stats, dict) else session.radio_stats,
+            "self_telemetry": dict(session.self_telemetry or {}) if isinstance(session.self_telemetry, dict) else session.self_telemetry,
+            "battery_info": dict(session.battery_info or {}) if isinstance(session.battery_info, dict) else session.battery_info,
+            "meshcore_params": dict(session.meshcore_params or {}) if session.meshcore_params else {},
+        }
 
 
 def _get_background_session(port: str) -> BackgroundCompanionSession | None:
@@ -3447,7 +3981,7 @@ def _background_command_priority(kind: str) -> int:
         return 0
     if normalized in ("trace_route",):
         return 1
-    if normalized in ("perform_contact_action", "save_channel", "set_node_name", "sync_device_time", "send_advert", "meshcore_params_snapshot", "apply_meshcore_params"):
+    if normalized in ("perform_contact_action", "save_channel", "delete_channel", "sync_meshcorium_channels", "remove_access_all_meshcorium_channels", "set_node_name", "sync_device_time", "send_advert", "meshcore_params_snapshot", "apply_meshcore_params"):
         return 2
     if normalized in ("refresh_contacts", "remove_contacts", "sync_favorites_group", "export_self_contact"):
         return 3
@@ -4117,10 +4651,12 @@ def _get_merged_radio_stats_with_client(client: MeshCoreSerialClient) -> dict | 
         radio_stats = _radio_stats_to_dict(client.get_radio_stats())
     except (MeshCoreError, SerialException, ValueError):
         radio_stats = None
+    _settle_ble_meshcore_snapshot_step(client)
     try:
         core_stats = client.get_core_stats()
     except (MeshCoreError, SerialException, ValueError):
         core_stats = None
+    _settle_ble_meshcore_snapshot_step(client)
     return _merge_core_stats_into_radio_stats(radio_stats, core_stats)
 
 
@@ -4137,6 +4673,8 @@ MESHCORE_AUTOADD_CHAT = 1 << 1
 MESHCORE_AUTOADD_REPEATER = 1 << 2
 MESHCORE_AUTOADD_ROOM_SERVER = 1 << 3
 MESHCORE_AUTOADD_SENSOR = 1 << 4
+BLE_MESHCORE_SNAPSHOT_STEP_SETTLE_SECS = 0.18
+BLE_MESHCORE_SNAPSHOT_REPEAT_COOLDOWN_SECS = 1.25
 
 
 def _decode_meshcore_telemetry_modes(value: object) -> dict[str, int]:
@@ -4146,6 +4684,24 @@ def _decode_meshcore_telemetry_modes(value: object) -> dict[str, int]:
         "location": (raw_value >> 2) & 0x03,
         "environment": (raw_value >> 4) & 0x03,
     }
+
+
+def _is_ble_meshcore_client(client: object) -> bool:
+    checker = getattr(client, "is_ble_transport", None)
+    if callable(checker):
+        try:
+            return bool(checker())
+        except Exception:
+            return False
+    return False
+
+
+def _settle_ble_meshcore_snapshot_step(
+    client: object,
+    delay_secs: float = BLE_MESHCORE_SNAPSHOT_STEP_SETTLE_SECS,
+) -> None:
+    if _is_ble_meshcore_client(client) and delay_secs > 0:
+        time.sleep(max(0.0, float(delay_secs)))
 
 
 def _encode_meshcore_telemetry_modes(*, base: object, location: object, environment: object) -> int:
@@ -4201,6 +4757,40 @@ def _require_float_range(name: str, value: object, *, minimum: float, maximum: f
     return parsed
 
 
+MESHCORE_RADIO_BW_KHZ_ALLOWED_VALUES = (
+    7.8,
+    10.4,
+    15.6,
+    20.8,
+    31.25,
+    41.7,
+    62.5,
+    125.0,
+    250.0,
+    500.0,
+)
+
+
+def _normalize_meshcore_radio_bw_khz(value: object, *, field_name: str = "bw_khz") -> float:
+    parsed = float(value)
+    for allowed in MESHCORE_RADIO_BW_KHZ_ALLOWED_VALUES:
+        if abs(parsed - allowed) < 0.001:
+            return float(allowed)
+    allowed_values = ", ".join(str(item).rstrip("0").rstrip(".") for item in MESHCORE_RADIO_BW_KHZ_ALLOWED_VALUES)
+    raise ValueError(f"{field_name} must be one of: {allowed_values}")
+
+
+def _meshcore_radio_cr_to_ui(raw_value: object, *, default: int = 5) -> int:
+    parsed = _parse_int_or_default(raw_value, default=default)
+    return parsed + 4 if 0 < parsed <= 4 else parsed
+
+
+def _meshcore_radio_cr_to_device(ui_value: object, current_raw_value: object) -> int:
+    parsed_ui = _parse_int_or_default(ui_value, default=5)
+    current_raw = _parse_int_or_default(current_raw_value, default=parsed_ui)
+    return parsed_ui - 4 if 0 < current_raw <= 4 else parsed_ui
+
+
 def _validate_meshcore_name(name: str) -> str:
     normalized = str(name or "").strip()
     if not normalized:
@@ -4226,30 +4816,37 @@ def _collect_meshcore_params_with_client(
         tuning_params = client.get_tuning_params()
     except (MeshCoreError, SerialException, ValueError):
         tuning_params = None
+    _settle_ble_meshcore_snapshot_step(client)
     try:
         custom_vars = client.get_custom_vars()
     except (MeshCoreError, SerialException, ValueError):
         custom_vars = {}
+    _settle_ble_meshcore_snapshot_step(client)
     try:
         autoadd_config = client.get_autoadd_config()
     except (MeshCoreError, SerialException, ValueError):
         autoadd_config = None
+    _settle_ble_meshcore_snapshot_step(client)
     try:
         allowed_repeat_ranges = client.get_allowed_repeat_freq_ranges()
     except (MeshCoreError, SerialException, ValueError):
         allowed_repeat_ranges = []
+    _settle_ble_meshcore_snapshot_step(client)
     try:
         core_stats = _core_stats_to_dict(client.get_core_stats())
     except (MeshCoreError, SerialException, ValueError):
         core_stats = None
+    _settle_ble_meshcore_snapshot_step(client)
     try:
         packet_stats = _packet_stats_to_dict(client.get_packet_stats())
     except (MeshCoreError, SerialException, ValueError):
         packet_stats = None
+    _settle_ble_meshcore_snapshot_step(client)
     try:
         device_time_epoch = int(client.get_device_time() or 0)
     except (MeshCoreError, SerialException, ValueError):
         device_time_epoch = None
+    _settle_ble_meshcore_snapshot_step(client)
 
     autoadd_flags = int(getattr(autoadd_config, "config", 0) or 0)
     autoadd_max_hops = int(getattr(autoadd_config, "max_hops", 0) or 0)
@@ -4273,12 +4870,14 @@ def _collect_meshcore_params_with_client(
     return {
         "radio": {
             "freq_mhz": round(float(self_dict.get("radio_freq_hz_x1000") or 0) / 1000.0, 3),
-            "bw_khz": round(float(self_dict.get("radio_bw_hz_x1000") or 0) / 1000.0, 1),
+            "bw_khz": round(float(self_dict.get("radio_bw_hz_x1000") or 0) / 1000.0, 3),
             "sf": int(self_dict.get("radio_sf") or 0),
-            "cr": int(self_dict.get("radio_cr") or 0),
+            "cr": _meshcore_radio_cr_to_ui(self_dict.get("radio_cr"), default=5),
+            "cr_raw": int(self_dict.get("radio_cr") or 0),
             "tx_power_dbm": int(self_dict.get("tx_power_dbm") or 0),
             "max_tx_power": int(self_dict.get("max_tx_power") or 0),
             "client_repeat": bool(device_dict.get("client_repeat")),
+            "client_repeat_supported": int(device_dict.get("firmware_ver") or 0) >= 9,
             "client_repeat_allowed": client_repeat_allowed,
             "allowed_repeat_ranges": allowed_repeat_ranges_payload,
         },
@@ -4368,6 +4967,7 @@ def _collect_meshcore_params_with_client(
                 "freq_mhz_max": 2500.0,
                 "bw_khz_min": 7.0,
                 "bw_khz_max": 500.0,
+                "bw_khz_allowed_values": list(MESHCORE_RADIO_BW_KHZ_ALLOWED_VALUES),
                 "sf_min": 5,
                 "sf_max": 12,
                 "cr_min": 5,
@@ -4386,7 +4986,7 @@ def _collect_meshcore_params_with_client(
             },
             "routing": {
                 "multi_acks_min": 0,
-                "multi_acks_max": 1,
+                "multi_acks_max": 2,
                 "rx_delay_base_min": 0.0,
                 "rx_delay_base_max": 20.0,
                 "airtime_factor_min": 0.0,
@@ -4433,6 +5033,13 @@ def _apply_meshcore_params_with_client(
     current_params = dict(current_snapshot.get("meshcore_params") or {})
     if normalized_group == "radio":
         current_radio = dict(current_params.get("radio") or {})
+        current_device = dict(current_snapshot.get("device") or {})
+        next_freq_mhz = None
+        next_bw_khz = None
+        next_sf = None
+        next_cr = None
+        next_client_repeat_value = None
+        next_tx_power_dbm = None
         radio_needs_update = any(
             key in patch
             for key in ("freq_mhz", "bw_khz", "sf", "cr", "client_repeat")
@@ -4450,6 +5057,7 @@ def _apply_meshcore_params_with_client(
                 minimum=7.0,
                 maximum=500.0,
             )
+            next_bw_khz = _normalize_meshcore_radio_bw_khz(next_bw_khz)
             next_sf = _require_int_range(
                 "sf",
                 _parse_int_or_default(patch.get("sf"), default=int(current_radio.get("sf") or 0)),
@@ -4462,6 +5070,7 @@ def _apply_meshcore_params_with_client(
                 minimum=5,
                 maximum=8,
             )
+            next_cr = _meshcore_radio_cr_to_device(next_cr, current_radio.get("cr_raw"))
             next_client_repeat = _parse_boolish(patch.get("client_repeat"), default=bool(current_radio.get("client_repeat")))
             allowed_repeat_ranges = list(current_radio.get("allowed_repeat_ranges") or [])
             if next_client_repeat and allowed_repeat_ranges:
@@ -4472,21 +5081,22 @@ def _apply_meshcore_params_with_client(
                     if isinstance(item, dict)
                 ):
                     raise ValueError("client_repeat is not allowed for the selected frequency")
-            client.set_radio_params(
+            next_client_repeat_value = (1 if next_client_repeat else 0) if int(current_device.get("firmware_ver") or 0) >= 9 else None
+        if "tx_power_dbm" in patch:
+            next_tx_power_dbm = _require_int_range(
+                "tx_power_dbm",
+                _parse_int_or_default(patch.get("tx_power_dbm"), default=int(current_radio.get("tx_power_dbm") or 0)),
+                minimum=-9,
+                maximum=int(current_radio.get("max_tx_power") or 30),
+            )
+        if radio_needs_update or next_tx_power_dbm is not None:
+            client.apply_radio_settings(
                 freq_mhz=next_freq_mhz,
                 bw_khz=next_bw_khz,
                 sf=next_sf,
                 cr=next_cr,
-                client_repeat=1 if next_client_repeat else 0,
-            )
-        if "tx_power_dbm" in patch:
-            client.set_radio_tx_power(
-                _require_int_range(
-                    "tx_power_dbm",
-                    _parse_int_or_default(patch.get("tx_power_dbm"), default=int(current_radio.get("tx_power_dbm") or 0)),
-                    minimum=-9,
-                    maximum=int(current_radio.get("max_tx_power") or 30),
-                )
+                client_repeat=next_client_repeat_value,
+                tx_power_dbm=next_tx_power_dbm,
             )
     elif normalized_group == "identity":
         next_name = str(patch.get("name") or "").strip()
@@ -4521,7 +5131,7 @@ def _apply_meshcore_params_with_client(
                     "multi_acks",
                     _parse_int_or_default(patch.get("multi_acks"), default=int(current_routing.get("multi_acks") or 0)),
                     minimum=0,
-                    maximum=1,
+                    maximum=2,
                 ),
             )
         if "rx_delay_base" in patch or "airtime_factor" in patch:
@@ -4632,7 +5242,9 @@ def _collect_node_snapshot_with_client(
     include_channels: bool = True,
 ) -> dict:
     device = client.query_device(protocol_version)
+    _settle_ble_meshcore_snapshot_step(client)
     self_info = client.app_start(app_name, app_version)
+    _settle_ble_meshcore_snapshot_step(client)
     device_dict = _device_info_to_dict(device)
     radio_stats = _get_merged_radio_stats_with_client(client)
     owner_id = _normalize_owner_id(getattr(self_info, "public_key", ""))
@@ -4642,10 +5254,18 @@ def _collect_node_snapshot_with_client(
         self_telemetry = _self_telemetry_to_dict(client.get_self_telemetry())
     except (MeshCoreError, SerialException, ValueError):
         self_telemetry = None
+    _settle_ble_meshcore_snapshot_step(client)
     try:
         battery_info = _battery_info_to_dict(client.get_battery_info())
     except (MeshCoreError, SerialException, ValueError):
         battery_info = None
+    _settle_ble_meshcore_snapshot_step(client)
+    _record_battery_history_sample(
+        radio_stats,
+        self_telemetry,
+        battery_info,
+        owner_id=owner_id,
+    )
     meshcore_params = _collect_meshcore_params_with_client(
         client,
         device=device,
@@ -4784,6 +5404,8 @@ def _resolve_channel_name_for_push(
     )
     if channel_name:
         return channel_name
+    if _is_official_meshcore_public_channel_idx(channel_idx):
+        return MESHCORE_PUBLIC_CHANNEL_NAME
     if normalized_identity.startswith("public::"):
         public_name = normalized_identity.split("::", 1)[1].strip()
         if public_name:
@@ -4808,14 +5430,38 @@ def _resolve_channel_runtime_dict(
                 continue
     slot = _get_node_channel_slot(owner_id, channel_idx=channel_idx)
     if slot is None:
+        if _is_official_meshcore_public_channel_idx(channel_idx):
+            return dict(_canonical_meshcore_public_channel_dict(int(channel_idx)))
         return None
     return {
         "idx": int(slot.get("channel_idx") or -1),
-        "name": str(slot.get("channel_name") or ""),
-        "secret_hex": str(slot.get("channel_secret_hex") or ""),
+        "name": _channel_runtime_name({
+            "idx": int(slot.get("channel_idx") or -1),
+            "name": str(slot.get("channel_name") or ""),
+            "secret_hex": str(slot.get("channel_secret_hex") or ""),
+        }),
+        "secret_hex": _channel_runtime_secret_hex({
+            "idx": int(slot.get("channel_idx") or -1),
+            "name": str(slot.get("channel_name") or ""),
+            "secret_hex": str(slot.get("channel_secret_hex") or ""),
+        }),
         "hash": str(slot.get("channel_hash") or ""),
-        "channel_identity": str(slot.get("channel_identity") or ""),
-        "is_public": bool(slot.get("is_public")),
+        "channel_identity": str(
+            slot.get("channel_identity")
+            or _build_channel_identity(
+                _channel_runtime_name({
+                    "idx": int(slot.get("channel_idx") or -1),
+                    "name": str(slot.get("channel_name") or ""),
+                    "secret_hex": str(slot.get("channel_secret_hex") or ""),
+                }),
+                _channel_runtime_secret_hex({
+                    "idx": int(slot.get("channel_idx") or -1),
+                    "name": str(slot.get("channel_name") or ""),
+                    "secret_hex": str(slot.get("channel_secret_hex") or ""),
+                }),
+            )
+        ),
+        "is_public": bool(slot.get("is_public")) or _is_official_meshcore_public_channel_idx(slot.get("channel_idx")),
     }
 
 
@@ -4832,7 +5478,8 @@ def _is_meshcore_public_channel_name(channel_name: object) -> bool:
 
 
 def _is_public_channel_name(channel_name: object) -> bool:
-    return _normalize_channel_name(channel_name).startswith("#")
+    normalized = _normalize_meshcore_channel_name(channel_name)
+    return normalized.startswith("#")
 
 
 def _normalize_channel_secret_hex(value: object) -> str:
@@ -4863,6 +5510,39 @@ def _is_canonical_meshcore_public_channel_config(channel_name: object, channel_s
     )
 
 
+def _is_official_meshcore_public_channel_idx(channel_idx: object) -> bool:
+    try:
+        return int(channel_idx) == 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _canonical_meshcore_public_channel_dict(channel_idx: int = 0) -> dict[str, object]:
+    return {
+        "idx": int(channel_idx),
+        "name": MESHCORE_PUBLIC_CHANNEL_NAME,
+        "secret_hex": MESHCORE_PUBLIC_CHANNEL_PSK_HEX,
+        "hash": hashlib.sha256(bytes.fromhex(MESHCORE_PUBLIC_CHANNEL_PSK_HEX)).hexdigest()[:2],
+        "channel_identity": _build_channel_identity(MESHCORE_PUBLIC_CHANNEL_NAME, MESHCORE_PUBLIC_CHANNEL_PSK_HEX),
+        "is_public": True,
+    }
+
+
+def _normalize_runtime_channel_fields(channel_idx: object, channel_name: object, channel_secret_hex: object = "") -> tuple[str, str]:
+    normalized_idx = None
+    try:
+        normalized_idx = int(channel_idx)
+    except (TypeError, ValueError):
+        normalized_idx = None
+    normalized_name = _normalize_meshcore_channel_name(channel_name)
+    normalized_secret_hex = _normalize_channel_secret_hex(channel_secret_hex)
+    if normalized_idx == 0 and not normalized_name:
+        return MESHCORE_PUBLIC_CHANNEL_NAME, MESHCORE_PUBLIC_CHANNEL_PSK_HEX
+    if _is_meshcore_public_channel_name(normalized_name) and not normalized_secret_hex:
+        return normalized_name, MESHCORE_PUBLIC_CHANNEL_PSK_HEX
+    return normalized_name, normalized_secret_hex
+
+
 def _channel_runtime_idx(channel: object) -> int:
     if isinstance(channel, dict):
         return int(channel.get("idx") or -1)
@@ -4871,14 +5551,34 @@ def _channel_runtime_idx(channel: object) -> int:
 
 def _channel_runtime_name(channel: object) -> str:
     if isinstance(channel, dict):
-        return _normalize_channel_name(channel.get("name"))
-    return _normalize_channel_name(getattr(channel, "channel_name", ""))
+        normalized_name, _normalized_secret_hex = _normalize_runtime_channel_fields(
+            channel.get("idx"),
+            channel.get("name"),
+            channel.get("secret_hex"),
+        )
+        return normalized_name
+    normalized_name, _normalized_secret_hex = _normalize_runtime_channel_fields(
+        getattr(channel, "channel_idx", -1),
+        getattr(channel, "channel_name", ""),
+        format_hex(getattr(channel, "channel_secret", b"")),
+    )
+    return normalized_name
 
 
 def _channel_runtime_secret_hex(channel: object) -> str:
     if isinstance(channel, dict):
-        return _normalize_channel_secret_hex(channel.get("secret_hex"))
-    return _normalize_channel_secret_hex(format_hex(getattr(channel, "channel_secret", b"")))
+        _normalized_name, normalized_secret_hex = _normalize_runtime_channel_fields(
+            channel.get("idx"),
+            channel.get("name"),
+            channel.get("secret_hex"),
+        )
+        return normalized_secret_hex
+    _normalized_name, normalized_secret_hex = _normalize_runtime_channel_fields(
+        getattr(channel, "channel_idx", -1),
+        getattr(channel, "channel_name", ""),
+        format_hex(getattr(channel, "channel_secret", b"")),
+    )
+    return normalized_secret_hex
 
 
 def _guard_meshcore_public_channel_edit(existing_channel: object | None, requested_name: object, requested_secret_hex: object) -> None:
@@ -4894,6 +5594,18 @@ def _guard_meshcore_public_channel_edit(existing_channel: object | None, request
         raise ValueError("official MeshCore public channel #public has a fixed PSK and cannot be edited")
 
 
+def _resolve_channel_target_idx(channel_idx: int | None, channel_name: object, existing_channels: list, max_channels: int) -> int:
+    normalized_name = _normalize_meshcore_channel_name(channel_name)
+    if _is_meshcore_public_channel_name(normalized_name):
+        return 0
+    if channel_idx is not None:
+        target_idx = int(channel_idx)
+        if target_idx == 0:
+            raise ValueError("channel idx=0 is reserved for the official MeshCore #public channel")
+        return target_idx
+    return _pick_first_free_channel_idx(existing_channels, max_channels)
+
+
 def _build_channel_identity(channel_name: object, channel_secret_hex: object = "") -> str:
     normalized_name = _normalize_meshcore_channel_name(channel_name)
     if not normalized_name:
@@ -4906,10 +5618,16 @@ def _build_channel_identity(channel_name: object, channel_secret_hex: object = "
     return f"private-name::{normalized_name.lower()}"
 
 
-def _channel_slot_row_to_dict(row: sqlite3.Row | tuple | None) -> dict | None:
+def _row_value(source: sqlite3.Row | dict, key: str, default: object = None) -> object:
+    if isinstance(source, sqlite3.Row):
+        return source[key] if key in source.keys() else default
+    return source.get(key, default)
+
+
+def _channel_slot_row_to_dict(row: sqlite3.Row | tuple | dict | None) -> dict | None:
     if row is None:
         return None
-    if isinstance(row, sqlite3.Row):
+    if isinstance(row, (sqlite3.Row, dict)):
         source = row
     else:
         source = {
@@ -4921,16 +5639,31 @@ def _channel_slot_row_to_dict(row: sqlite3.Row | tuple | None) -> dict | None:
             "channel_identity": row[5],
             "is_public": row[6],
             "last_seen_at": row[7],
+            "access_all_messages_enabled": row[8] if len(row) > 8 else 0,
+            "access_all_messages_enabled_at": row[9] if len(row) > 9 else 0,
+            "access_all_messages_source_owner_id": row[10] if len(row) > 10 else "",
         }
+    channel_idx = int(_row_value(source, "channel_idx", 0) or 0)
+    channel_name, channel_secret_hex = _normalize_runtime_channel_fields(
+        channel_idx,
+        _row_value(source, "channel_name", ""),
+        _row_value(source, "channel_secret_hex", ""),
+    )
+    channel_identity = str(_row_value(source, "channel_identity", "") or "").strip() or _build_channel_identity(channel_name, channel_secret_hex)
     return {
-        "owner_id": _normalize_owner_id(source["owner_id"]),
-        "channel_idx": int(source["channel_idx"] or 0),
-        "channel_name": _normalize_channel_name(source["channel_name"]),
-        "channel_secret_hex": _normalize_channel_secret_hex(source["channel_secret_hex"]),
-        "channel_hash": str(source["channel_hash"] or "").strip().lower(),
-        "channel_identity": str(source["channel_identity"] or "").strip(),
-        "is_public": bool(source["is_public"]),
-        "last_seen_at": int(source["last_seen_at"] or 0),
+        "owner_id": _normalize_owner_id(_row_value(source, "owner_id", "")),
+        "channel_idx": channel_idx,
+        "channel_name": channel_name,
+        "channel_secret_hex": channel_secret_hex,
+        "channel_hash": str(_row_value(source, "channel_hash", "") or "").strip().lower() or (
+            hashlib.sha256(bytes.fromhex(channel_secret_hex)).hexdigest()[:2] if channel_secret_hex else ""
+        ),
+        "channel_identity": channel_identity,
+        "is_public": bool(_row_value(source, "is_public", 0)) or _is_official_meshcore_public_channel_idx(channel_idx),
+        "last_seen_at": int(_row_value(source, "last_seen_at", 0) or 0),
+        "access_all_messages_enabled": bool(_row_value(source, "access_all_messages_enabled", 0)),
+        "access_all_messages_enabled_at": int(_row_value(source, "access_all_messages_enabled_at", 0) or 0),
+        "access_all_messages_source_owner_id": _normalize_owner_id(_row_value(source, "access_all_messages_source_owner_id", "")),
     }
 
 
@@ -4942,7 +5675,8 @@ def _list_node_channel_slots(owner_id: str | None) -> list[dict]:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             """
-            SELECT owner_id, channel_idx, channel_name, channel_secret_hex, channel_hash, channel_identity, is_public, last_seen_at
+            SELECT owner_id, channel_idx, channel_name, channel_secret_hex, channel_hash, channel_identity, is_public, last_seen_at,
+                   access_all_messages_enabled, access_all_messages_enabled_at, access_all_messages_source_owner_id
             FROM node_channel_slots
             WHERE owner_id = ?
             ORDER BY channel_idx ASC
@@ -4950,6 +5684,43 @@ def _list_node_channel_slots(owner_id: str | None) -> list[dict]:
             (normalized_owner_id,),
         ).fetchall()
     return [_channel_slot_row_to_dict(row) for row in rows if _channel_slot_row_to_dict(row) is not None]
+
+
+def _list_meshcorium_channel_library() -> tuple[list[dict], int]:
+    with DB_LOCK, sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT owner_id, channel_idx, channel_name, channel_secret_hex, channel_hash, channel_identity, is_public, last_seen_at,
+                   access_all_messages_enabled, access_all_messages_enabled_at, access_all_messages_source_owner_id
+            FROM node_channel_slots
+            WHERE COALESCE(channel_name, '') != ''
+            ORDER BY last_seen_at DESC, owner_id ASC, channel_idx ASC
+            """
+        ).fetchall()
+    seen_identities: set[str] = set()
+    duplicate_sources = 0
+    candidates: list[dict] = []
+    for row in rows:
+        slot = _channel_slot_row_to_dict(row)
+        if slot is None:
+            continue
+        channel_name = _normalize_meshcore_channel_name(slot.get("channel_name"))
+        channel_secret_hex = _resolve_channel_secret_hex_for_save(channel_name, slot.get("channel_secret_hex"))
+        channel_identity = str(slot.get("channel_identity") or _build_channel_identity(channel_name, channel_secret_hex)).strip()
+        if not channel_name or not channel_identity:
+            continue
+        if channel_identity in seen_identities:
+            duplicate_sources += 1
+            continue
+        seen_identities.add(channel_identity)
+        candidates.append({
+            **slot,
+            "channel_name": channel_name,
+            "channel_secret_hex": channel_secret_hex,
+            "channel_identity": channel_identity,
+        })
+    return candidates, duplicate_sources
 
 
 def _get_node_channel_slot(
@@ -4968,7 +5739,8 @@ def _get_node_channel_slot(
     if candidate_identity:
         queries.append((
             """
-            SELECT owner_id, channel_idx, channel_name, channel_secret_hex, channel_hash, channel_identity, is_public, last_seen_at
+            SELECT owner_id, channel_idx, channel_name, channel_secret_hex, channel_hash, channel_identity, is_public, last_seen_at,
+                   access_all_messages_enabled, access_all_messages_enabled_at, access_all_messages_source_owner_id
             FROM node_channel_slots
             WHERE owner_id = ? AND channel_identity = ?
             LIMIT 1
@@ -4978,7 +5750,8 @@ def _get_node_channel_slot(
     if channel_idx is not None:
         queries.append((
             """
-            SELECT owner_id, channel_idx, channel_name, channel_secret_hex, channel_hash, channel_identity, is_public, last_seen_at
+            SELECT owner_id, channel_idx, channel_name, channel_secret_hex, channel_hash, channel_identity, is_public, last_seen_at,
+                   access_all_messages_enabled, access_all_messages_enabled_at, access_all_messages_source_owner_id
             FROM node_channel_slots
             WHERE owner_id = ? AND channel_idx = ?
             LIMIT 1
@@ -5026,7 +5799,8 @@ def _persist_node_channel_slots(owner_id: str | None, channels: list[dict]) -> N
         conn.row_factory = sqlite3.Row
         existing_rows = conn.execute(
             """
-            SELECT owner_id, channel_idx, channel_name, channel_secret_hex, channel_hash, channel_identity, is_public, last_seen_at
+            SELECT owner_id, channel_idx, channel_name, channel_secret_hex, channel_hash, channel_identity, is_public, last_seen_at,
+                   access_all_messages_enabled, access_all_messages_enabled_at, access_all_messages_source_owner_id
             FROM node_channel_slots
             WHERE owner_id = ?
             """,
@@ -5062,15 +5836,33 @@ def _persist_node_channel_slots(owner_id: str | None, channels: list[dict]) -> N
                 channel_hash,
                 channel_identity,
                 is_public,
-                last_seen_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                last_seen_at,
+                access_all_messages_enabled,
+                access_all_messages_enabled_at,
+                access_all_messages_source_owner_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, '')
             ON CONFLICT(owner_id, channel_idx) DO UPDATE SET
                 channel_name = excluded.channel_name,
                 channel_secret_hex = excluded.channel_secret_hex,
                 channel_hash = excluded.channel_hash,
                 channel_identity = excluded.channel_identity,
                 is_public = excluded.is_public,
-                last_seen_at = excluded.last_seen_at
+                last_seen_at = excluded.last_seen_at,
+                access_all_messages_enabled = CASE
+                    WHEN node_channel_slots.channel_identity = excluded.channel_identity
+                    THEN node_channel_slots.access_all_messages_enabled
+                    ELSE 0
+                END,
+                access_all_messages_enabled_at = CASE
+                    WHEN node_channel_slots.channel_identity = excluded.channel_identity
+                    THEN node_channel_slots.access_all_messages_enabled_at
+                    ELSE 0
+                END,
+                access_all_messages_source_owner_id = CASE
+                    WHEN node_channel_slots.channel_identity = excluded.channel_identity
+                    THEN node_channel_slots.access_all_messages_source_owner_id
+                    ELSE ''
+                END
             """,
             [
                 (
@@ -5088,6 +5880,84 @@ def _persist_node_channel_slots(owner_id: str | None, channels: list[dict]) -> N
         )
         conn.commit()
     _backfill_channel_message_identities(normalized_owner_id)
+
+
+def _mark_access_all_message_channel_slots(owner_id: str | None, applied_entries: list[dict]) -> None:
+    normalized_owner_id = _normalize_owner_id(owner_id)
+    if not normalized_owner_id or not applied_entries:
+        return
+    now_epoch = utc_now_epoch()
+    records = [
+        (
+            now_epoch,
+            _normalize_owner_id(entry.get("source_owner_id")),
+            normalized_owner_id,
+            int(entry.get("idx") or -1),
+            str(entry.get("channel_identity") or "").strip(),
+        )
+        for entry in applied_entries
+        if int(entry.get("idx") or -1) >= 0 and str(entry.get("channel_identity") or "").strip()
+    ]
+    if not records:
+        return
+    with DB_LOCK, sqlite3.connect(DB_PATH) as conn:
+        conn.executemany(
+            """
+            UPDATE node_channel_slots
+            SET access_all_messages_enabled = 1,
+                access_all_messages_enabled_at = ?,
+                access_all_messages_source_owner_id = ?
+            WHERE owner_id = ?
+              AND channel_idx = ?
+              AND channel_identity = ?
+            """,
+            records,
+        )
+        conn.commit()
+
+
+def _list_access_all_message_channel_slots(owner_id: str | None) -> list[dict]:
+    normalized_owner_id = _normalize_owner_id(owner_id)
+    if not normalized_owner_id:
+        return []
+    with DB_LOCK, sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT owner_id, channel_idx, channel_name, channel_secret_hex, channel_hash, channel_identity, is_public, last_seen_at,
+                   access_all_messages_enabled, access_all_messages_enabled_at, access_all_messages_source_owner_id
+            FROM node_channel_slots
+            WHERE owner_id = ?
+              AND COALESCE(access_all_messages_enabled, 0) = 1
+            ORDER BY channel_idx DESC
+            """,
+            (normalized_owner_id,),
+        ).fetchall()
+    return [slot for row in rows if (slot := _channel_slot_row_to_dict(row)) is not None]
+
+
+def _delete_node_channel_slot_record(owner_id: str | None, channel_idx: int, channel_identity: str = "") -> None:
+    normalized_owner_id = _normalize_owner_id(owner_id)
+    if not normalized_owner_id or int(channel_idx) < 0:
+        return
+    normalized_identity = str(channel_identity or "").strip()
+    with DB_LOCK, sqlite3.connect(DB_PATH) as conn:
+        if normalized_identity:
+            conn.execute(
+                """
+                DELETE FROM node_channel_slots
+                WHERE owner_id = ?
+                  AND channel_idx = ?
+                  AND channel_identity = ?
+                """,
+                (normalized_owner_id, int(channel_idx), normalized_identity),
+            )
+        else:
+            conn.execute(
+                "DELETE FROM node_channel_slots WHERE owner_id = ? AND channel_idx = ?",
+                (normalized_owner_id, int(channel_idx)),
+            )
+        conn.commit()
 
 
 def _resolve_node_channel_slot_idx(
@@ -5113,10 +5983,10 @@ def _resolve_node_channel_slot_idx(
 def _resolve_channel_name_for_port(port: str | None, channel_idx: int) -> str:
     normalized_port = _normalize_port_value(port)
     if not normalized_port:
-        return ""
+        return MESHCORE_PUBLIC_CHANNEL_NAME if _is_official_meshcore_public_channel_idx(channel_idx) else ""
     session = _get_background_session(normalized_port)
     if not session:
-        return ""
+        return MESHCORE_PUBLIC_CHANNEL_NAME if _is_official_meshcore_public_channel_idx(channel_idx) else ""
     with session.snapshot_lock:
         channels = list(session.channels or [])
     for channel in channels:
@@ -5125,7 +5995,7 @@ def _resolve_channel_name_for_port(port: str | None, channel_idx: int) -> str:
                 return _normalize_channel_name((channel or {}).get("name"))
         except (TypeError, ValueError, AttributeError):
             continue
-    return ""
+    return MESHCORE_PUBLIC_CHANNEL_NAME if _is_official_meshcore_public_channel_idx(channel_idx) else ""
 
 
 @contextmanager
@@ -5159,195 +6029,116 @@ def _channel_history_scope(port: str | None, channel_idx: int, *, owner_id: str 
 
 def _build_channel_unread_payload_for_port(port: str | None, mention_name: str) -> tuple[dict[str, dict[str, int]], dict[str, dict[str, int]]]:
     normalized_port = _normalize_port_value(port)
-    session = _get_background_session(normalized_port) if normalized_port else None
-    channels = []
-    if session:
-        with session.snapshot_lock:
-            channels = list(session.channels or [])
-    owner_id = _resolve_owner_id_for_port(normalized_port)
-    if not channels:
-        channels = [
-            {
-                "idx": int(item.get("channel_idx") or -1),
-                "name": str(item.get("channel_name") or ""),
-                "channel_identity": str(item.get("channel_identity") or ""),
-            }
-            for item in _list_node_channel_slots(owner_id)
-        ]
-    if not channels:
-        return {}, {}
-    owner_id = _resolve_owner_id_for_port(normalized_port)
-    if not owner_id:
-        return {}, {}
-
-    identity_targets: dict[str, str] = {}
-    idx_targets: dict[int, str] = {}
-    for channel in channels:
-        try:
-            channel_idx = int((channel or {}).get("idx") or -1)
-        except (TypeError, ValueError, AttributeError):
-            continue
-        if channel_idx < 0:
-            continue
-        channel_key = str(channel_idx)
-        channel_identity = str((channel or {}).get("channel_identity") or "").strip()
-        if channel_identity:
-            identity_targets[channel_identity] = channel_key
-        else:
-            idx_targets[channel_idx] = channel_key
-
-    if not identity_targets and not idx_targets:
-        return {}, {}
+    scoped_owner_id, access_all = _resolve_owner_scope(_resolve_owner_id_for_port(normalized_port), None)
+    owner_where, owner_params = _message_owner_clause(scoped_owner_id, access_all)
 
     needle = str(mention_name or "").strip().lower()
     like_pattern = f"%{needle}%"
     unread_summary: dict[str, dict[str, int]] = {}
     mention_summary: dict[str, dict[str, int]] = {}
 
-    def _rows_to_payload(rows: list[sqlite3.Row], key_column: str, target_map: dict[str | int, str], count_key: str, first_key: str, last_key: str) -> dict[str, dict[str, int]]:
+    def _channel_summary_key(row: sqlite3.Row) -> str:
+        channel_identity = str(row["channel_identity"] or "").strip()
+        if channel_identity:
+            return channel_identity
+        try:
+            channel_idx = int(row["channel_idx"])
+        except (TypeError, ValueError):
+            return ""
+        if channel_idx < 0:
+            return ""
+        if _is_official_meshcore_public_channel_idx(channel_idx):
+            return _build_channel_identity(MESHCORE_PUBLIC_CHANNEL_NAME, MESHCORE_PUBLIC_CHANNEL_PSK_HEX)
+        row_owner_id = _normalize_owner_id(row["owner_id"])
+        if not access_all or not scoped_owner_id or row_owner_id == scoped_owner_id:
+            return str(channel_idx)
+        return f"{row_owner_id}:idx:{channel_idx}"
+
+    def _merge_payload_row(payload: dict[str, dict[str, int]], row: sqlite3.Row, count_key: str, first_key: str, last_key: str) -> None:
+        channel_key = _channel_summary_key(row)
+        if not channel_key:
+            return
+        current = payload.get(channel_key)
+        count = int(row[count_key] or 0)
+        first_id = int(row[first_key] or 0)
+        last_id = int(row[last_key] or 0)
+        if current is None:
+            payload[channel_key] = {
+                count_key: count,
+                first_key: first_id,
+                last_key: last_id,
+            }
+            return
+        current[count_key] = int(current.get(count_key) or 0) + count
+        if first_id > 0:
+            current[first_key] = min(int(current.get(first_key) or first_id), first_id)
+        current[last_key] = max(int(current.get(last_key) or 0), last_id)
+
+    def _rows_to_payload(rows: list[sqlite3.Row], count_key: str, first_key: str, last_key: str) -> dict[str, dict[str, int]]:
         payload: dict[str, dict[str, int]] = {}
         for row in rows:
-            summary_value = row[key_column]
-            if summary_value is None:
-                continue
-            target_key = target_map.get(summary_value)
-            if not target_key:
-                continue
-            payload[target_key] = {
-                count_key: int(row[count_key] or 0),
-                first_key: int(row[first_key] or 0),
-                last_key: int(row[last_key] or 0),
-            }
+            _merge_payload_row(payload, row, count_key, first_key, last_key)
         return payload
 
     with DB_LOCK, sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
-
-        if identity_targets:
-            placeholders = ", ".join("?" for _ in identity_targets)
-            identity_params = (owner_id, *identity_targets.keys())
-            unread_rows = conn.execute(
-                f"""
-                SELECT
-                    channel_identity,
-                    COUNT(*) AS unread_count,
-                    MIN(id) AS first_unread_id,
-                    MAX(id) AS last_unread_id
-                FROM messages
-                WHERE owner_id = ?
-                  AND message_kind = 'channel'
-                  AND channel_identity IN ({placeholders})
-                  AND from_self = 0
-                  AND COALESCE(is_read, 0) = 0
-                  {"" if not needle else "AND lower(text) NOT LIKE ?"}
-                GROUP BY channel_identity
-                ORDER BY channel_identity ASC
-                """,
-                identity_params if not needle else identity_params + (like_pattern,),
-            ).fetchall()
-            unread_summary.update(
-                _rows_to_payload(
-                    unread_rows,
-                    "channel_identity",
-                    identity_targets,
-                    "unread_count",
-                    "first_unread_id",
-                    "last_unread_id",
-                )
+        unread_rows = conn.execute(
+            f"""
+            SELECT
+                owner_id,
+                channel_idx,
+                channel_identity,
+                COUNT(*) AS unread_count,
+                MIN(id) AS first_unread_id,
+                MAX(id) AS last_unread_id
+            FROM messages
+            WHERE {owner_where}
+              AND message_kind = 'channel'
+              AND from_self = 0
+              AND COALESCE(is_read, 0) = 0
+              {"" if not needle else "AND lower(text) NOT LIKE ?"}
+            GROUP BY owner_id, channel_idx, channel_identity
+            ORDER BY owner_id ASC, channel_idx ASC, channel_identity ASC
+            """,
+            owner_params if not needle else owner_params + (like_pattern,),
+        ).fetchall()
+        unread_summary.update(
+            _rows_to_payload(
+                unread_rows,
+                "unread_count",
+                "first_unread_id",
+                "last_unread_id",
             )
-            if needle:
-                mention_rows = conn.execute(
-                    f"""
-                    SELECT
-                        channel_identity,
-                        COUNT(*) AS mention_count,
-                        MIN(id) AS first_mention_id,
-                        MAX(id) AS last_mention_id
-                    FROM messages
-                    WHERE owner_id = ?
-                      AND message_kind = 'channel'
-                      AND channel_identity IN ({placeholders})
-                      AND from_self = 0
-                      AND lower(text) LIKE ?
-                      AND COALESCE(is_mention_read, 0) = 0
-                    GROUP BY channel_identity
-                    ORDER BY channel_identity ASC
-                    """,
-                    identity_params + (like_pattern,),
-                ).fetchall()
-                mention_summary.update(
-                    _rows_to_payload(
-                        mention_rows,
-                        "channel_identity",
-                        identity_targets,
-                        "mention_count",
-                        "first_mention_id",
-                        "last_mention_id",
-                    )
-                )
-
-        if idx_targets:
-            placeholders = ", ".join("?" for _ in idx_targets)
-            idx_params = (owner_id, *idx_targets.keys())
-            unread_rows = conn.execute(
+        )
+        if needle:
+            mention_rows = conn.execute(
                 f"""
                 SELECT
+                    owner_id,
                     channel_idx,
-                    COUNT(*) AS unread_count,
-                    MIN(id) AS first_unread_id,
-                    MAX(id) AS last_unread_id
+                    channel_identity,
+                    COUNT(*) AS mention_count,
+                    MIN(id) AS first_mention_id,
+                    MAX(id) AS last_mention_id
                 FROM messages
-                WHERE owner_id = ?
+                WHERE {owner_where}
                   AND message_kind = 'channel'
-                  AND channel_idx IN ({placeholders})
                   AND from_self = 0
-                  AND COALESCE(is_read, 0) = 0
-                  {"" if not needle else "AND lower(text) NOT LIKE ?"}
-                GROUP BY channel_idx
-                ORDER BY channel_idx ASC
+                  AND lower(text) LIKE ?
+                  AND COALESCE(is_mention_read, 0) = 0
+                GROUP BY owner_id, channel_idx, channel_identity
+                ORDER BY owner_id ASC, channel_idx ASC, channel_identity ASC
                 """,
-                idx_params if not needle else idx_params + (like_pattern,),
+                owner_params + (like_pattern,),
             ).fetchall()
-            unread_summary.update(
+            mention_summary.update(
                 _rows_to_payload(
-                    unread_rows,
-                    "channel_idx",
-                    idx_targets,
-                    "unread_count",
-                    "first_unread_id",
-                    "last_unread_id",
+                    mention_rows,
+                    "mention_count",
+                    "first_mention_id",
+                    "last_mention_id",
                 )
             )
-            if needle:
-                mention_rows = conn.execute(
-                    f"""
-                    SELECT
-                        channel_idx,
-                        COUNT(*) AS mention_count,
-                        MIN(id) AS first_mention_id,
-                        MAX(id) AS last_mention_id
-                    FROM messages
-                    WHERE owner_id = ?
-                      AND message_kind = 'channel'
-                      AND channel_idx IN ({placeholders})
-                      AND from_self = 0
-                      AND lower(text) LIKE ?
-                      AND COALESCE(is_mention_read, 0) = 0
-                    GROUP BY channel_idx
-                    ORDER BY channel_idx ASC
-                    """,
-                    idx_params + (like_pattern,),
-                ).fetchall()
-                mention_summary.update(
-                    _rows_to_payload(
-                        mention_rows,
-                        "channel_idx",
-                        idx_targets,
-                        "mention_count",
-                        "first_mention_id",
-                        "last_mention_id",
-                    )
-                )
 
     return unread_summary, mention_summary
 
@@ -5867,7 +6658,11 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                 _adopt_unowned_contact_records(owner_id)
                 _adopt_unowned_message_records(owner_id)
                 _normalize_self_contact_message_records(owner_id)
+                initialized_ble_pin = _maybe_initialize_managed_ble_pin_after_first_success(client, session.config, self_dict, device_dict)
                 _record_successful_connection(session.config, self_dict, device_dict)
+                if initialized_ble_pin:
+                    with session.snapshot_lock:
+                        session.device = dict(device_dict)
                 _set_background_bootstrap_stage(
                     session,
                     "load-radio-stats",
@@ -5883,6 +6678,12 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                     battery_info = _battery_info_to_dict(client.get_battery_info())
                 except (MeshCoreError, SerialException, ValueError):
                     battery_info = None
+                _record_battery_history_sample(
+                    radio_stats,
+                    self_telemetry,
+                    battery_info,
+                    owner_id=owner_id,
+                )
                 try:
                     _set_background_bootstrap_stage(
                         session,
@@ -5964,6 +6765,12 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                 )
                 _freeze_self_contact_if_cached(self_dict)
                 _record_signal_metrics_sample(radio_stats, repeaters=_get_recent_repeater_count(session), owner_id=owner_id)
+                _record_battery_history_sample(
+                    radio_stats,
+                    self_telemetry,
+                    battery_info,
+                    owner_id=owner_id,
+                )
                 recent_repeaters_count = _get_recent_repeater_count(session)
                 logging.info(
                     "background session initial snapshot ready port=%s baudrate=%s contacts=%s channels=%s",
@@ -6102,6 +6909,71 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                                         "ok": True,
                                         "channel": channel_dict,
                                         "channels": channels_dict,
+                                    }
+                                )
+                                continue
+                            if kind == "delete_channel":
+                                channels_dict = _delete_channel_and_reload_with_client(
+                                    client,
+                                    session,
+                                    int(command["channel_idx"]),
+                                )
+                                with session.snapshot_lock:
+                                    session.channels = channels_dict
+                                _log_delivery_debug("bg_command_response_put", port=port, kind=kind, sequence=command_sequence, ok=True)
+                                response_queue.put(
+                                    {
+                                        "ok": True,
+                                        "channels": channels_dict,
+                                    }
+                                )
+                                continue
+                            if kind == "sync_meshcorium_channels":
+                                operation_id = str(command.get("operation_id") or "")
+                                channels_dict, summary = _sync_meshcorium_channels_to_node_with_client(
+                                    client,
+                                    session,
+                                    mark_access_all_messages=bool(command.get("mark_access_all_messages", False)),
+                                    progress_callback=lambda payload, operation_id=operation_id: _broadcast_channel_sync_progress(
+                                        port,
+                                        {
+                                            **payload,
+                                            "operation_id": operation_id,
+                                        },
+                                    ),
+                                )
+                                with session.snapshot_lock:
+                                    session.channels = channels_dict
+                                _log_delivery_debug("bg_command_response_put", port=port, kind=kind, sequence=command_sequence, ok=True)
+                                response_queue.put(
+                                    {
+                                        "ok": True,
+                                        "channels": channels_dict,
+                                        "summary": summary,
+                                    }
+                                )
+                                continue
+                            if kind == "remove_access_all_meshcorium_channels":
+                                operation_id = str(command.get("operation_id") or "")
+                                channels_dict, summary = _remove_access_all_meshcorium_channels_from_node_with_client(
+                                    client,
+                                    session,
+                                    progress_callback=lambda payload, operation_id=operation_id: _broadcast_channel_sync_progress(
+                                        port,
+                                        {
+                                            **payload,
+                                            "operation_id": operation_id,
+                                        },
+                                    ),
+                                )
+                                with session.snapshot_lock:
+                                    session.channels = channels_dict
+                                _log_delivery_debug("bg_command_response_put", port=port, kind=kind, sequence=command_sequence, ok=True)
+                                response_queue.put(
+                                    {
+                                        "ok": True,
+                                        "channels": channels_dict,
+                                        "summary": summary,
                                     }
                                 )
                                 continue
@@ -6244,6 +7116,12 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                                 _normalize_self_contact_message_records(owner_id)
                                 recent_repeaters_count = _get_recent_repeater_count(session)
                                 _record_signal_metrics_sample(radio_stats, repeaters=recent_repeaters_count, owner_id=owner_id)
+                                _record_battery_history_sample(
+                                    radio_stats,
+                                    self_telemetry,
+                                    battery_info,
+                                    owner_id=owner_id,
+                                )
                                 _record_successful_connection(session.config, self_dict, device_dict)
                                 _log_delivery_debug("bg_command_response_put", port=port, kind=kind, sequence=command_sequence, ok=True)
                                 response_queue.put({
@@ -6296,6 +7174,22 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                                 })
                                 continue
                             if kind == "meshcore_params_snapshot":
+                                if _is_ble_meshcore_client(client):
+                                    with session.snapshot_lock:
+                                        cached_snapshot_age = time.monotonic() - float(session.last_meshcore_params_snapshot_at or 0.0)
+                                        cached_snapshot_ready = bool(session.meshcore_params and session.device and session.self_info)
+                                    if cached_snapshot_ready and cached_snapshot_age < BLE_MESHCORE_SNAPSHOT_REPEAT_COOLDOWN_SECS:
+                                        _log_delivery_debug(
+                                            "bg_command_response_put",
+                                            port=port,
+                                            kind=kind,
+                                            sequence=command_sequence,
+                                            ok=True,
+                                            cached=True,
+                                            snapshot_age_ms=int(max(0.0, cached_snapshot_age * 1000.0)),
+                                        )
+                                        response_queue.put(_build_cached_meshcore_params_snapshot(session))
+                                        continue
                                 snapshot = _collect_node_snapshot_with_client(
                                     client,
                                     protocol_version=protocol_version,
@@ -6309,6 +7203,8 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                                     session.radio_stats = snapshot.get("radio_stats")
                                     session.self_telemetry = snapshot.get("self_telemetry")
                                     session.battery_info = snapshot.get("battery_info")
+                                    session.meshcore_params = dict(snapshot.get("meshcore_params") or {})
+                                    session.last_meshcore_params_snapshot_at = time.monotonic()
                                 _log_delivery_debug("bg_command_response_put", port=port, kind=kind, sequence=command_sequence, ok=True)
                                 response_queue.put({
                                     "ok": True,
@@ -6333,11 +7229,15 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                                     session.radio_stats = snapshot.get("radio_stats")
                                     session.self_telemetry = snapshot.get("self_telemetry")
                                     session.battery_info = snapshot.get("battery_info")
+                                    session.meshcore_params = dict(snapshot.get("meshcore_params") or {})
+                                    session.last_meshcore_params_snapshot_at = time.monotonic()
                                 _freeze_self_contact_if_cached(self_dict)
                                 _adopt_unowned_contact_records(owner_id)
                                 _adopt_unowned_message_records(owner_id)
                                 _normalize_self_contact_message_records(owner_id)
                                 _record_successful_connection(session.config, self_dict, device_dict)
+                                if str(command.get("group") or "").strip().lower() == "security" and "ble_pin" in dict(command.get("patch") or {}):
+                                    _mark_known_ble_pin_custom(session.config, self_dict, dict(command.get("patch") or {}).get("ble_pin"))
                                 _log_delivery_debug("bg_command_response_put", port=port, kind=kind, sequence=command_sequence, ok=True)
                                 response_queue.put({
                                     "ok": True,
@@ -6439,6 +7339,7 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                                 session.radio_stats = radio_stats
                             recent_repeaters_count = _get_recent_repeater_count(session)
                             _record_signal_metrics_sample(radio_stats, repeaters=recent_repeaters_count, owner_id=owner_id)
+                            _record_battery_history_sample(radio_stats, None, None, owner_id=owner_id)
                             _broadcast_event(
                                 port,
                                 {
@@ -6841,6 +7742,8 @@ def _resolve_channel_message_identity(message: dict | None = None) -> str:
     explicit_identity = str(payload.get("channel_identity") or "").strip()
     if explicit_identity:
         return explicit_identity
+    if _is_official_meshcore_public_channel_idx(payload.get("channel_idx")):
+        return _build_channel_identity(MESHCORE_PUBLIC_CHANNEL_NAME, MESHCORE_PUBLIC_CHANNEL_PSK_HEX)
     return _build_channel_identity(payload.get("channel_name"), payload.get("channel_secret_hex"))
 
 
@@ -6851,6 +7754,94 @@ def _message_owner_clause(owner_id: str | None = None, access_all: bool | None =
     if not normalized_owner_id:
         return "1 = 0", ()
     return f"{column} = ?", (normalized_owner_id,)
+
+
+def _list_node_channel_slots_in_message_scope(
+    *,
+    owner_id: str | None = None,
+    access_all: bool | None = None,
+) -> list[dict]:
+    owner_where, owner_params = _message_owner_clause(owner_id, access_all)
+    with DB_LOCK, sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            f"""
+            SELECT owner_id, channel_idx, channel_name, channel_secret_hex, channel_hash, channel_identity, is_public, last_seen_at,
+                   access_all_messages_enabled, access_all_messages_enabled_at, access_all_messages_source_owner_id
+            FROM node_channel_slots
+            WHERE {owner_where}
+            ORDER BY last_seen_at DESC, owner_id ASC, channel_idx ASC
+            """,
+            owner_params,
+        ).fetchall()
+    return [_channel_slot_row_to_dict(dict(row)) for row in rows]
+
+
+def get_channel_conversation_stats(
+    mention_name: str = "",
+    *,
+    owner_id: str | None = None,
+    access_all: bool | None = None,
+) -> dict[str, dict[str, int]]:
+    needle = str(mention_name or "").strip().lower()
+    like_pattern = f"%{needle}%"
+    owner_where, owner_params = _message_owner_clause(owner_id, access_all)
+    preview_key_sql = (
+        "CASE "
+        "WHEN COALESCE(channel_identity, '') != '' THEN channel_identity "
+        "WHEN channel_idx = 0 THEN 'public::#public' "
+        "ELSE 'idx::' || CAST(channel_idx AS TEXT) "
+        "END"
+    )
+    stats: dict[str, dict[str, int]] = {}
+    with DB_LOCK, sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        unread_rows = conn.execute(
+            f"""
+            SELECT
+                {preview_key_sql} AS preview_key,
+                COUNT(*) AS unread_count
+            FROM messages
+            WHERE {owner_where}
+              AND message_kind = 'channel'
+              AND from_self = 0
+              AND COALESCE(is_read, 0) = 0
+              {"" if not needle else "AND lower(text) NOT LIKE ?"}
+            GROUP BY preview_key
+            ORDER BY preview_key ASC
+            """,
+            owner_params if not needle else owner_params + (like_pattern,),
+        ).fetchall()
+        mention_rows = conn.execute(
+            f"""
+            SELECT
+                {preview_key_sql} AS preview_key,
+                COUNT(*) AS mention_count
+            FROM messages
+            WHERE {owner_where}
+              AND message_kind = 'channel'
+              AND from_self = 0
+              AND COALESCE(is_mention_read, 0) = 0
+              {"" if not needle else "AND lower(text) LIKE ?"}
+              {"" if needle else "AND 1 = 0"}
+            GROUP BY preview_key
+            ORDER BY preview_key ASC
+            """,
+            owner_params if not needle else owner_params + (like_pattern,),
+        ).fetchall()
+    for row in unread_rows:
+        preview_key = str(row["preview_key"] or "").strip()
+        if not preview_key:
+            continue
+        stats.setdefault(preview_key, {})
+        stats[preview_key]["unread_count"] = int(row["unread_count"] or 0)
+    for row in mention_rows:
+        preview_key = str(row["preview_key"] or "").strip()
+        if not preview_key:
+            continue
+        stats.setdefault(preview_key, {})
+        stats[preview_key]["mention_count"] = int(row["mention_count"] or 0)
+    return stats
 
 
 def _adopt_unowned_message_records(owner_id: str | None) -> None:
@@ -6905,8 +7896,22 @@ def _backfill_channel_message_identities(owner_id: str | None) -> None:
         return
     slots = _list_node_channel_slots(normalized_owner_id)
     if not slots:
-        return
+        slots = []
     with DB_LOCK, sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            """
+            UPDATE messages
+            SET channel_identity = ?
+            WHERE owner_id = ?
+              AND message_kind = 'channel'
+              AND channel_idx = 0
+              AND COALESCE(channel_identity, '') = ''
+            """,
+            (
+                _build_channel_identity(MESHCORE_PUBLIC_CHANNEL_NAME, MESHCORE_PUBLIC_CHANNEL_PSK_HEX),
+                normalized_owner_id,
+            ),
+        )
         for slot in slots:
             channel_identity = str(slot.get("channel_identity") or "").strip()
             channel_idx = int(slot.get("channel_idx") or -1)
@@ -7240,6 +8245,13 @@ def get_channel_unique_outgoing_texts(
 def get_channel_message_previews(*, owner_id: str | None = None, access_all: bool | None = None) -> dict[str, dict[str, object]]:
     owner_where, owner_params = _message_owner_clause(owner_id, access_all, column="m.owner_id")
     latest_owner_where, latest_owner_params = _message_owner_clause(owner_id, access_all)
+    preview_key_sql = (
+        "CASE "
+        "WHEN COALESCE(channel_identity, '') != '' THEN channel_identity "
+        "WHEN channel_idx = 0 THEN 'public::#public' "
+        "ELSE 'idx::' || CAST(channel_idx AS TEXT) "
+        "END"
+    )
     with DB_LOCK, sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
@@ -7247,30 +8259,21 @@ def get_channel_message_previews(*, owner_id: str | None = None, access_all: boo
             SELECT
                 m.channel_idx,
                 m.channel_identity,
-                CASE
-                    WHEN COALESCE(m.channel_identity, '') != '' THEN m.channel_identity
-                    ELSE 'idx::' || CAST(m.channel_idx AS TEXT)
-                END AS preview_key,
+                {preview_key_sql.replace("channel_identity", "m.channel_identity").replace("channel_idx", "m.channel_idx")} AS preview_key,
                 m.text,
                 m.from_self,
                 m.sender_timestamp
             FROM messages m
             INNER JOIN (
                 SELECT
-                    CASE
-                        WHEN COALESCE(channel_identity, '') != '' THEN channel_identity
-                        ELSE 'idx::' || CAST(channel_idx AS TEXT)
-                    END AS preview_key,
+                    {preview_key_sql} AS preview_key,
                     MAX(sender_timestamp) AS max_sender_timestamp,
                     MAX(id) AS max_id
                 FROM messages
                 WHERE {latest_owner_where} AND message_kind = 'channel'
                 GROUP BY preview_key
             ) latest
-              ON latest.preview_key = CASE
-                    WHEN COALESCE(m.channel_identity, '') != '' THEN m.channel_identity
-                    ELSE 'idx::' || CAST(m.channel_idx AS TEXT)
-                 END
+              ON latest.preview_key = {preview_key_sql.replace("channel_identity", "m.channel_identity").replace("channel_idx", "m.channel_idx")}
              AND latest.max_sender_timestamp = m.sender_timestamp
             WHERE {owner_where} AND m.message_kind = 'channel'
             ORDER BY m.id DESC
@@ -8393,6 +9396,180 @@ def get_contact_mention_summary(
         if str(row["pubkey_prefix"] or "").strip()
     }
 
+
+def _compact_message_conversation_contact(contact: dict) -> dict:
+    payload = _compact_contact_for_client(contact)
+    payload["mention_count"] = int(contact.get("mention_count") or 0)
+    payload["sendable"] = bool(contact.get("sendable", len(str(contact.get("public_key") or "")) == 64))
+    return payload
+
+
+def _build_messages_conversation_directory(
+    *,
+    port: str | None = None,
+    mention_name: str = "",
+) -> dict:
+    normalized_port = _normalize_port_value(port)
+    owner_id = _resolve_owner_id_for_port(normalized_port)
+    access_all = _get_access_all_meshcorium_messages()
+    session = _get_background_session(normalized_port) if normalized_port else None
+    live_contacts: list[dict] = []
+    live_channels: list[dict] = []
+    if session is not None:
+        with session.snapshot_lock:
+            live_contacts = list(session.contacts or [])
+            live_channels = list(session.channels or [])
+    with _messages_owner_scope(port=normalized_port, owner_id=owner_id, access_all=access_all):
+        with contact_store.contact_scope(owner_id=owner_id, access_all=access_all):
+            contacts_snapshot = CONTACT_BACKEND.compose_snapshot(live_contacts)
+        contact_stats = get_contact_message_stats(owner_id=owner_id, access_all=access_all)
+        contact_mentions = get_contact_mention_summary(mention_name, owner_id=owner_id, access_all=access_all)
+        channel_previews = get_channel_message_previews(owner_id=owner_id, access_all=access_all)
+        channel_stats = get_channel_conversation_stats(mention_name, owner_id=owner_id, access_all=access_all)
+        scoped_slots = _list_node_channel_slots_in_message_scope(owner_id=owner_id, access_all=access_all)
+
+    contacts_by_prefix: dict[str, dict] = {}
+    for contact in contacts_snapshot:
+        prefix = str((contact or {}).get("public_key") or "").lower()[:12]
+        if not prefix:
+            continue
+        entry = dict(contact)
+        entry["mention_count"] = int((contact_mentions.get(prefix) or {}).get("mention_count") or 0)
+        entry["sendable"] = len(str(entry.get("public_key") or "")) == 64
+        contacts_by_prefix[prefix] = entry
+    for prefix, stats in contact_stats.items():
+        entry = contacts_by_prefix.get(prefix)
+        if entry is None:
+            entry = {
+                "public_key": prefix,
+                "adv_type": 0,
+                "flags": 0,
+                "path_len_byte": 0,
+                "out_path_len": 0,
+                "out_path_hash_len": 0,
+                "out_path": "",
+                "adv_name": prefix.upper(),
+                "last_advert": 0,
+                "lat": 0.0,
+                "lon": 0.0,
+                "has_location": False,
+                "updated_at": 0,
+                "last_interaction_at": 0,
+                "last_materialized_at": 0,
+                "last_removed_from_node_at": 0,
+                "pubkey_prefix": prefix,
+                "is_favorite": False,
+                "group_tags": [],
+                "is_on_node": False,
+                "is_local_self": False,
+                "sendable": False,
+            }
+        entry["unread_count"] = int(stats.get("unread_count") or 0)
+        entry["last_message_at"] = int(stats.get("last_message_at") or 0)
+        entry["last_message_text"] = str(stats.get("last_message_text") or "")
+        entry["last_message_from_self"] = bool(stats.get("last_message_from_self", False))
+        entry["mention_count"] = int((contact_mentions.get(prefix) or {}).get("mention_count") or 0)
+        contacts_by_prefix[prefix] = entry
+
+    channel_entries_by_key: dict[str, dict] = {}
+
+    def _upsert_channel_entry(source: dict, *, is_on_node: bool) -> None:
+        idx_value = int(source.get("idx") if source.get("idx") is not None else source.get("channel_idx") or -1)
+        channel_name, channel_secret_hex = _normalize_runtime_channel_fields(
+            idx_value,
+            source.get("name") or source.get("channel_name"),
+            source.get("secret_hex") or source.get("channel_secret_hex"),
+        )
+        channel_identity = str(source.get("channel_identity") or "").strip()
+        if _is_official_meshcore_public_channel_idx(idx_value) or _is_meshcore_public_channel_name(channel_name):
+            channel_name = MESHCORE_PUBLIC_CHANNEL_NAME
+            channel_secret_hex = MESHCORE_PUBLIC_CHANNEL_PSK_HEX
+            channel_identity = _build_channel_identity(channel_name, channel_secret_hex)
+        elif not channel_identity:
+            channel_identity = _build_channel_identity(channel_name, channel_secret_hex)
+        preview_key = channel_identity or f"idx::{idx_value}"
+        preview = channel_previews.get(preview_key) or {}
+        stats = channel_stats.get(preview_key) or {}
+        entry = channel_entries_by_key.get(preview_key) or {
+            "idx": idx_value,
+            "name": channel_name,
+            "description": str(source.get("description") or ""),
+            "secret_hex": channel_secret_hex,
+            "hash": str(source.get("hash") or source.get("channel_hash") or ""),
+            "channel_identity": channel_identity,
+            "is_public": bool(source.get("is_public")) or _is_public_channel_name(channel_name),
+            "kind": str(source.get("kind") or ("configured" if is_on_node else "cached")),
+            "last_message_preview": "",
+            "last_message_from_self": False,
+            "last_message_ts": 0,
+            "unread_count": 0,
+            "mention_count": 0,
+            "is_on_node": False,
+        }
+        entry["is_on_node"] = bool(entry.get("is_on_node")) or bool(is_on_node)
+        if is_on_node:
+            entry["idx"] = idx_value
+            entry["name"] = channel_name
+            entry["secret_hex"] = channel_secret_hex
+            entry["channel_identity"] = channel_identity
+            entry["is_public"] = bool(source.get("is_public")) or _is_public_channel_name(channel_name)
+            entry["kind"] = str(source.get("kind") or "configured")
+            entry["description"] = str(source.get("description") or entry.get("description") or "Channel configuration read from the node.")
+        entry["last_message_preview"] = str(preview.get("text") or entry.get("last_message_preview") or "")
+        entry["last_message_from_self"] = bool(preview.get("from_self", entry.get("last_message_from_self", False)))
+        entry["last_message_ts"] = int(preview.get("sender_timestamp") or entry.get("last_message_ts") or 0)
+        entry["unread_count"] = int(stats.get("unread_count") or entry.get("unread_count") or 0)
+        entry["mention_count"] = int(stats.get("mention_count") or entry.get("mention_count") or 0)
+        channel_entries_by_key[preview_key] = entry
+
+    for channel in live_channels:
+        _upsert_channel_entry(dict(channel or {}), is_on_node=True)
+    for slot in scoped_slots:
+        _upsert_channel_entry({
+            "idx": int(slot.get("channel_idx") or -1),
+            "name": str(slot.get("channel_name") or ""),
+            "secret_hex": str(slot.get("channel_secret_hex") or ""),
+            "hash": str(slot.get("channel_hash") or ""),
+            "channel_identity": str(slot.get("channel_identity") or ""),
+            "is_public": bool(slot.get("is_public")),
+            "kind": "cached",
+            "description": "Channel history stored only in the Meshcorium database.",
+        }, is_on_node=False)
+
+    channels_payload = [
+        entry
+        for entry in channel_entries_by_key.values()
+        if entry.get("is_on_node") or int(entry.get("last_message_ts") or 0) > 0 or int(entry.get("unread_count") or 0) > 0 or int(entry.get("mention_count") or 0) > 0
+    ]
+    channels_payload.sort(
+        key=lambda entry: (
+            -int(entry.get("unread_count") or 0),
+            -int(entry.get("mention_count") or 0),
+            -int(entry.get("last_message_ts") or 0),
+            str(entry.get("name") or "").lower(),
+        )
+    )
+    contacts_payload = [
+        _compact_message_conversation_contact(contact)
+        for contact in contacts_by_prefix.values()
+        if int(contact.get("last_message_at") or 0) > 0 or int(contact.get("unread_count") or 0) > 0 or int(contact.get("mention_count") or 0) > 0
+    ]
+    contacts_payload.sort(
+        key=lambda contact: (
+            -int(contact.get("unread_count") or 0),
+            -int(contact.get("mention_count") or 0),
+            -int(contact.get("last_message_at") or 0),
+            str(contact.get("adv_name") or contact.get("name") or contact.get("pubkey_prefix") or "").lower(),
+        )
+    )
+    return {
+        "ok": True,
+        "owner_id": owner_id,
+        "access_all": access_all,
+        "channels": channels_payload,
+        "contacts": contacts_payload,
+    }
+
 def _enrich_contacts_with_local_state(contacts: list[dict]) -> list[dict]:
     stats = get_contact_message_stats()
     groups = get_contact_groups()
@@ -9113,6 +10290,8 @@ def _self_telemetry_to_dict(telemetry):
 
 def _battery_info_to_dict(info):
     return {
+        "battery_mv": info.battery_mv,
+        "battery_percent": info.battery_percent,
         "level": info.level,
         "used_kb": info.used_kb,
         "total_kb": info.total_kb,
@@ -9344,14 +10523,17 @@ def _parse_log_rx_group_text(frame: bytes, channels: list[dict]) -> dict | None:
 
 
 def _channel_to_dict(channel, preview: dict | None = None) -> dict:
-    name = channel.channel_name.strip()
-    secret_hex = format_hex(channel.channel_secret)
+    name, secret_hex = _normalize_runtime_channel_fields(
+        getattr(channel, "channel_idx", -1),
+        getattr(channel, "channel_name", ""),
+        format_hex(getattr(channel, "channel_secret", b"")),
+    )
     return {
         "idx": channel.channel_idx,
         "name": name,
         "description": "Channel configuration read from the node.",
         "secret_hex": secret_hex,
-        "hash": channel.channel_hash,
+        "hash": channel.channel_hash or hashlib.sha256(bytes.fromhex(secret_hex)).hexdigest()[:2] if secret_hex else "",
         "channel_identity": _build_channel_identity(name, secret_hex),
         "is_public": _is_public_channel_name(name),
         "kind": "configured",
@@ -9359,6 +10541,34 @@ def _channel_to_dict(channel, preview: dict | None = None) -> dict:
         "last_message_from_self": bool((preview or {}).get("from_self", False)),
         "last_message_ts": int((preview or {}).get("sender_timestamp", 0) or 0),
     }
+
+
+def _merge_channel_slot_metadata(owner_id: str | None, channels: list[dict]) -> list[dict]:
+    normalized_owner_id = _normalize_owner_id(owner_id)
+    if not normalized_owner_id or not channels:
+        return channels
+    slot_rows = _list_node_channel_slots(normalized_owner_id)
+    slot_by_idx = {
+        int(slot.get("channel_idx") or -1): slot
+        for slot in slot_rows
+        if int(slot.get("channel_idx") or -1) >= 0
+    }
+    merged_channels: list[dict] = []
+    for channel in channels:
+        item = dict(channel or {})
+        slot = slot_by_idx.get(int(item.get("idx") or -1))
+        if slot:
+            item["access_all_messages_enabled"] = bool(slot.get("access_all_messages_enabled", False))
+            item["access_all_messages_enabled_at"] = int(slot.get("access_all_messages_enabled_at", 0) or 0)
+            item["access_all_messages_source_owner_id"] = _normalize_owner_id(
+                slot.get("access_all_messages_source_owner_id", "")
+            )
+        else:
+            item["access_all_messages_enabled"] = False
+            item["access_all_messages_enabled_at"] = 0
+            item["access_all_messages_source_owner_id"] = ""
+        merged_channels.append(item)
+    return merged_channels
 
 
 def _channels_to_dict(
@@ -9369,18 +10579,18 @@ def _channels_to_dict(
     access_all: bool = False,
 ) -> list[dict]:
     previews = get_channel_message_previews(owner_id=owner_id, access_all=access_all)
-    channel_dicts = [
-        _channel_to_dict(
+    channel_dicts: list[dict] = []
+    for channel in sorted(channels, key=lambda item: item.channel_idx):
+        channel_dict = _channel_to_dict(
             channel,
-            previews.get(_build_channel_identity(channel.channel_name, format_hex(channel.channel_secret)))
+            previews.get(_build_channel_identity(_channel_runtime_name(channel), _channel_runtime_secret_hex(channel)))
             or previews.get(f"idx::{int(channel.channel_idx)}")
             or previews.get(str(int(channel.channel_idx))),
         )
-        for channel in sorted(channels, key=lambda item: item.channel_idx)
-        if channel.channel_name.strip()
-    ]
+        if str(channel_dict.get("name") or "").strip():
+            channel_dicts.append(channel_dict)
     _persist_node_channel_slots(owner_id, channel_dicts)
-    return channel_dicts
+    return _merge_channel_slot_metadata(owner_id, channel_dicts)
 
 
 def _decode_channel_secret(secret_hex: object) -> bytes | None:
@@ -9393,6 +10603,122 @@ def _decode_channel_secret(secret_hex: object) -> bytes | None:
         return bytes.fromhex(value)
     except ValueError as exc:
         raise ValueError("channel secret must be valid hex") from exc
+
+
+def _channel_runtime_identity(channel: object) -> str:
+    return _build_channel_identity(
+        _channel_runtime_name(channel),
+        _channel_runtime_secret_hex(channel),
+    )
+
+
+def _verify_channel_slot(
+    client: MeshCoreSerialClient,
+    channel_idx: int,
+    expected_identity: str,
+) -> tuple[bool, object | None, str]:
+    try:
+        channel = client.get_channel(channel_idx)
+    except (MeshCoreError, SerialException, ValueError) as exc:
+        return False, None, str(exc)
+    actual_identity = _channel_runtime_identity(channel)
+    if actual_identity == expected_identity:
+        return True, channel, ""
+    actual_name = _channel_runtime_name(channel)
+    return (
+        False,
+        channel,
+        f"idx {channel_idx} contains {actual_name or 'empty'} identity={actual_identity or '-'}",
+    )
+
+
+def _set_channel_with_retry(
+    client: MeshCoreSerialClient,
+    channel_idx: int,
+    channel_name: str,
+    channel_secret_hex: object,
+    *,
+    attempts: int = CHANNEL_SET_RETRY_COUNT,
+    progress_callback=None,
+    progress_base: dict | None = None,
+) -> tuple[object, dict]:
+    normalized_channel_name = _normalize_meshcore_channel_name(channel_name)
+    resolved_channel_secret_hex = _resolve_channel_secret_hex_for_save(normalized_channel_name, channel_secret_hex)
+    secret = _decode_channel_secret(resolved_channel_secret_hex)
+    expected_identity = _build_channel_identity(normalized_channel_name, resolved_channel_secret_hex)
+    last_error = ""
+    errors: list[str] = []
+    applied_after_empty_response = False
+    total_attempts = max(1, int(attempts or CHANNEL_SET_RETRY_COUNT))
+    base_progress = dict(progress_base or {})
+    for attempt in range(1, total_attempts + 1):
+        if progress_callback is not None:
+            progress_callback({
+                **base_progress,
+                "status": "adding" if attempt == 1 else "retrying",
+                "phase": "set-channel",
+                "channel_idx": channel_idx,
+                "channel_name": normalized_channel_name,
+                "attempt": attempt,
+                "attempts": total_attempts,
+            })
+        set_returned_ok = False
+        try:
+            client.set_channel(channel_idx, normalized_channel_name, secret)
+            set_returned_ok = True
+        except (MeshCoreError, SerialException, ValueError) as exc:
+            last_error = str(exc)
+            errors.append(last_error)
+        if CHANNEL_SET_VERIFY_DELAY_SECS > 0:
+            time.sleep(CHANNEL_SET_VERIFY_DELAY_SECS)
+        verified, channel, verify_error = _verify_channel_slot(client, channel_idx, expected_identity)
+        if verified and channel is not None:
+            applied_after_empty_response = applied_after_empty_response or not set_returned_ok
+            if progress_callback is not None:
+                progress_callback({
+                    **base_progress,
+                    "status": "added",
+                    "phase": "verified",
+                    "channel_idx": channel_idx,
+                    "channel_name": normalized_channel_name,
+                    "attempt": attempt,
+                    "attempts": total_attempts,
+                    "message": "verified after empty response" if applied_after_empty_response else "",
+                })
+            return channel, {
+                "attempts": attempt,
+                "errors": errors,
+                "verified_after_empty_response": applied_after_empty_response,
+            }
+        if verify_error:
+            last_error = verify_error
+            if set_returned_ok:
+                errors.append(verify_error)
+        if attempt < total_attempts:
+            logging.warning(
+                "channel SET retry idx=%s name=%s attempt=%s/%s error=%s",
+                channel_idx,
+                normalized_channel_name,
+                attempt,
+                total_attempts,
+                last_error,
+            )
+            if progress_callback is not None:
+                progress_callback({
+                    **base_progress,
+                    "status": "retry-wait",
+                    "phase": "retry-wait",
+                    "channel_idx": channel_idx,
+                    "channel_name": normalized_channel_name,
+                    "attempt": attempt,
+                    "attempts": total_attempts,
+                    "message": last_error,
+                })
+            time.sleep(CHANNEL_SET_RETRY_BASE_DELAY_SECS * attempt)
+    raise MeshCoreError(
+        f"failed to SET_CHANNEL idx={channel_idx} name={normalized_channel_name} "
+        f"after {total_attempts} attempts: {last_error or 'unknown error'}"
+    )
 
 
 def _pick_first_free_channel_idx(channels: list, max_channels: int) -> int:
@@ -9420,10 +10746,10 @@ def _save_channel_and_reload_with_standalone_client(
     self_info = client.app_start(app_name, app_version)
     owner_id = _normalize_owner_id(getattr(self_info, "public_key", ""))
     existing_channels = _load_channels_in_session(client, int(device.max_channels), owner_id=owner_id)
-    target_idx = int(channel_idx) if channel_idx is not None else _pick_first_free_channel_idx(existing_channels, device.max_channels)
+    target_idx = _resolve_channel_target_idx(channel_idx, normalized_channel_name, existing_channels, device.max_channels)
     existing_channel = next((item for item in existing_channels if _channel_runtime_idx(item) == target_idx), None)
     _guard_meshcore_public_channel_edit(existing_channel, normalized_channel_name, resolved_channel_secret_hex)
-    client.set_channel(target_idx, normalized_channel_name, secret)
+    _set_channel_with_retry(client, target_idx, normalized_channel_name, resolved_channel_secret_hex)
     channels = _load_channels_in_session(client, int(device.max_channels), owner_id=owner_id)
     channel = next(
         (
@@ -9488,6 +10814,181 @@ def _save_channel_and_reload(session_kwargs: dict, channel_idx: int | None, chan
             )
 
 
+def _delete_channel_local_records(
+    owner_id: str | None,
+    channel_idx: int,
+    channel_identity: str = "",
+    *,
+    global_by_identity: bool = False,
+) -> None:
+    normalized_owner_id = _normalize_owner_id(owner_id)
+    if not normalized_owner_id or int(channel_idx) < 0:
+        return
+    normalized_identity = str(channel_identity or "").strip()
+    with DB_LOCK, sqlite3.connect(DB_PATH) as conn:
+        if normalized_identity and global_by_identity:
+            conn.execute(
+                """
+                DELETE FROM messages
+                WHERE message_kind = 'channel'
+                  AND channel_identity = ?
+                """,
+                (normalized_identity,),
+            )
+            conn.execute(
+                """
+                DELETE FROM node_channel_slots
+                WHERE channel_identity = ?
+                """,
+                (normalized_identity,),
+            )
+        elif normalized_identity:
+            conn.execute(
+                """
+                DELETE FROM messages
+                WHERE owner_id = ?
+                  AND message_kind = 'channel'
+                  AND (channel_identity = ? OR channel_idx = ?)
+                """,
+                (normalized_owner_id, normalized_identity, int(channel_idx)),
+            )
+        else:
+            conn.execute(
+                """
+                DELETE FROM messages
+                WHERE owner_id = ?
+                  AND message_kind = 'channel'
+                  AND channel_idx = ?
+                """,
+                (normalized_owner_id, int(channel_idx)),
+            )
+        conn.execute(
+            "DELETE FROM node_channel_slots WHERE owner_id = ? AND channel_idx = ?",
+            (normalized_owner_id, int(channel_idx)),
+        )
+        conn.commit()
+
+
+def _delete_channel_and_reload_with_standalone_client(
+    client: MeshCoreSerialClient,
+    *,
+    protocol_version: int,
+    app_version: int,
+    app_name: str,
+    channel_idx: int,
+) -> list[dict]:
+    if channel_idx < 0:
+        raise ValueError("channel_idx must be non-negative")
+    device = client.query_device(protocol_version)
+    self_info = client.app_start(app_name, app_version)
+    owner_id = _normalize_owner_id(getattr(self_info, "public_key", ""))
+    existing_channels = _load_channels_in_session(client, int(device.max_channels), owner_id=owner_id)
+    existing_channel = next((item for item in existing_channels if _channel_runtime_idx(item) == int(channel_idx)), None)
+    if existing_channel is None:
+        raise ValueError(f"channel idx={channel_idx} not found")
+    channel_identity = _build_channel_identity(
+        _channel_runtime_name(existing_channel),
+        _channel_runtime_secret_hex(existing_channel),
+    )
+    client.delete_channel(channel_idx)
+    channels = _load_channels_in_session(client, int(device.max_channels), owner_id=owner_id)
+    _delete_channel_local_records(owner_id, channel_idx, channel_identity, global_by_identity=True)
+    return _channels_to_dict(
+        channels,
+        _device_info_to_dict(device),
+        owner_id=owner_id,
+        access_all=False,
+    )
+
+
+def _delete_channel_and_reload(session_kwargs: dict, channel_idx: int) -> list[dict]:
+    with _connection_access_from_kwargs(session_kwargs):
+        with _open_meshcore_client(session_kwargs) as client:
+            return _delete_channel_and_reload_with_standalone_client(
+                client,
+                protocol_version=session_kwargs["protocol_version"],
+                app_version=session_kwargs["app_version"],
+                app_name=session_kwargs["app_name"],
+                channel_idx=channel_idx,
+            )
+
+
+def _sync_meshcorium_channels_to_node_with_standalone_client(
+    client: MeshCoreSerialClient,
+    *,
+    protocol_version: int,
+    app_version: int,
+    app_name: str,
+    mark_access_all_messages: bool = False,
+    progress_callback=None,
+) -> tuple[list[dict], dict]:
+    device = client.query_device(protocol_version)
+    self_info = client.app_start(app_name, app_version)
+    owner_id = _normalize_owner_id(getattr(self_info, "public_key", ""))
+    max_channels = int(getattr(device, "max_channels", 0) or 0)
+    existing_channels = _load_channels_in_session(client, max_channels, owner_id=owner_id)
+    return _sync_meshcorium_channels_to_node_runtime(
+        client,
+        owner_id=owner_id,
+        max_channels=max_channels,
+        existing_channels=existing_channels,
+        mark_access_all_messages=mark_access_all_messages,
+        progress_callback=progress_callback,
+    )
+
+
+def _sync_meshcorium_channels_to_node(
+    session_kwargs: dict,
+    *,
+    mark_access_all_messages: bool = False,
+    progress_callback=None,
+) -> tuple[list[dict], dict]:
+    with _connection_access_from_kwargs(session_kwargs):
+        with _open_meshcore_client(session_kwargs) as client:
+            return _sync_meshcorium_channels_to_node_with_standalone_client(
+                client,
+                protocol_version=session_kwargs["protocol_version"],
+                app_version=session_kwargs["app_version"],
+                app_name=session_kwargs["app_name"],
+                mark_access_all_messages=mark_access_all_messages,
+                progress_callback=progress_callback,
+            )
+
+
+def _remove_access_all_meshcorium_channels_from_node_with_standalone_client(
+    client: MeshCoreSerialClient,
+    *,
+    protocol_version: int,
+    app_version: int,
+    app_name: str,
+    progress_callback=None,
+) -> tuple[list[dict], dict]:
+    device = client.query_device(protocol_version)
+    self_info = client.app_start(app_name, app_version)
+    owner_id = _normalize_owner_id(getattr(self_info, "public_key", ""))
+    max_channels = int(getattr(device, "max_channels", 0) or 0)
+    existing_channels = _load_channels_in_session(client, max_channels, owner_id=owner_id)
+    return _remove_access_all_meshcorium_channels_from_node_runtime(
+        client,
+        owner_id=owner_id,
+        max_channels=max_channels,
+        existing_channels=existing_channels,
+        progress_callback=progress_callback,
+    )
+
+
+def _remove_access_all_meshcorium_channels_from_node(session_kwargs: dict, *, progress_callback=None) -> tuple[list[dict], dict]:
+    with _connection_access_from_kwargs(session_kwargs):
+        with _open_meshcore_client(session_kwargs) as client:
+            return _remove_access_all_meshcorium_channels_from_node_with_standalone_client(
+                client,
+                protocol_version=session_kwargs["protocol_version"],
+                app_version=session_kwargs["app_version"],
+                app_name=session_kwargs["app_name"],
+                progress_callback=progress_callback,
+            )
+
+
 def _pick_first_free_channel_idx_from_dicts(channels: list[dict], max_channels: int) -> int:
     used = {
         int(channel.get("idx") or -1)
@@ -9498,6 +10999,18 @@ def _pick_first_free_channel_idx_from_dicts(channels: list[dict], max_channels: 
         if idx not in used:
             return idx
     raise ValueError("no free channel slots available")
+
+
+def _resolve_channel_target_idx_from_dicts(channel_idx: int | None, channel_name: object, existing_channels: list[dict], max_channels: int) -> int:
+    normalized_name = _normalize_meshcore_channel_name(channel_name)
+    if _is_meshcore_public_channel_name(normalized_name):
+        return 0
+    if channel_idx is not None:
+        target_idx = int(channel_idx)
+        if target_idx == 0:
+            raise ValueError("channel idx=0 is reserved for the official MeshCore #public channel")
+        return target_idx
+    return _pick_first_free_channel_idx_from_dicts(existing_channels, max_channels)
 
 
 def _save_channel_and_reload_with_client(
@@ -9513,14 +11026,10 @@ def _save_channel_and_reload_with_client(
     owner_id = _normalize_owner_id((session.self_info or {}).get("public_key"))
     max_channels = int((session.device or {}).get("max_channels") or 0)
     existing_channels = _load_channels_in_session(client, max_channels, owner_id=owner_id) if max_channels > 0 else list(session.channels or [])
-    target_idx = (
-        int(channel_idx)
-        if channel_idx is not None
-        else _pick_first_free_channel_idx_from_dicts(existing_channels, max_channels)
-    )
+    target_idx = _resolve_channel_target_idx_from_dicts(channel_idx, normalized_channel_name, existing_channels, max_channels)
     existing_channel = next((item for item in existing_channels if _channel_runtime_idx(item) == target_idx), None)
     _guard_meshcore_public_channel_edit(existing_channel, normalized_channel_name, resolved_channel_secret_hex)
-    client.set_channel(target_idx, normalized_channel_name, secret)
+    _set_channel_with_retry(client, target_idx, normalized_channel_name, resolved_channel_secret_hex)
     channels_dict = _load_channels_in_session(client, max_channels, owner_id=owner_id) if max_channels > 0 else list(session.channels or [])
     channel_dict = next(
         (
@@ -9541,6 +11050,381 @@ def _save_channel_and_reload_with_client(
         },
     )
     return channel_dict, channels_dict
+
+
+def _delete_channel_and_reload_with_client(
+    client: MeshCoreSerialClient,
+    session: BackgroundCompanionSession,
+    channel_idx: int,
+) -> list[dict]:
+    owner_id = _normalize_owner_id((session.self_info or {}).get("public_key"))
+    max_channels = int((session.device or {}).get("max_channels") or 0)
+    existing_channels = _load_channels_in_session(client, max_channels, owner_id=owner_id) if max_channels > 0 else list(session.channels or [])
+    existing_channel = next((item for item in existing_channels if _channel_runtime_idx(item) == int(channel_idx)), None)
+    if existing_channel is None:
+        raise ValueError(f"channel idx={channel_idx} not found")
+    channel_identity = _build_channel_identity(
+        _channel_runtime_name(existing_channel),
+        _channel_runtime_secret_hex(existing_channel),
+    )
+    client.delete_channel(channel_idx)
+    channels_dict = _load_channels_in_session(client, max_channels, owner_id=owner_id) if max_channels > 0 else []
+    _delete_channel_local_records(owner_id, channel_idx, channel_identity, global_by_identity=True)
+    return channels_dict
+
+
+def _sync_meshcorium_channels_to_node_runtime(
+    client: MeshCoreSerialClient,
+    *,
+    owner_id: str,
+    max_channels: int,
+    existing_channels: list[dict],
+    mark_access_all_messages: bool = False,
+    progress_callback=None,
+) -> tuple[list[dict], dict]:
+    if max_channels <= 1:
+        raise ValueError("node does not expose free channel slots")
+    db_candidates, duplicate_sources = _list_meshcorium_channel_library()
+    used_idx = {
+        _channel_runtime_idx(channel)
+        for channel in list(existing_channels or [])
+        if _channel_runtime_idx(channel) >= 0 and _channel_runtime_name(channel)
+    }
+    existing_by_identity = {
+        _channel_runtime_identity(channel): channel
+        for channel in list(existing_channels or [])
+        if _channel_runtime_name(channel) and _channel_runtime_identity(channel)
+    }
+    added = 0
+    already_present = 0
+    remapped = 0
+    no_free_slots = 0
+    failed = 0
+    retry_count = 0
+    verified_after_empty_response = 0
+    warnings: list[str] = []
+    applied_entries: list[dict] = []
+    already_present_entries: list[dict] = []
+    failed_entries: list[dict] = []
+    processed = 0
+    total_candidates = len(db_candidates)
+    if progress_callback is not None:
+        progress_callback({
+            "operation": "enable",
+            "status": "started",
+            "phase": "prepare",
+            "current": 0,
+            "total": total_candidates,
+        })
+    for candidate in db_candidates:
+        identity = str(candidate.get("channel_identity") or "").strip()
+        if not identity:
+            continue
+        channel_name = _normalize_meshcore_channel_name(candidate.get("channel_name"))
+        if not channel_name:
+            continue
+        processed += 1
+        desired_idx = 0 if _is_meshcore_public_channel_name(channel_name) else int(candidate.get("channel_idx") or -1)
+        existing_channel = existing_by_identity.get(identity)
+        if existing_channel is not None:
+            already_present += 1
+            current_idx = _channel_runtime_idx(existing_channel)
+            already_present_entries.append({
+                "idx": current_idx,
+                "desired_idx": desired_idx,
+                "name": _channel_runtime_name(existing_channel) or channel_name,
+                "channel_identity": identity,
+                "source_owner_id": _normalize_owner_id(candidate.get("owner_id")),
+                "remapped": bool(desired_idx != current_idx),
+            })
+            if progress_callback is not None:
+                progress_callback({
+                    "operation": "enable",
+                    "status": "already-present",
+                    "phase": "skip",
+                    "current": processed,
+                    "total": total_candidates,
+                    "channel_idx": current_idx,
+                    "channel_name": _channel_runtime_name(existing_channel) or channel_name,
+                })
+            continue
+        if _is_meshcore_public_channel_name(channel_name) and max_channels > 0:
+            assigned_idx = 0
+        else:
+            assigned_idx = (
+                desired_idx
+                if 1 <= desired_idx < max_channels and desired_idx not in used_idx
+                else None
+            )
+        if assigned_idx is None:
+            free_idx = None
+            for idx in range(1, max_channels):
+                if idx not in used_idx:
+                    free_idx = idx
+                    break
+            if free_idx is None:
+                no_free_slots += 1
+                warnings.append(
+                    f"{candidate.get('channel_name') or identity}: no free channel slots left on the node."
+                )
+                if progress_callback is not None:
+                    progress_callback({
+                        "operation": "enable",
+                        "status": "no-free-slot",
+                        "phase": "skip",
+                        "current": processed,
+                        "total": total_candidates,
+                        "channel_idx": desired_idx,
+                        "channel_name": channel_name,
+                    })
+                continue
+            assigned_idx = free_idx
+        channel_secret_hex = _resolve_channel_secret_hex_for_save(channel_name, candidate.get("channel_secret_hex"))
+        try:
+            written_channel, write_meta = _set_channel_with_retry(
+                client,
+                assigned_idx,
+                channel_name,
+                channel_secret_hex,
+                progress_callback=progress_callback,
+                progress_base={
+                    "operation": "enable",
+                    "current": processed,
+                    "total": total_candidates,
+                },
+            )
+        except (MeshCoreError, SerialException, ValueError) as exc:
+            failed += 1
+            message = str(exc)
+            failed_entries.append({
+                "idx": assigned_idx,
+                "desired_idx": desired_idx,
+                "name": channel_name,
+                "channel_identity": identity,
+                "error": message,
+            })
+            warnings.append(f"{channel_name or identity}: {message}")
+            logging.warning(
+                "channel sync failed idx=%s name=%s identity=%s error=%s",
+                assigned_idx,
+                channel_name,
+                identity,
+                message,
+            )
+            if progress_callback is not None:
+                progress_callback({
+                    "operation": "enable",
+                    "status": "failed",
+                    "phase": "set-channel",
+                    "current": processed,
+                    "total": total_candidates,
+                    "channel_idx": assigned_idx,
+                    "channel_name": channel_name,
+                    "message": message,
+                })
+            continue
+        used_idx.add(assigned_idx)
+        existing_by_identity[identity] = written_channel
+        added += 1
+        if desired_idx != assigned_idx:
+            remapped += 1
+        attempts = int(write_meta.get("attempts") or 1)
+        retry_count += max(0, attempts - 1)
+        if bool(write_meta.get("verified_after_empty_response")):
+            verified_after_empty_response += 1
+        applied_entries.append({
+            "idx": assigned_idx,
+            "desired_idx": desired_idx,
+            "name": channel_name,
+            "channel_identity": identity,
+            "source_owner_id": _normalize_owner_id(candidate.get("owner_id")),
+            "remapped": bool(desired_idx != assigned_idx),
+        })
+    channels_dict = _load_channels_in_session(client, max_channels, owner_id=owner_id) if max_channels > 0 else []
+    marked_entries = already_present_entries + applied_entries
+    if mark_access_all_messages:
+        _mark_access_all_message_channel_slots(owner_id, marked_entries)
+    if progress_callback is not None:
+        progress_callback({
+            "operation": "enable",
+            "status": "completed",
+            "phase": "completed",
+            "current": total_candidates,
+            "total": total_candidates,
+            "message": f"added={added} already_present={already_present} failed={failed}",
+        })
+    return channels_dict, {
+        "db_candidates": len(db_candidates),
+        "db_duplicate_sources": int(duplicate_sources),
+        "already_present": int(already_present),
+        "added": int(added),
+        "remapped": int(remapped),
+        "no_free_slots": int(no_free_slots),
+        "failed": int(failed),
+        "retry_count": int(retry_count),
+        "verified_after_empty_response": int(verified_after_empty_response),
+        "marked": len(marked_entries) if mark_access_all_messages else 0,
+        "applied": applied_entries,
+        "already_present_entries": already_present_entries,
+        "failed_entries": failed_entries,
+        "warnings": warnings[:50],
+    }
+
+
+def _sync_meshcorium_channels_to_node_with_client(
+    client: MeshCoreSerialClient,
+    session: BackgroundCompanionSession,
+    *,
+    mark_access_all_messages: bool = False,
+    progress_callback=None,
+) -> tuple[list[dict], dict]:
+    owner_id = _normalize_owner_id((session.self_info or {}).get("public_key"))
+    max_channels = int((session.device or {}).get("max_channels") or 0)
+    existing_channels = _load_channels_in_session(client, max_channels, owner_id=owner_id) if max_channels > 0 else list(session.channels or [])
+    return _sync_meshcorium_channels_to_node_runtime(
+        client,
+        owner_id=owner_id,
+        max_channels=max_channels,
+        existing_channels=existing_channels,
+        mark_access_all_messages=mark_access_all_messages,
+        progress_callback=progress_callback,
+    )
+
+
+def _remove_access_all_meshcorium_channels_from_node_runtime(
+    client: MeshCoreSerialClient,
+    *,
+    owner_id: str,
+    max_channels: int,
+    existing_channels: list[dict],
+    progress_callback=None,
+) -> tuple[list[dict], dict]:
+    marked_slots = _list_access_all_message_channel_slots(owner_id)
+    existing_by_idx = {
+        _channel_runtime_idx(channel): channel
+        for channel in list(existing_channels or [])
+        if _channel_runtime_idx(channel) >= 0 and _channel_runtime_name(channel)
+    }
+    removed = 0
+    skipped_missing = 0
+    skipped_mismatch = 0
+    removed_entries: list[dict] = []
+    warnings: list[str] = []
+    total_marked = len(marked_slots)
+    processed = 0
+    if progress_callback is not None:
+        progress_callback({
+            "operation": "disable",
+            "status": "started",
+            "phase": "prepare",
+            "current": 0,
+            "total": total_marked,
+        })
+    for slot in marked_slots:
+        processed += 1
+        channel_idx = int(slot.get("channel_idx") or -1)
+        channel_identity = str(slot.get("channel_identity") or "").strip()
+        if channel_idx < 0 or not channel_identity:
+            continue
+        current_channel = existing_by_idx.get(channel_idx)
+        if current_channel is None:
+            skipped_missing += 1
+            _delete_node_channel_slot_record(owner_id, channel_idx, channel_identity)
+            if progress_callback is not None:
+                progress_callback({
+                    "operation": "disable",
+                    "status": "skipped-missing",
+                    "phase": "skip",
+                    "current": processed,
+                    "total": total_marked,
+                    "channel_idx": channel_idx,
+                    "channel_name": str(slot.get("channel_name") or ""),
+                })
+            continue
+        current_identity = _build_channel_identity(
+            _channel_runtime_name(current_channel),
+            _channel_runtime_secret_hex(current_channel),
+        )
+        if current_identity != channel_identity:
+            skipped_mismatch += 1
+            warnings.append(
+                f"idx {channel_idx}: channel identity changed, keeping current node channel."
+            )
+            if progress_callback is not None:
+                progress_callback({
+                    "operation": "disable",
+                    "status": "skipped-mismatch",
+                    "phase": "skip",
+                    "current": processed,
+                    "total": total_marked,
+                    "channel_idx": channel_idx,
+                    "channel_name": _channel_runtime_name(current_channel),
+                })
+            continue
+        if progress_callback is not None:
+            progress_callback({
+                "operation": "disable",
+                "status": "removing",
+                "phase": "delete-channel",
+                "current": processed,
+                "total": total_marked,
+                "channel_idx": channel_idx,
+                "channel_name": _channel_runtime_name(current_channel) or str(slot.get("channel_name") or ""),
+            })
+        client.delete_channel(channel_idx)
+        removed += 1
+        removed_entries.append({
+            "idx": channel_idx,
+            "name": str(slot.get("channel_name") or ""),
+            "channel_identity": channel_identity,
+        })
+        _delete_node_channel_slot_record(owner_id, channel_idx, channel_identity)
+        if progress_callback is not None:
+            progress_callback({
+                "operation": "disable",
+                "status": "removed",
+                "phase": "deleted",
+                "current": processed,
+                "total": total_marked,
+                "channel_idx": channel_idx,
+                "channel_name": str(slot.get("channel_name") or ""),
+            })
+    channels_dict = _load_channels_in_session(client, max_channels, owner_id=owner_id) if max_channels > 0 else []
+    if progress_callback is not None:
+        progress_callback({
+            "operation": "disable",
+            "status": "completed",
+            "phase": "completed",
+            "current": total_marked,
+            "total": total_marked,
+            "message": f"removed={removed} skipped_missing={skipped_missing} skipped_mismatch={skipped_mismatch}",
+        })
+    return channels_dict, {
+        "marked": len(marked_slots),
+        "removed": removed,
+        "skipped_missing": skipped_missing,
+        "skipped_mismatch": skipped_mismatch,
+        "removed_entries": removed_entries,
+        "warnings": warnings[:50],
+    }
+
+
+def _remove_access_all_meshcorium_channels_from_node_with_client(
+    client: MeshCoreSerialClient,
+    session: BackgroundCompanionSession,
+    *,
+    progress_callback=None,
+) -> tuple[list[dict], dict]:
+    owner_id = _normalize_owner_id((session.self_info or {}).get("public_key"))
+    max_channels = int((session.device or {}).get("max_channels") or 0)
+    existing_channels = _load_channels_in_session(client, max_channels, owner_id=owner_id) if max_channels > 0 else list(session.channels or [])
+    return _remove_access_all_meshcorium_channels_from_node_runtime(
+        client,
+        owner_id=owner_id,
+        max_channels=max_channels,
+        existing_channels=existing_channels,
+        progress_callback=progress_callback,
+    )
 
 
 def _load_channels_snapshot_with_client(
@@ -9622,6 +11506,7 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
             requested_type = str(params.get("type", ["all"])[0] or "all").strip().lower()
             adapter_id = str(params.get("adapter_id", [""])[0] or "").strip()
             reset_ble_pairs = str(params.get("reset", ["0"])[0] or "0").strip().lower() in {"1", "true", "yes", "on"}
+            cached_only = str(params.get("cached_only", ["0"])[0] or "0").strip().lower() in {"1", "true", "yes", "on"}
             try:
                 ble_timeout = max(1.0, min(15.0, float(params.get("timeout", ["5"])[0] or 5.0)))
             except (TypeError, ValueError):
@@ -9651,6 +11536,7 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                         BLE_TRANSPORT_TYPE,
                         timeout=ble_timeout,
                         adapter_id=adapter_id,
+                        cached_only=cached_only,
                     )
                     transports.append(
                         {
@@ -9659,6 +11545,7 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                             "connections": ble_connections,
                             "adapter_id": adapter_id,
                             "reset": ble_reset_result,
+                            "cached_only": cached_only,
                         }
                     )
                 except BleTransportUnavailable as exc:
@@ -9707,6 +11594,24 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
             with _contact_owner_scope(port=port):
                 self._send_json(get_signal_metrics_chart(range_seconds))
             return
+        if parsed.path == "/api/battery-history":
+            params = parse_qs(parsed.query)
+            raw_range_seconds = params.get("range_seconds", [""])[0]
+            raw_start_at = params.get("start_at", [""])[0]
+            raw_end_at = params.get("end_at", [""])[0]
+            port = params.get("port", [""])[0]
+            range_seconds = None if raw_range_seconds in ("", None) else int(raw_range_seconds)
+            start_at = None if raw_start_at in ("", None) else int(raw_start_at)
+            end_at = None if raw_end_at in ("", None) else int(raw_end_at)
+            with _contact_owner_scope(port=port):
+                self._send_json(
+                    get_battery_history_chart(
+                        range_seconds,
+                        start_at=start_at,
+                        end_at=end_at,
+                    )
+                )
+            return
         if parsed.path == "/api/session":
             params = parse_qs(parsed.query)
             port = params.get("port", [""])[0]
@@ -9729,18 +11634,25 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/messages/channel":
             params = parse_qs(parsed.query)
             channel_idx = int(params.get("channel_idx", ["0"])[0])
+            channel_identity = str(params.get("channel_identity", [""])[0] or "").strip()
             limit = int(params.get("limit", ["200"])[0])
             port = params.get("port", [""])[0]
             raw_anchor = params.get("anchor_message_id", [""])[0]
             anchor_message_id = None if raw_anchor in ("", None) else int(raw_anchor)
             raw_before = params.get("before_message_id", [""])[0]
             before_message_id = None if raw_before in ("", None) else int(raw_before)
-            with _channel_history_scope(port, channel_idx):
+            with _messages_owner_scope(port=port, channel_identity=channel_identity):
                 self._send_json({
                     "messages": list_channel_messages(channel_idx, limit, anchor_message_id=anchor_message_id, before_message_id=before_message_id),
                     "total_count": get_channel_message_count(channel_idx),
                     "sent_history": get_channel_unique_outgoing_texts(channel_idx, 20),
                 })
+            return
+        if parsed.path == "/api/messages/conversations":
+            params = parse_qs(parsed.query)
+            port = params.get("port", [""])[0]
+            mention_name = params.get("mention_name", [""])[0]
+            self._send_json(_build_messages_conversation_directory(port=port, mention_name=mention_name))
             return
         if parsed.path == "/api/messages/contact":
             params = parse_qs(parsed.query)
@@ -9754,7 +11666,7 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
             anchor_message_id = None if raw_anchor in ("", None) else int(raw_anchor)
             raw_before = params.get("before_message_id", [""])[0]
             before_message_id = None if raw_before in ("", None) else int(raw_before)
-            with _contact_owner_scope(port=port, access_all=False):
+            with _messages_owner_scope(port=port):
                 self._send_json({
                     "messages": list_contact_messages(public_key, limit, anchor_message_id=anchor_message_id, before_message_id=before_message_id),
                     "total_count": get_contact_message_count(public_key),
@@ -9953,6 +11865,8 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                 _normalize_self_contact_message_records(owner_id)
                 _freeze_self_contact_if_cached(self_dict)
                 _record_successful_connection(session_kwargs, self_dict, device_dict)
+                if group.lower() == "security" and "ble_pin" in patch:
+                    _mark_known_ble_pin_custom(session_kwargs, self_dict, patch.get("ble_pin"))
                 self._send_json({
                     "ok": True,
                     "device": device_dict,
@@ -10058,6 +11972,64 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                 )
                 self._send_json(response_payload)
                 return
+            if parsed.path == "/api/data-transfer/export":
+                with DB_LOCK:
+                    export_result = meshcorium_data_transfer.export_package(
+                        categories=list((body or {}).get("categories") or []),
+                        messages_db_path=str(DB_PATH),
+                        contacts_db_path=str(CONTACTS_DB_PATH),
+                        known_nodes_db_path=str(KNOWN_NODES_DB_PATH),
+                    )
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                self._send_json(
+                    {
+                        "ok": True,
+                        "package": export_result["package"],
+                        "summary": export_result["summary"],
+                        "filename": f"meshcorium-export-{stamp}.json",
+                    }
+                )
+                return
+            if parsed.path == "/api/data-transfer/preview":
+                package = body.get("package") if isinstance(body.get("package"), dict) else {}
+                with DB_LOCK:
+                    preview = meshcorium_data_transfer.preview_package(
+                        package=package,
+                        categories=list((body or {}).get("categories") or []),
+                        messages_db_path=str(DB_PATH),
+                        contacts_db_path=str(CONTACTS_DB_PATH),
+                        known_nodes_db_path=str(KNOWN_NODES_DB_PATH),
+                    )
+                self._send_json({"ok": True, "preview": preview})
+                return
+            if parsed.path == "/api/data-transfer/import":
+                package = body.get("package") if isinstance(body.get("package"), dict) else {}
+                with DB_LOCK:
+                    import_result = meshcorium_data_transfer.import_package(
+                        package=package,
+                        categories=list((body or {}).get("categories") or []),
+                        messages_db_path=str(DB_PATH),
+                        contacts_db_path=str(CONTACTS_DB_PATH),
+                        known_nodes_db_path=str(KNOWN_NODES_DB_PATH),
+                        overwrite_conflicts=bool((body or {}).get("overwrite_conflicts")),
+                    )
+                for owner_id in list(import_result.get("touched_channel_owners") or []):
+                    _backfill_channel_message_identities(owner_id)
+                response_payload = _build_client_settings_payload()
+                _broadcast_global_event(
+                    {
+                        "event": "client-settings",
+                        "settings": response_payload.get("settings", {}),
+                    }
+                )
+                self._send_json(
+                    {
+                        "ok": True,
+                        "result": import_result,
+                        "settings": response_payload.get("settings", {}),
+                    }
+                )
+                return
             if parsed.path == "/api/transports/ble/unpair":
                 connection = body.get("connection") if isinstance(body.get("connection"), dict) else {}
                 address = str(
@@ -10070,7 +12042,17 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                 adapter_id = str(body.get("adapter_id") or connection.get("adapter_id") or "").strip()
                 if not address:
                     raise ValueError("BLE device address is required")
+                logging.info(
+                    "api ble unpair requested address=%s adapter=%s",
+                    address,
+                    adapter_id or "-",
+                )
                 result = unpair_ble_device(address=address, adapter_id=adapter_id)
+                logging.info(
+                    "api ble unpair completed address=%s removed=%s",
+                    address,
+                    bool((result or {}).get("removed")),
+                )
                 self._send_json({"ok": True, "result": result})
                 return
             if parsed.path == "/api/frontend-diagnostic":
@@ -10218,6 +12200,83 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                             body.get("channel_secret_hex"),
                         )
                 self._send_json({"channel": channel_dict, "channels": channels_dict})
+                return
+            if parsed.path == "/api/channels/delete":
+                session_kwargs = self._session_kwargs(body)
+                raw_channel_idx = body.get("channel_idx")
+                if raw_channel_idx in (None, ""):
+                    raise ValueError("channel_idx is required")
+                channel_idx = int(raw_channel_idx)
+                logging.info(
+                    "api channels/delete requested port=%s baudrate=%s idx=%s",
+                    conn["port"],
+                    conn["baudrate"],
+                    channel_idx,
+                )
+                session = _get_background_session(session_kwargs["port"])
+                if session and session.thread and session.thread.is_alive() and not session.stop_event.is_set():
+                    response = _run_command_via_background_session(
+                        conn["port"],
+                        {
+                            "kind": "delete_channel",
+                            "channel_idx": channel_idx,
+                        },
+                        timeout_secs=20.0,
+                    )
+                    channels_dict = list(response.get("channels") or [])
+                else:
+                    with _paused_background_session(session_kwargs["port"]):
+                        channels_dict = _delete_channel_and_reload(session_kwargs, channel_idx)
+                self._send_json({"ok": True, "channel_idx": channel_idx, "channels": channels_dict})
+                return
+            if parsed.path == "/api/channels/sync-from-db":
+                session_kwargs = self._session_kwargs(body)
+                mode = str(body.get("mode") or body.get("action") or "enable").strip().lower()
+                remove_mode = mode in {"disable", "remove", "cleanup", "off", "remove_access_all"}
+                mark_access_all_messages = bool(body.get("mark_access_all_messages", False))
+                operation_id = str(body.get("operation_id") or secrets.token_hex(8)).strip()
+                progress_callback = lambda payload, operation_id=operation_id: _broadcast_channel_sync_progress(
+                    session_kwargs["port"],
+                    {
+                        **payload,
+                        "operation_id": operation_id,
+                        "operation": "disable" if remove_mode else "enable",
+                    },
+                )
+                logging.info(
+                    "api channels/sync-from-db requested port=%s baudrate=%s mode=%s mark_access_all_messages=%s",
+                    conn["port"],
+                    conn["baudrate"],
+                    "disable" if remove_mode else "enable",
+                    mark_access_all_messages,
+                )
+                session = _get_background_session(session_kwargs["port"])
+                if session and session.thread and session.thread.is_alive() and not session.stop_event.is_set():
+                    response = _run_command_via_background_session(
+                        conn["port"],
+                        {
+                            "kind": "remove_access_all_meshcorium_channels" if remove_mode else "sync_meshcorium_channels",
+                            "mark_access_all_messages": mark_access_all_messages,
+                            "operation_id": operation_id,
+                        },
+                        timeout_secs=180.0,
+                    )
+                    channels_dict = list(response.get("channels") or [])
+                    summary = dict(response.get("summary") or {})
+                else:
+                    with _paused_background_session(session_kwargs["port"]):
+                        if remove_mode:
+                            channels_dict, summary = _remove_access_all_meshcorium_channels_from_node(
+                                session_kwargs,
+                                progress_callback=progress_callback,
+                            )
+                        else:
+                            channels_dict, summary = _sync_meshcorium_channels_to_node(
+                                session_kwargs,
+                                mark_access_all_messages=mark_access_all_messages,
+                                progress_callback=progress_callback,
+                            )
+                self._send_json({"ok": True, "channels": channels_dict, "summary": summary})
                 return
             if parsed.path == "/api/time/get":
                 logging.info("api time/get requested port=%s baudrate=%s", conn["port"], conn["baudrate"])
@@ -10612,7 +12671,7 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                 self._send_json({"ok": True})
                 return
             if parsed.path == "/api/messages/clear":
-                with _contact_owner_scope(port=conn["port"]):
+                with _messages_owner_scope(port=conn["port"]):
                     deleted = clear_message_db()
                 logging.info("api messages/clear completed deleted=%s", deleted)
                 self._send_json({"ok": True, "deleted": deleted})
@@ -10622,7 +12681,7 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                 scope = str(body.get("scope") or "regular")
                 mention_name = str(body.get("mention_name") or "")
                 source = str(body.get("source") or "").strip()
-                with _contact_owner_scope(port=conn["port"]):
+                with _messages_owner_scope(port=conn["port"]):
                     updated = set_all_messages_read_state(is_read, scope=scope, mention_name=mention_name)
                 if source:
                     _log_read_debug(
@@ -10649,31 +12708,33 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                 return
             if parsed.path == "/api/messages/debug-summary":
                 mention_name = str(body.get("mention_name") or "")
-                with _contact_owner_scope(port=conn["port"]):
+                with _messages_owner_scope(port=conn["port"]):
                     summary = get_message_debug_summary(mention_name)
                 self._send_json({"ok": True, **summary})
                 return
             if parsed.path == "/api/messages/conversation/read":
                 conversation_kind = str(body.get("conversation_kind") or "")
                 conversation_value = str(body.get("conversation_value") or "")
+                channel_identity = str(body.get("channel_identity") or "").strip()
                 mention_name = str(body.get("mention_name") or "")
                 if conversation_kind == "channel":
-                    with _channel_history_scope(conn["port"], int(conversation_value or 0)):
+                    with _messages_owner_scope(port=conn["port"], channel_identity=channel_identity):
                         updated = mark_conversation_messages_read(conversation_kind, conversation_value, mention_name=mention_name)
                 else:
-                    with _contact_owner_scope(port=conn["port"], access_all=False):
+                    with _messages_owner_scope(port=conn["port"]):
                         updated = mark_conversation_messages_read(conversation_kind, conversation_value, mention_name=mention_name)
                 self._send_json({"ok": True, **updated})
                 return
             if parsed.path == "/api/messages/read-up-to":
                 conversation_kind = str(body.get("conversation_kind") or "")
                 conversation_value = str(body.get("conversation_value") or "")
+                channel_identity = str(body.get("channel_identity") or "").strip()
                 message_id = int(body.get("message_id", 0))
                 if conversation_kind == "channel":
-                    with _channel_history_scope(conn["port"], int(conversation_value or 0)):
+                    with _messages_owner_scope(port=conn["port"], channel_identity=channel_identity):
                         stored = mark_messages_read_up_to(conversation_kind, conversation_value, message_id)
                 else:
-                    with _contact_owner_scope(port=conn["port"], access_all=False):
+                    with _messages_owner_scope(port=conn["port"]):
                         stored = mark_messages_read_up_to(conversation_kind, conversation_value, message_id)
                 self._send_json({"ok": True, "message_id": stored})
                 return
@@ -10681,18 +12742,18 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                 message_table = str(body.get("message_table") or "")
                 message_id = int(body.get("message_id", 0))
                 is_read = bool(body.get("is_read", True))
-                with _contact_owner_scope(port=conn["port"]):
+                with _messages_owner_scope(port=conn["port"]):
                     set_mention_message_read_state(message_table, message_id, is_read)
                 self._send_json({"ok": True})
                 return
             if parsed.path == "/api/messages/unread":
                 mention_name = str(body.get("mention_name") or "")
                 include_entries = bool(body.get("include_entries", True))
-                with _contact_owner_scope(port=conn["port"]):
+                with _messages_owner_scope(port=conn["port"]):
                     owner_id = _resolve_owner_id_for_port(conn["port"])
                     channel_unread_summary, channel_mention_summary = _build_channel_unread_payload_for_port(conn["port"], mention_name)
-                    contact_unread_summary = get_contact_unread_summary(mention_name, owner_id=owner_id, access_all=False)
-                    contact_mention_summary = get_contact_mention_summary(mention_name, owner_id=owner_id, access_all=False)
+                    contact_unread_summary = get_contact_unread_summary(mention_name, owner_id=owner_id)
+                    contact_mention_summary = get_contact_mention_summary(mention_name, owner_id=owner_id)
                     self._send_json(
                         {
                             "channel_unread_counts": {key: int(value["unread_count"]) for key, value in channel_unread_summary.items()},
@@ -11243,14 +13304,26 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
     def _conn_kwargs(self, body: dict) -> dict:
         descriptor = DEFAULT_CONNECTION_ROUTER.from_request(body)
         connection_id = descriptor.port if descriptor.transport_type == SERIAL_TRANSPORT_TYPE else descriptor.transport_id
+        saved_ble_pin = ""
+        effective_pin = descriptor.pin
+        if descriptor.transport_type == BLE_TRANSPORT_TYPE:
+            saved_ble_pin = _get_known_ble_pin_for_address(descriptor.transport_id)
+            if saved_ble_pin and not descriptor.pin:
+                effective_pin = saved_ble_pin
+        connection_payload = descriptor.to_dict(include_secrets=False)
+        if effective_pin:
+            connection_payload["pin"] = effective_pin
         return {
-            "connection": descriptor.to_dict(include_secrets=bool(descriptor.pin)),
+            "connection": connection_payload,
             "port": connection_id,
             "baudrate": int(descriptor.baudrate),
             "timeout": float(descriptor.timeout),
             "transport_type": descriptor.transport_type,
             "transport_id": descriptor.transport_id,
-            "allow_ble_bond_repair": bool(descriptor.allow_ble_bond_repair),
+            "allow_ble_bond_repair": bool(
+                descriptor.allow_ble_bond_repair
+                or (descriptor.transport_type == BLE_TRANSPORT_TYPE and bool(effective_pin))
+            ),
             "protocol_version": int(body.get("protocol_version", DEFAULT_PROTOCOL_VERSION)),
         }
 
@@ -11299,6 +13372,21 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
             self.send_header(key, value)
         self.end_headers()
         self._write_response_body(payload)
+
+    @staticmethod
+    def _is_cacheable_image_content_type(content_type: str) -> bool:
+        normalized = str(content_type or "").split(";", 1)[0].strip().lower()
+        return normalized.startswith("image/")
+
+    @staticmethod
+    def _cache_headers_for_static_file(*, content_type: str, immutable: bool = False, long_lived: bool = False) -> dict[str, str]:
+        if immutable:
+            return {"Cache-Control": "public, max-age=31536000, immutable"}
+        if long_lived:
+            return {"Cache-Control": "public, max-age=2592000, stale-while-revalidate=86400"}
+        if MeshCoreHandler._is_cacheable_image_content_type(content_type):
+            return {"Cache-Control": "public, max-age=2592000, stale-while-revalidate=86400"}
+        return {"Cache-Control": "public, max-age=3600"}
 
     def _is_auth_exempt_path(self, path: str) -> bool:
         if path in {"/login", "/api/auth/login", "/api/auth/logout"}:
@@ -11374,6 +13462,8 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
             content_type = "application/octet-stream"
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", content_type)
+        for key, value in self._cache_headers_for_static_file(content_type=content_type, long_lived=True).items():
+            self.send_header(key, value)
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self._write_response_body(payload)
@@ -11417,6 +13507,8 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
         content_type = ALLOWED_WALLPAPER_EXTENSIONS.get(resolved.suffix.lower(), "application/octet-stream")
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", content_type)
+        for key, value in self._cache_headers_for_static_file(content_type=content_type, long_lived=True).items():
+            self.send_header(key, value)
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self._write_response_body(payload)
@@ -11512,6 +13604,10 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
             self.send_header("Pragma", "no-cache")
             self.send_header("Expires", "0")
+        else:
+            immutable = "assets/" in normalized or normalized.startswith("assets/")
+            for key, value in self._cache_headers_for_static_file(content_type=content_type, immutable=immutable).items():
+                self.send_header(key, value)
         if guessed_encoding:
             self.send_header("Content-Encoding", guessed_encoding)
         self.send_header("Content-Length", str(len(payload)))
@@ -11592,6 +13688,7 @@ def main() -> int:
     _migrate_named_db_files_if_needed()
     init_message_db()
     init_contact_db()
+    init_known_nodes_db()
     try:
         sync_mobile_push_muted_conversations(
             DB_LOCK,
@@ -11604,12 +13701,13 @@ def main() -> int:
     _attempt_service_startup_auto_connect()
     server = ThreadingHTTPServer((args.host, args.port), MeshcoriumWebHandler)
     logging.info(
-        "server starting host=%s port=%s log=%s messages_db=%s contacts_db=%s client_settings=%s",
+        "server starting host=%s port=%s log=%s messages_db=%s contacts_db=%s known_nodes_db=%s client_settings=%s",
         args.host,
         args.port,
         _display_project_path(LOG_PATH),
         _display_project_path(DB_PATH),
         _display_project_path(CONTACTS_DB_PATH),
+        _display_project_path(KNOWN_NODES_DB_PATH),
         _display_project_path(CLIENT_SETTINGS_PATH),
     )
     print(f"Meshcorium listening on http://{args.host}:{args.port}")

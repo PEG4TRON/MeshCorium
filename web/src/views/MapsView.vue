@@ -10,6 +10,7 @@ import { resolveNodePreviewUrl } from '../lib/nodePreview'
 import ShellPageFrame from '../components/layout/ShellPageFrame.vue'
 import ShellPhonebar from '../components/layout/ShellPhonebar.vue'
 import { useSessionStore } from '../stores/session'
+import { filterStatusTextForTransport } from '../lib/statusText'
 
 const session = useSessionStore()
 const { t, locale } = useI18n()
@@ -72,6 +73,10 @@ const serviceStatusCopy = computed(() => {
     return t('settings.status.recovering', { count: session.recoveringSessions.length })
   }
   return t('settings.status.disconnected')
+})
+
+const scrollerFooterStatus = computed(() => {
+  return filterStatusTextForTransport(session.statusText, session.selectedTransportType) || serviceStatusCopy.value
 })
 
 const normalizedMapThemeMode = computed(() => {
@@ -2361,7 +2366,7 @@ onBeforeUnmount(() => {
 
       <template #scroller-footer>
         <div class="mc-status" :class="{ 'is-error': session.statusError }">
-          {{ session.statusText || serviceStatusCopy }}
+          {{ scrollerFooterStatus }}
         </div>
       </template>
     </ShellPageFrame>

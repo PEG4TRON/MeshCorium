@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import { useStorage } from '@vueuse/core'
 
 import { i18n } from '../i18n'
+import { batteryProfileForNode, normalizeBatteryProfileMap } from '../lib/batteryProfile'
 import { normalizeStopState } from '../lib/sessionLiveState'
 
 const DEFAULT_TIMEOUT = 4.0
@@ -272,11 +273,65 @@ export const useSessionStore = defineStore('session', () => {
     return mode === 'regular' || mode === 'all' ? mode : 'none'
   }
 
+  function getHighestPriorityMuteMode(modes = []) {
+    if (modes.includes('all')) {
+      return 'all'
+    }
+    if (modes.includes('regular')) {
+      return 'regular'
+    }
+    return 'none'
+  }
+
+  function getChannelMuteKeys(value) {
+    const keys = []
+    const pushUnique = (next) => {
+      const normalized = String(next || '').trim().toLowerCase()
+      if (normalized && !keys.includes(normalized)) {
+        keys.push(normalized)
+      }
+    }
+    if (isPlainObject(value)) {
+      const identity = String(value?.channel_identity || '').trim()
+      const idx = Number(value?.idx ?? -1)
+      if (identity) {
+        pushUnique(`channelid:${identity}`)
+      }
+      if (Number.isFinite(idx) && idx >= 0) {
+        pushUnique(`channel:${idx}`)
+      }
+      return keys
+    }
+    const normalized = String(value || '').trim()
+    if (!normalized) {
+      return keys
+    }
+    if (/^-?\d+$/.test(normalized)) {
+      const idx = Number(normalized)
+      if (Number.isFinite(idx) && idx >= 0) {
+        pushUnique(`channel:${idx}`)
+      }
+      return keys
+    }
+    if (normalized.startsWith('channelid:') || normalized.startsWith('channel:')) {
+      pushUnique(normalized)
+      return keys
+    }
+    pushUnique(`channelid:${normalized}`)
+    return keys
+  }
+
+  function getChannelMuteMode(value) {
+    return getHighestPriorityMuteMode(
+      getChannelMuteKeys(value).map((muteKey) => getConversationMuteModeByKey(muteKey)),
+    )
+  }
+
   function sumAudibleUnread(summary = {}) {
     const channelUnreadCounts = isPlainObject(summary?.channel_unread_counts) ? summary.channel_unread_counts : {}
     let total = 0
     for (const [channelKey, rawCount] of Object.entries(channelUnreadCounts)) {
-      const muteMode = getConversationMuteModeByKey(`channel:${String(channelKey).trim().toLowerCase()}`)
+      const muteMode = getChannelMuteMode(channelKey)
       if (muteMode === 'regular' || muteMode === 'all') {
         continue
       }
@@ -290,7 +345,7 @@ export const useSessionStore = defineStore('session', () => {
     const contactMentionCounts = isPlainObject(summary?.contact_mention_counts) ? summary.contact_mention_counts : {}
     let total = 0
     for (const [channelKey, rawCount] of Object.entries(channelMentionCounts)) {
-      const muteMode = getConversationMuteModeByKey(`channel:${String(channelKey).trim().toLowerCase()}`)
+      const muteMode = getChannelMuteMode(channelKey)
       if (muteMode === 'all') {
         continue
       }
@@ -482,6 +537,27 @@ export const useSessionStore = defineStore('session', () => {
         selectedBleDevice.value = normalizePort(nextBleDevice.transport_id)
       }
     }
+  }
+
+  function applyConnectionSelection(source = {}, fallback = {}) {
+    const connection = normalizeConnectionDescriptor(source, fallback)
+    const transportType = String(connection.transport_type || 'serial').trim().toLowerCase() || 'serial'
+    selectedTransportType.value = transportType
+    if (transportType === 'ble') {
+      const transportId = normalizePort(connection.transport_id || connection.port)
+      selectedBleDevice.value = transportId
+      selectedPort.value = transportId
+      selectedBaudrate.value = Number(connection.baudrate || 0) || 0
+      return
+    }
+    if (transportType === 'serial') {
+      const port = normalizePort(connection.port || connection.transport_id)
+      selectedPort.value = port
+      selectedBaudrate.value = Number(connection.baudrate || DEFAULT_BAUDRATE) || DEFAULT_BAUDRATE
+      return
+    }
+    selectedPort.value = normalizePort(connection.port || connection.transport_id)
+    selectedBaudrate.value = Number(connection.baudrate || 0) || 0
   }
 
   function applyClientSettingsPayload(data) {
@@ -714,6 +790,9 @@ export const useSessionStore = defineStore('session', () => {
       channels_count: nextChannelsCount,
       recent_repeaters_count: nextRecentRepeatersCount,
     }
+    if (nextActive) {
+      applyConnectionSelection(data, previous)
+    }
   }
 
   async function loadClientSettings() {
@@ -767,13 +846,16 @@ export const useSessionStore = defineStore('session', () => {
     })
   }
 
-  async function refreshBleConnections({ timeout = 6, resetKnownDevices = false } = {}) {
+  async function refreshBleConnections({ timeout = 6, resetKnownDevices = false, cachedOnly = false } = {}) {
     loadingBleConnections.value = true
     try {
       const query = new URLSearchParams({
         type: 'ble',
         timeout: String(Math.max(1, Number(timeout || 6))),
       })
+      if (cachedOnly) {
+        query.set('cached_only', '1')
+      }
       if (resetKnownDevices) {
         query.set('reset', '1')
       }
@@ -813,12 +895,33 @@ export const useSessionStore = defineStore('session', () => {
         adapter_id: String(adapterId || '').trim(),
       }),
     })
+    const result = isPlainObject(data?.result) ? data.result : null
+    const removed = Boolean(result?.removed)
+    if (!removed) {
+      throw new Error(t('connect.ble.unpairFailed'))
+    }
+    bleConnections.value = bleConnections.value
+      .map((entry) => {
+        const entryAddress = normalizePort(entry?.transport_id || entry?.address)
+        if (entryAddress !== normalizedAddress) {
+          return entry
+        }
+        return {
+          ...entry,
+          paired: false,
+          bonded: false,
+          trusted: false,
+          connected: false,
+          cached: false,
+        }
+      })
+      .filter((entry) => normalizePort(entry?.transport_id || entry?.address) !== normalizedAddress)
     if (normalizePort(selectedBleDevice.value) === normalizedAddress) {
       selectedBlePin.value = ''
     }
-    await refreshBleConnections()
+    await refreshBleConnections({ cachedOnly: true })
     setStatus(t('connect.ble.unpaired', { address: normalizedAddress }))
-    return data?.result || null
+    return result
   }
 
   function configBody(extra = {}) {
@@ -969,6 +1072,7 @@ export const useSessionStore = defineStore('session', () => {
         ...payload,
         active: true,
       })
+      applyConnectionSelection(payload, connection)
       await loadClientSettings()
       clearConnectNotice()
       setStatus(t('connect.status.connectedTo', { target: payload?.self?.name || connection.display_label || port }))
@@ -1028,6 +1132,8 @@ export const useSessionStore = defineStore('session', () => {
   const selfPublicKey = computed(() => String(self.value?.public_key || '').trim())
   const deviceModel = computed(() => String(device.value?.manufacturer_model || '').trim())
   const notificationSoundEnabled = computed(() => Boolean(settingsPayload.value?.settings?.notifications_sound_enabled))
+  const batteryProfilesByNodeId = computed(() => normalizeBatteryProfileMap(settingsPayload.value?.settings?.battery_profile_by_node_id))
+  const currentNodeBatteryProfile = computed(() => batteryProfileForNode(settingsPayload.value?.settings, selfPublicKey.value))
   const selectedConnection = computed(() => {
     const rawTransportType = String(selectedTransportType.value || 'serial').trim().toLowerCase()
     const transportType = ['serial', 'ble', 'wifi'].includes(rawTransportType) ? rawTransportType : 'serial'
@@ -1044,15 +1150,18 @@ export const useSessionStore = defineStore('session', () => {
     if (transportType === 'ble') {
       const bleDevice = bleConnections.value.find(
         (entry) => normalizePort(entry?.transport_id || entry?.address) === normalizePort(selectedBleDevice.value),
-      ) || {}
+      ) || savedConnections.value.find((entry) => {
+        const connection = normalizeConnectionDescriptor(entry)
+        return connection.transport_type === 'ble' && normalizePort(connection.transport_id) === normalizePort(selectedBleDevice.value)
+      }) || {}
       const transportId = normalizePort(selectedBleDevice.value || bleDevice?.transport_id || bleDevice?.address)
       return normalizeConnectionDescriptor({
         connection: {
           transport_type: 'ble',
           transport_id: transportId,
-          display_label: String(bleDevice?.display_label || bleDevice?.name || transportId || '').trim(),
+          display_label: String(bleDevice?.display_label || bleDevice?.name || bleDevice?.node_name || bleDevice?.manufacturer_model || transportId || '').trim(),
           adapter_id: String(bleDevice?.adapter_id || '').trim(),
-          pin: String(selectedBlePin.value || '').trim(),
+          pin: String(selectedBlePin.value || bleDevice?.pin || '').trim(),
           timeout: Math.max(DEFAULT_TIMEOUT, 8),
         },
       })
@@ -1121,6 +1230,8 @@ export const useSessionStore = defineStore('session', () => {
     selfPublicKey,
     deviceModel,
     notificationSoundEnabled,
+    batteryProfilesByNodeId,
+    currentNodeBatteryProfile,
     selectedSavedConnection,
     setStatus,
     showConnectNotice,
