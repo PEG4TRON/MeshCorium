@@ -27,7 +27,7 @@ Key `dev` differences relative to `v0.5.3`:
 - UI/UX was refreshed across the connection float, phonebar, dropdowns, sync animations, route loading, battery display, and notification/message flows.
 - BLE/Wi-Fi battery percentage, battery profiles, and DB-backed battery history charts were added.
 - The launcher was hardened around venv setup, frontend build fallback, and USB serial access groups.
-- Docker was aligned with the dev runtime: it now includes the current backend modules and can use host BlueZ through D-Bus for BLE while keeping USB serial device passthrough.
+- Docker was aligned with the dev runtime: it now includes the current backend modules, uses host BlueZ through D-Bus for BLE, and exposes host `/dev` so USB serial discovery behaves like the ordinary launcher path.
 
 Runtime variants remain:
 

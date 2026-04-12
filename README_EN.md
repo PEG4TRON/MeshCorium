@@ -131,7 +131,7 @@ In `dev`, the Docker variant is aligned with the current application code:
 
 - the image builds the current Vue frontend during Docker build
 - the backend includes the new known-node, DB import/export, and BLE transport modules
-- USB serial remains available through device passthrough
+- USB serial remains available through host `/dev` passthrough
 - BLE uses host BlueZ through the host system D-Bus socket
 
 Default bind mounts in `docker-compose.yml`:
@@ -139,11 +139,11 @@ Default bind mounts in `docker-compose.yml`:
 - `/etc/meshcorium` -> container config directory `/etc/meshcorium`
 - `/var/lib/meshcorium` -> container runtime data directory `/var/lib/meshcorium`
 - `/var/log/meshcorium` -> container log directory `/var/log/meshcorium`
+- `/dev` -> host system devices inside the container
+- `/run/udev` -> read-only udev metadata for reliable USB serial discovery
 - `/run/dbus` -> host D-Bus socket for BlueZ access when using BLE
 
-The compose file also forwards one USB serial device by default:
-
-- `${MESHCORIUM_SERIAL_DEVICE:-/dev/ttyUSB0}`
+Compose runs the container with `privileged: true` so Docker sees hardware close to the way the ordinary launcher sees it on the host. This is needed for dynamic USB serial devices (`/dev/ttyUSB*`, `/dev/ttyACM*`), Bluetooth/rfkill, and other runtime device nodes that can appear after container startup.
 
 Typical start:
 
@@ -163,7 +163,8 @@ Notes:
 - Docker uses the same MeshCorium backend/frontend code as the ordinary release
 - BLE inside Docker depends on host `bluetoothd` / BlueZ and the mounted `/run/dbus`
 - if `/run/dbus/system_bus_socket` is unavailable, the container still starts, but BLE is unavailable
-- USB serial remains independent from BLE and continues to work through the forwarded serial device
+- USB serial remains independent from BLE and continues to work through host `/dev/tty*` devices
+- because `privileged: true` is enabled, the Docker variant should be run only on a trusted local host
 
 ## Updating From `v0.5.0` / `v0.5.1`
 
