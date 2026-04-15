@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import platform
@@ -34,6 +35,7 @@ _BLE_CONNECTING_TRANSPORTS_LOCK = threading.Lock()
 _BLE_CONNECTING_TRANSPORTS: dict[str, set[object]] = {}
 _BLE_CONNECTION_GENERATIONS_LOCK = threading.Lock()
 _BLE_CONNECTION_GENERATIONS: dict[str, int] = {}
+_BLUETOOTHCTL_SESSION_LOCK = threading.RLock()
 
 
 try:
@@ -89,6 +91,15 @@ _BLUETOOTHCTL_FAILURE_MARKERS = (
 )
 
 
+@contextlib.contextmanager
+def _bluetoothctl_session_scope(*, purpose: str, address: str = ""):
+    _BLUETOOTHCTL_SESSION_LOCK.acquire()
+    try:
+        yield
+    finally:
+        _BLUETOOTHCTL_SESSION_LOCK.release()
+
+
 class _BluetoothctlAgentSession:
     def __init__(self, *, address: str, pin: str = "", adapter_id: str = "", purpose: str = "connect"):
         self.address = str(address or "").strip()
@@ -101,6 +112,7 @@ class _BluetoothctlAgentSession:
         self._ready = threading.Event()
         self._detector_buffer = ""
         self._lock = threading.Lock()
+        self._session_lock_acquired = False
         self.passkey_requested = False
         self.confirmation_requested = False
         self.pin_sent = False
@@ -113,6 +125,8 @@ class _BluetoothctlAgentSession:
             return False
         if self._process is not None:
             return True
+        _BLUETOOTHCTL_SESSION_LOCK.acquire()
+        self._session_lock_acquired = True
         try:
             self._process = subprocess.Popen(
                 [_bluetoothctl_binary()],
@@ -124,6 +138,9 @@ class _BluetoothctlAgentSession:
             )
         except (OSError, subprocess.TimeoutExpired):
             self._process = None
+            if self._session_lock_acquired:
+                self._session_lock_acquired = False
+                _BLUETOOTHCTL_SESSION_LOCK.release()
             return False
         self._thread = threading.Thread(
             target=self._run,
@@ -157,6 +174,9 @@ class _BluetoothctlAgentSession:
             self._thread.join(timeout=1.5)
         self._process = None
         self._thread = None
+        if self._session_lock_acquired:
+            self._session_lock_acquired = False
+            _BLUETOOTHCTL_SESSION_LOCK.release()
 
     def auth_state(self) -> dict[str, bool]:
         return {
@@ -373,6 +393,12 @@ class BleFrameTransport:
 
     async def _get_nus_service(self):
         self._set_connect_stage("resolve-services")
+        _log_bluez_device_state_snapshot(
+            "before-get-services",
+            address=self.port,
+            adapter_id=self.adapter_id,
+            client_connected=bool(getattr(self._client, "is_connected", False)),
+        )
         services = self._client.services
         service = services.get_service(NUS_SERVICE_UUID) if services is not None else None
         if service is not None:
@@ -384,7 +410,25 @@ class BleFrameTransport:
                 service = services.get_service(NUS_SERVICE_UUID)
             except AttributeError:
                 service = None
+            except Exception as exc:
+                _log_bluez_device_state_snapshot(
+                    "get-services-failed",
+                    address=self.port,
+                    adapter_id=self.adapter_id,
+                    level=logging.WARNING,
+                    attempt=attempt,
+                    error=type(exc).__name__,
+                    client_connected=bool(getattr(self._client, "is_connected", False)),
+                )
+                raise
             if service is not None:
+                _log_bluez_device_state_snapshot(
+                    "after-get-services",
+                    address=self.port,
+                    adapter_id=self.adapter_id,
+                    attempt=attempt,
+                    client_connected=bool(getattr(self._client, "is_connected", False)),
+                )
                 return service
             if attempt == 1:
                 await asyncio.sleep(0.35)
@@ -580,6 +624,7 @@ class BleFrameTransport:
                 bluez_bonded = False
                 bluez_trusted = False
                 bluez_connected = False
+                preconnect_pairing_completed = False
                 try:
                     bluez_state = _get_bluez_device_state(self.port, adapter_id=self.adapter_id)
                     bluez_paired = bool(bluez_state.get("paired"))
@@ -635,49 +680,60 @@ class BleFrameTransport:
                         else:
                             self._client = BleakClient(self.port, **client_kwargs)
                     else:
-                        device = await _resolve_ble_client_target_async(
+                        self._set_connect_stage("resolve-device", adapter=self.adapter_id or "-")
+                        logging.info(
+                            "ble transport resolving unpaired device address=%s adapter=%s skip_cache=%s directed_scan=%s",
                             self.port,
-                            timeout=max(3.0, min(self.timeout + 1.0, 6.0)),
-                            adapter_id=self.adapter_id,
-                            prefer_bluez_state=False,
-                            allow_directed_scan=False,
+                            self.adapter_id or "-",
+                            True,
+                            True,
                         )
-                        if device is not None:
-                            self._set_connect_stage("reuse-recent-scan-device", adapter=self.adapter_id or "-")
-                            logging.info(
-                                "ble transport reusing recently scanned device address=%s adapter=%s",
-                                self.port,
-                                self.adapter_id or "-",
-                            )
-                        else:
-                            self._set_connect_stage("resolve-device", adapter=self.adapter_id or "-")
-                            logging.info("ble transport resolving device address=%s adapter=%s", self.port, self.adapter_id or "-")
-                            device = await _resolve_ble_client_target_async(
-                                self.port,
-                                timeout=max(3.0, min(self.timeout + 1.0, 6.0)),
+                        if self.pin:
+                            self._set_connect_stage("pre-pairing-helper", adapter=self.adapter_id or "-")
+                            helper_paired = await asyncio.to_thread(
+                                _ensure_ble_pairing_via_bluetoothctl,
+                                address=self.port,
+                                pin=self.pin,
+                                timeout=max(12.0, self.timeout + 14.0),
                                 adapter_id=self.adapter_id,
-                                prefer_bluez_state=False,
-                                allow_directed_scan=False,
+                                allow_no_challenge_fallback=True,
                             )
-                        if device is None and BLE_ADDRESS_RE.match(self.port):
-                            self._set_connect_stage("resolve-device-directed-scan", adapter=self.adapter_id or "-")
-                            logging.info(
-                                "ble transport directed scan address=%s adapter=%s",
-                                self.port,
-                                self.adapter_id or "-",
-                            )
-                            device = await _resolve_ble_client_target_async(
+                            if helper_paired and _is_bluez_device_paired_and_trusted(self.port, adapter_id=self.adapter_id):
+                                preconnect_pairing_completed = True
+                                bluez_state = _log_bluez_device_state_snapshot(
+                                    "post-pre-pairing",
+                                    address=self.port,
+                                    adapter_id=self.adapter_id,
+                                )
+                                bluez_paired = bool(bluez_state.get("paired"))
+                                bluez_bonded = bool(bluez_state.get("bonded"))
+                                bluez_trusted = bool(bluez_state.get("trusted"))
+                                bluez_connected = bool(bluez_state.get("connected"))
+                                bluez_uuids = {_normalize_uuid(item) for item in bluez_state.get("uuids") or []}
+                                bluez_pairing_present = True
+                            elif helper_paired:
+                                raise BleTransportUnavailable("BLE pre-connect pairing completed without trusted BlueZ state")
+                        if preconnect_pairing_completed:
+                            paired_target = await _resolve_ble_client_target_async(
                                 self.port,
                                 timeout=max(4.0, min(self.timeout + 2.0, 8.0)),
                                 adapter_id=self.adapter_id,
-                                prefer_bluez_state=False,
+                                prefer_bluez_state=True,
                                 allow_directed_scan=True,
+                                skip_cache=True,
                             )
-                        if device is None:
-                            raise BleTransportUnavailable(
-                                f"BLE device {self.port} is not discoverable right now. Keep the node advertising and retry."
+                            self._client = BleakClient(paired_target or self.port, **client_kwargs)
+                        else:
+                            device = await _resolve_fresh_ble_client_target_async(
+                                self.port,
+                                timeout=max(4.0, min(self.timeout + 2.0, 8.0)),
+                                adapter_id=self.adapter_id,
                             )
-                        self._client = BleakClient(device, **client_kwargs)
+                            if device is None:
+                                raise BleTransportUnavailable(
+                                    f"BLE device {self.port} is not discoverable right now. Keep the node advertising and retry."
+                                )
+                            self._client = BleakClient(device, **client_kwargs)
                 except TypeError as exc:
                     if self.adapter_id:
                         raise BleTransportUnavailable(
@@ -695,15 +751,39 @@ class BleFrameTransport:
                         self.port,
                         round(connect_timeout, 2),
                     )
+                    _log_bluez_device_state_snapshot(
+                        "pre-connect",
+                        address=self.port,
+                        adapter_id=self.adapter_id,
+                        paired_hint=bluez_pairing_present,
+                        client_target_type=type(getattr(self, "_client", None)).__name__,
+                    )
                     for attempt in (1, 2):
                         try:
                             await self._connect_client(
                                 timeout=connect_timeout,
                                 use_cache=False,
                             )
+                            _log_bluez_device_state_snapshot(
+                                "post-connect",
+                                address=self.port,
+                                adapter_id=self.adapter_id,
+                                attempt=attempt,
+                                client_connected=bool(getattr(self._client, "is_connected", False)),
+                            )
                             break
                         except Exception as exc:
                             retry_reason = _ble_connect_retry_reason(exc)
+                            _log_bluez_device_state_snapshot(
+                                "connect-failed",
+                                address=self.port,
+                                adapter_id=self.adapter_id,
+                                level=logging.WARNING,
+                                attempt=attempt,
+                                retry_reason=retry_reason or "-",
+                                error=type(exc).__name__,
+                                client_connected=bool(getattr(self._client, "is_connected", False)),
+                            )
                             if attempt == 2 or not retry_reason:
                                 raise
                             self._set_connect_stage(f"connect-retry-after-{retry_reason}", attempt=attempt + 1)
@@ -715,6 +795,9 @@ class BleFrameTransport:
                                 exc,
                             )
                             await self._close_client_quietly()
+                            retry_requires_fresh_target = retry_reason in {"service-discovery-disconnected", "device-not-found"} or (
+                                retry_reason == "timeout" and bluez_pairing_present
+                            )
                             if retry_reason != "in-progress":
                                 await asyncio.to_thread(
                                     _disconnect_ble_device_via_dbus,
@@ -727,16 +810,39 @@ class BleFrameTransport:
                                     timeout=4.0,
                                     adapter_id=self.adapter_id,
                                 )
+                                _log_bluez_device_state_snapshot(
+                                    "post-retry-disconnect",
+                                    address=self.port,
+                                    adapter_id=self.adapter_id,
+                                    retry_reason=retry_reason,
+                                )
                                 await asyncio.sleep(0.35)
-                            retry_target = await _resolve_ble_client_target_async(
-                                self.port,
-                                timeout=max(4.0, min(self.timeout + 2.0, 8.0)),
-                                adapter_id=self.adapter_id,
-                                prefer_bluez_state=retry_reason != "service-discovery-disconnected",
-                                allow_directed_scan=True,
-                                skip_cache=preexisting_link_reset_attempted
-                                or retry_reason == "service-discovery-disconnected",
-                            )
+                            if retry_requires_fresh_target:
+                                if retry_reason == "timeout" and bluez_pairing_present:
+                                    _drop_cached_ble_device(self.port)
+                                    retry_target = await _resolve_ble_client_target_async(
+                                        self.port,
+                                        timeout=max(4.5, min(self.timeout + 3.0, 9.0)),
+                                        adapter_id=self.adapter_id,
+                                        prefer_bluez_state=False,
+                                        allow_directed_scan=True,
+                                        skip_cache=True,
+                                    )
+                                else:
+                                    retry_target = await _resolve_fresh_ble_client_target_async(
+                                        self.port,
+                                        timeout=max(4.5, min(self.timeout + 3.0, 9.0)),
+                                        adapter_id=self.adapter_id,
+                                    )
+                            else:
+                                retry_target = await _resolve_ble_client_target_async(
+                                    self.port,
+                                    timeout=max(4.0, min(self.timeout + 2.0, 8.0)),
+                                    adapter_id=self.adapter_id,
+                                    prefer_bluez_state=True,
+                                    allow_directed_scan=True,
+                                    skip_cache=preexisting_link_reset_attempted,
+                                )
                             logging.info(
                                 "ble transport retry target address=%s reason=%s source=%s target_type=%s",
                                 self.port,
@@ -757,7 +863,7 @@ class BleFrameTransport:
                     )
                     self._set_connect_stage("connected")
                     logging.info("ble transport connected address=%s", self.port)
-                    await asyncio.sleep(0.25)
+                    await asyncio.sleep(0.5 if not bluez_pairing_present else 0.25)
                     if self.pin:
                         post_connect_state = _get_bluez_device_state(self.port, adapter_id=self.adapter_id)
                         post_connect_paired = bool(post_connect_state.get("paired"))
@@ -1066,6 +1172,39 @@ def _get_cached_ble_device(address: object) -> Any | None:
             _BLE_DEVICE_CACHE.pop(normalized_address, None)
             return None
         return device
+
+
+def _drop_cached_ble_device(address: object) -> None:
+    normalized_address = str(address or "").strip().lower()
+    if not normalized_address:
+        return
+    with _BLE_DEVICE_CACHE_LOCK:
+        _BLE_DEVICE_CACHE.pop(normalized_address, None)
+
+
+async def _resolve_fresh_ble_client_target_async(
+    address: str,
+    *,
+    timeout: float,
+    adapter_id: str = "",
+) -> Any | None:
+    _drop_cached_ble_device(address)
+    if BLE_ADDRESS_RE.match(str(address or "").strip()):
+        device = await _scan_for_meshcore_ble_device_async(
+            target_address=str(address or "").strip(),
+            timeout=max(4.0, float(timeout or 6.0)),
+            adapter_id=adapter_id,
+        )
+        if device is not None:
+            return device
+    return await _resolve_ble_client_target_async(
+        str(address or "").strip(),
+        timeout=max(4.0, float(timeout or 6.0)),
+        adapter_id=adapter_id,
+        prefer_bluez_state=False,
+        allow_directed_scan=True,
+        skip_cache=True,
+    )
 
 
 def _register_active_ble_transport(address: object, token: object) -> None:
@@ -1662,6 +1801,36 @@ def _get_bluez_device_state(address: str, adapter_id: str = "") -> dict[str, obj
     return info
 
 
+def _log_bluez_device_state_snapshot(
+    prefix: str,
+    *,
+    address: str,
+    adapter_id: str = "",
+    level: int = logging.INFO,
+    **details: object,
+) -> dict[str, object]:
+    state = _get_bluez_device_state(address, adapter_id=adapter_id)
+    uuids = {_normalize_uuid(item) for item in state.get("uuids") or [] if item}
+    payload = " ".join(f"{key}={value}" for key, value in details.items() if value not in (None, ""))
+    logging.log(
+        level,
+        "ble transport %s address=%s adapter=%s path=%s paired=%s bonded=%s trusted=%s connected=%s services_resolved=%s nus_known=%s address_type=%s%s",
+        str(prefix or "").strip() or "bluez-state",
+        str(address or "").strip(),
+        str(adapter_id or "").strip() or "-",
+        _find_bluez_device_path(address, adapter_id=adapter_id) or "-",
+        bool(state.get("paired")),
+        bool(state.get("bonded")),
+        bool(state.get("trusted")),
+        bool(state.get("connected")),
+        bool(state.get("services_resolved")),
+        NUS_SERVICE_UUID in uuids,
+        state.get("address_type") or "-",
+        f" {payload}" if payload else "",
+    )
+    return state
+
+
 def _write_bluetoothctl_command(process: subprocess.Popen[str], command: str) -> None:
     if process.stdin is None:
         raise BleTransportUnavailable("bluetoothctl stdin is unavailable")
@@ -1795,92 +1964,93 @@ def _disconnect_ble_device_via_bluetoothctl(
     address = str(address or "").strip()
     if not address:
         return
-    bluetoothctl = _bluetoothctl_binary()
-    process = subprocess.Popen(
-        [bluetoothctl],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-    )
-    deadline = time.monotonic() + max(2.0, float(timeout or 6.0))
-    output_chunks: list[str] = []
+    with _bluetoothctl_session_scope(purpose="disconnect", address=address):
+        bluetoothctl = _bluetoothctl_binary()
+        process = subprocess.Popen(
+            [bluetoothctl],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        deadline = time.monotonic() + max(2.0, float(timeout or 6.0))
+        output_chunks: list[str] = []
 
-    def cleanup() -> None:
-        if process.poll() is None:
-            try:
-                _write_bluetoothctl_command(process, "quit")
-            except Exception:
-                pass
-            try:
-                process.terminate()
-                process.wait(timeout=1.0)
-            except Exception:
-                process.kill()
+        def cleanup() -> None:
+            if process.poll() is None:
+                try:
+                    _write_bluetoothctl_command(process, "quit")
+                except Exception:
+                    pass
+                try:
+                    process.terminate()
+                    process.wait(timeout=1.0)
+                except Exception:
+                    process.kill()
 
-    try:
-        prompt_seen = False
-        adapter_selected = not bool(adapter_id)
-        disconnect_sent = False
-        while time.monotonic() < deadline:
-            if process.stdout is None:
-                break
-            ready, _, _ = select.select([process.stdout], [], [], 0.5)
-            if not ready:
-                continue
-            line = process.stdout.readline()
-            if not line:
-                if process.poll() is not None:
+        try:
+            prompt_seen = False
+            adapter_selected = not bool(adapter_id)
+            disconnect_sent = False
+            while time.monotonic() < deadline:
+                if process.stdout is None:
                     break
-                continue
-            stripped = line.strip()
-            lowered = stripped.lower()
-            if stripped:
-                output_chunks.append(stripped)
-            if ("]>" in stripped or stripped.endswith(">")) and not prompt_seen:
-                prompt_seen = True
-            if prompt_seen and not adapter_selected and adapter_id:
-                _write_bluetoothctl_command(process, f"select {adapter_id}")
-                adapter_selected = True
-                continue
-            if prompt_seen and adapter_selected and not disconnect_sent:
-                if generation and _get_ble_connection_generation(address) != generation:
-                    logging.info(
-                        "ble soft disconnect skipped address=%s reason=newer-connect-attempt scheduled_generation=%s current_generation=%s",
-                        address,
-                        generation,
-                        _get_ble_connection_generation(address),
+                ready, _, _ = select.select([process.stdout], [], [], 0.5)
+                if not ready:
+                    continue
+                line = process.stdout.readline()
+                if not line:
+                    if process.poll() is not None:
+                        break
+                    continue
+                stripped = line.strip()
+                lowered = stripped.lower()
+                if stripped:
+                    output_chunks.append(stripped)
+                if ("]>" in stripped or stripped.endswith(">")) and not prompt_seen:
+                    prompt_seen = True
+                if prompt_seen and not adapter_selected and adapter_id:
+                    _write_bluetoothctl_command(process, f"select {adapter_id}")
+                    adapter_selected = True
+                    continue
+                if prompt_seen and adapter_selected and not disconnect_sent:
+                    if generation and _get_ble_connection_generation(address) != generation:
+                        logging.info(
+                            "ble soft disconnect skipped address=%s reason=newer-connect-attempt scheduled_generation=%s current_generation=%s",
+                            address,
+                            generation,
+                            _get_ble_connection_generation(address),
+                        )
+                        return
+                    skip_reason = _should_skip_ble_soft_disconnect(address) if skip_if_active_transport else ""
+                    if skip_reason:
+                        logging.info(
+                            "ble soft disconnect skipped address=%s reason=%s",
+                            address,
+                            skip_reason,
+                        )
+                        return
+                    _write_bluetoothctl_command(process, f"disconnect {address}")
+                    disconnect_sent = True
+                    continue
+                if disconnect_sent and any(
+                    marker in lowered
+                    for marker in (
+                        "successful disconnected",
+                        "not connected",
+                        "failed to disconnect",
+                        "not available",
                     )
-                    return
-                skip_reason = _should_skip_ble_soft_disconnect(address) if skip_if_active_transport else ""
-                if skip_reason:
-                    logging.info(
-                        "ble soft disconnect skipped address=%s reason=%s",
-                        address,
-                        skip_reason,
-                    )
-                    return
-                _write_bluetoothctl_command(process, f"disconnect {address}")
-                disconnect_sent = True
-                continue
-            if disconnect_sent and any(
-                marker in lowered
-                for marker in (
-                    "successful disconnected",
-                    "not connected",
-                    "failed to disconnect",
-                    "not available",
-                )
-            ):
-                break
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        logging.warning("ble soft disconnect failed address=%s error=%s", address, exc)
-        return
-    finally:
-        cleanup()
-    output = " | ".join(chunk for chunk in output_chunks[-8:] if chunk)
-    logging.info("ble soft disconnect address=%s output=%s", address, output or "-")
+                ):
+                    break
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            logging.warning("ble soft disconnect failed address=%s error=%s", address, exc)
+            return
+        finally:
+            cleanup()
+        output = " | ".join(chunk for chunk in output_chunks[-8:] if chunk)
+        logging.info("ble soft disconnect address=%s output=%s", address, output or "-")
 
 
 def _remove_ble_device_via_bluetoothctl(*, address: str, timeout: float = 6.0, adapter_id: str = "") -> None:
@@ -1889,95 +2059,96 @@ def _remove_ble_device_via_bluetoothctl(*, address: str, timeout: float = 6.0, a
     address = str(address or "").strip()
     if not address:
         return
-    bluetoothctl = _bluetoothctl_binary()
-    process = subprocess.Popen(
-        [bluetoothctl],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-    )
-    deadline = time.monotonic() + max(2.0, float(timeout or 6.0))
-    output_chunks: list[str] = []
+    with _bluetoothctl_session_scope(purpose="remove", address=address):
+        bluetoothctl = _bluetoothctl_binary()
+        process = subprocess.Popen(
+            [bluetoothctl],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        deadline = time.monotonic() + max(2.0, float(timeout or 6.0))
+        output_chunks: list[str] = []
 
-    def cleanup() -> None:
-        if process.poll() is None:
-            try:
-                _write_bluetoothctl_command(process, "quit")
-            except Exception:
-                pass
-            try:
-                process.terminate()
-                process.wait(timeout=1.0)
-            except Exception:
-                process.kill()
+        def cleanup() -> None:
+            if process.poll() is None:
+                try:
+                    _write_bluetoothctl_command(process, "quit")
+                except Exception:
+                    pass
+                try:
+                    process.terminate()
+                    process.wait(timeout=1.0)
+                except Exception:
+                    process.kill()
 
-    try:
-        prompt_seen = False
-        adapter_selected = not bool(adapter_id)
-        disconnect_sent = False
-        remove_sent = False
-        while time.monotonic() < deadline:
-            if process.stdout is None:
-                break
-            ready, _, _ = select.select([process.stdout], [], [], 0.5)
-            if not ready:
-                continue
-            line = process.stdout.readline()
-            if not line:
-                if process.poll() is not None:
+        try:
+            prompt_seen = False
+            adapter_selected = not bool(adapter_id)
+            disconnect_sent = False
+            remove_sent = False
+            while time.monotonic() < deadline:
+                if process.stdout is None:
                     break
-                continue
-            stripped = line.strip()
-            lowered = stripped.lower()
-            if stripped:
-                output_chunks.append(stripped)
-            if ("]>" in stripped or stripped.endswith(">")) and not prompt_seen:
-                prompt_seen = True
-            if prompt_seen and not adapter_selected and adapter_id:
-                _write_bluetoothctl_command(process, f"select {adapter_id}")
-                adapter_selected = True
-                continue
-            if prompt_seen and adapter_selected and not disconnect_sent:
-                _write_bluetoothctl_command(process, f"disconnect {address}")
-                disconnect_sent = True
-                continue
-            if disconnect_sent and not remove_sent:
-                if any(
+                ready, _, _ = select.select([process.stdout], [], [], 0.5)
+                if not ready:
+                    continue
+                line = process.stdout.readline()
+                if not line:
+                    if process.poll() is not None:
+                        break
+                    continue
+                stripped = line.strip()
+                lowered = stripped.lower()
+                if stripped:
+                    output_chunks.append(stripped)
+                if ("]>" in stripped or stripped.endswith(">")) and not prompt_seen:
+                    prompt_seen = True
+                if prompt_seen and not adapter_selected and adapter_id:
+                    _write_bluetoothctl_command(process, f"select {adapter_id}")
+                    adapter_selected = True
+                    continue
+                if prompt_seen and adapter_selected and not disconnect_sent:
+                    _write_bluetoothctl_command(process, f"disconnect {address}")
+                    disconnect_sent = True
+                    continue
+                if disconnect_sent and not remove_sent:
+                    if any(
+                        marker in lowered
+                        for marker in (
+                            "successful disconnected",
+                            "successful disconnected",
+                            "not connected",
+                            "not available",
+                            "device has been removed",
+                            "failed to disconnect",
+                        )
+                    ) or ("]>" in stripped or stripped.endswith(">")):
+                        _write_bluetoothctl_command(process, f"remove {address}")
+                        remove_sent = True
+                        continue
+                if remove_sent and any(
                     marker in lowered
                     for marker in (
-                        "successful disconnected",
-                        "successful disconnected",
-                        "not connected",
-                        "not available",
                         "device has been removed",
-                        "failed to disconnect",
+                        "not available",
+                        "failed to remove",
                     )
-                ) or ("]>" in stripped or stripped.endswith(">")):
-                    _write_bluetoothctl_command(process, f"remove {address}")
-                    remove_sent = True
-                    continue
-            if remove_sent and any(
-                marker in lowered
-                for marker in (
-                    "device has been removed",
-                    "not available",
-                    "failed to remove",
-                )
-            ):
-                break
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        logging.warning("ble cache reset failed address=%s error=%s", address, exc)
-        return
-    finally:
-        cleanup()
-    output = " | ".join(chunk for chunk in output_chunks[-12:] if chunk)
-    logging.info(
-        "ble cache reset address=%s output=%s",
-        address,
-        output or "-",
-    )
+                ):
+                    break
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            logging.warning("ble cache reset failed address=%s error=%s", address, exc)
+            return
+        finally:
+            cleanup()
+        output = " | ".join(chunk for chunk in output_chunks[-12:] if chunk)
+        logging.info(
+            "ble cache reset address=%s output=%s",
+            address,
+            output or "-",
+        )
 
 
 def _remove_ble_device_via_dbus(*, address: str, adapter_id: str = "") -> bool:
@@ -2071,76 +2242,77 @@ def _trust_ble_device_via_bluetoothctl(*, address: str, timeout: float = 6.0, ad
     address = str(address or "").strip()
     if not address:
         return False
-    bluetoothctl = _bluetoothctl_binary()
-    process = subprocess.Popen(
-        [bluetoothctl],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-    )
-    deadline = time.monotonic() + max(2.0, float(timeout or 6.0))
-    output_chunks: list[str] = []
+    with _bluetoothctl_session_scope(purpose="trust", address=address):
+        bluetoothctl = _bluetoothctl_binary()
+        process = subprocess.Popen(
+            [bluetoothctl],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        deadline = time.monotonic() + max(2.0, float(timeout or 6.0))
+        output_chunks: list[str] = []
 
-    def cleanup() -> None:
-        if process.poll() is None:
-            try:
-                _write_bluetoothctl_command(process, "quit")
-            except Exception:
-                pass
-            try:
-                process.terminate()
-                process.wait(timeout=1.0)
-            except Exception:
-                process.kill()
+        def cleanup() -> None:
+            if process.poll() is None:
+                try:
+                    _write_bluetoothctl_command(process, "quit")
+                except Exception:
+                    pass
+                try:
+                    process.terminate()
+                    process.wait(timeout=1.0)
+                except Exception:
+                    process.kill()
 
-    try:
-        prompt_seen = False
-        adapter_selected = not bool(adapter_id)
-        trust_sent = False
-        while time.monotonic() < deadline:
-            if process.stdout is None:
-                break
-            ready, _, _ = select.select([process.stdout], [], [], 0.5)
-            if not ready:
-                continue
-            line = process.stdout.readline()
-            if not line:
-                if process.poll() is not None:
+        try:
+            prompt_seen = False
+            adapter_selected = not bool(adapter_id)
+            trust_sent = False
+            while time.monotonic() < deadline:
+                if process.stdout is None:
                     break
-                continue
-            stripped = line.strip()
-            lowered = stripped.lower()
-            if stripped:
-                output_chunks.append(stripped)
-            if ("]>" in stripped or stripped.endswith(">")) and not prompt_seen:
-                prompt_seen = True
-            if prompt_seen and not adapter_selected and adapter_id:
-                _write_bluetoothctl_command(process, f"select {adapter_id}")
-                adapter_selected = True
-                continue
-            if prompt_seen and adapter_selected and not trust_sent:
-                _write_bluetoothctl_command(process, f"trust {address}")
-                trust_sent = True
-                continue
-            if trust_sent and any(
-                marker in lowered
-                for marker in (
-                    "trust succeeded",
-                    "already exists",
-                    "changed",
-                    "not available",
-                    "failed to trust",
-                )
-            ):
-                break
-        trusted = _is_bluez_device_paired_and_trusted(address, adapter_id=adapter_id)
-        output = " | ".join(chunk for chunk in output_chunks[-8:] if chunk)
-        logging.info("ble trust helper address=%s trusted=%s output=%s", address, trusted, output or "-")
-        return trusted
-    finally:
-        cleanup()
+                ready, _, _ = select.select([process.stdout], [], [], 0.5)
+                if not ready:
+                    continue
+                line = process.stdout.readline()
+                if not line:
+                    if process.poll() is not None:
+                        break
+                    continue
+                stripped = line.strip()
+                lowered = stripped.lower()
+                if stripped:
+                    output_chunks.append(stripped)
+                if ("]>" in stripped or stripped.endswith(">")) and not prompt_seen:
+                    prompt_seen = True
+                if prompt_seen and not adapter_selected and adapter_id:
+                    _write_bluetoothctl_command(process, f"select {adapter_id}")
+                    adapter_selected = True
+                    continue
+                if prompt_seen and adapter_selected and not trust_sent:
+                    _write_bluetoothctl_command(process, f"trust {address}")
+                    trust_sent = True
+                    continue
+                if trust_sent and any(
+                    marker in lowered
+                    for marker in (
+                        "trust succeeded",
+                        "already exists",
+                        "changed",
+                        "not available",
+                        "failed to trust",
+                    )
+                ):
+                    break
+            trusted = _is_bluez_device_paired_and_trusted(address, adapter_id=adapter_id)
+            output = " | ".join(chunk for chunk in output_chunks[-8:] if chunk)
+            logging.info("ble trust helper address=%s trusted=%s output=%s", address, trusted, output or "-")
+            return trusted
+        finally:
+            cleanup()
 
 
 def _repair_ble_trust_via_bluetoothctl(
@@ -2315,187 +2487,188 @@ def _ensure_ble_pairing_via_bluetoothctl(
     if _is_bluez_device_paired_and_trusted(address, adapter_id=adapter_id) and not force_pairing_attempt:
         logging.info("ble pairing helper address=%s already paired+trusted", address)
         return True
-    bluetoothctl = _bluetoothctl_binary()
-    process = subprocess.Popen(
-        [bluetoothctl],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=False,
-        bufsize=0,
-    )
-    deadline = time.monotonic() + max(8.0, float(timeout or 12.0))
-    output_chunks: list[str] = []
-    detector_buffer = ""
-    adapter_selected = not bool(adapter_id)
-    power_requested = False
-    agent_requested = False
-    agent_ready = False
-    default_agent_requested = False
-    default_agent_requested_at = 0.0
-    default_agent_ready = False
-    pair_sent = False
-    pin_sent = False
-    confirmation_handled = False
-    pair_succeeded = False
-    trust_sent = False
-    prompt_seen = False
-    meaningful_pair_activity = False
-
-    def cleanup() -> None:
-        if process.poll() is None:
-            try:
-                if process.stdin is not None:
-                    process.stdin.write(b"quit\n")
-                    process.stdin.flush()
-            except Exception:
-                pass
-            try:
-                process.terminate()
-                process.wait(timeout=1.0)
-            except Exception:
-                process.kill()
-
-    def write_cmd(command: str) -> None:
-        if process.stdin is None:
-            raise BleTransportUnavailable("bluetoothctl stdin is unavailable")
-        process.stdin.write(f"{command}\n".encode("utf-8"))
-        process.stdin.flush()
-
-    try:
-        while time.monotonic() < deadline:
-            if process.stdout is None:
-                break
-            ready, _, _ = select.select([process.stdout], [], [], 0.5)
-            if not ready:
-                if (
-                    agent_ready
-                    and default_agent_requested
-                    and not default_agent_ready
-                    and not pair_sent
-                    and default_agent_requested_at > 0
-                    and time.monotonic() - default_agent_requested_at >= 1.0
-                ):
-                    logging.info(
-                        "ble pairing helper address=%s default-agent response delayed; sending pair anyway",
-                        address,
-                    )
-                    write_cmd(f"pair {address}")
-                    pair_sent = True
-                continue
-            chunk = os.read(process.stdout.fileno(), 4096)
-            if not chunk:
-                if process.poll() is not None:
-                    break
-                continue
-            decoded = chunk.decode("utf-8", errors="ignore")
-            if not decoded:
-                continue
-            detector_buffer += decoded.lower()
-            if len(detector_buffer) > 4096:
-                detector_buffer = detector_buffer[-4096:]
-            lowered = detector_buffer
-            chunk_prompt_seen = "]>" in decoded or decoded.rstrip().endswith(">")
-            if chunk_prompt_seen:
-                prompt_seen = True
-            for raw_line in decoded.splitlines():
-                stripped = raw_line.strip()
-                if stripped:
-                    output_chunks.append(stripped)
-                    logging.info("ble pairing helper address=%s line=%s", address, stripped)
-            if prompt_seen and adapter_id and not adapter_selected:
-                write_cmd(f"select {adapter_id}")
-                adapter_selected = True
-                continue
-            if prompt_seen and not power_requested:
-                write_cmd("power on")
-                power_requested = True
-                continue
-            if prompt_seen and not agent_requested:
-                write_cmd("agent KeyboardDisplay")
-                agent_requested = True
-                continue
-            if "agent registered" in lowered or "agent is already registered" in lowered:
-                agent_ready = True
-                if not default_agent_requested:
-                    write_cmd("default-agent")
-                    default_agent_requested = True
-                    default_agent_requested_at = time.monotonic()
-                detector_buffer = ""
-                continue
-            if "failed to register agent object" in lowered:
-                agent_requested = False
-                detector_buffer = ""
-                continue
-            if "default agent request successful" in lowered:
-                default_agent_ready = True
-                if not pair_sent:
-                    write_cmd(f"pair {address}")
-                    pair_sent = True
-                detector_buffer = ""
-                continue
-            if "no agent is registered" in lowered:
-                default_agent_requested = False
-                default_agent_ready = False
-                agent_requested = False
-                detector_buffer = ""
-                continue
-            if not pin_sent and any(prompt in lowered for prompt in _BLUETOOTHCTL_PASSKEY_PROMPTS):
-                write_cmd(pin)
-                pin_sent = True
-                meaningful_pair_activity = True
-                detector_buffer = ""
-                continue
-            if not confirmation_handled and any(prompt in lowered for prompt in _BLUETOOTHCTL_CONFIRM_PROMPTS):
-                write_cmd("yes")
-                confirmation_handled = True
-                meaningful_pair_activity = True
-                detector_buffer = ""
-                continue
-            if "pairing successful" in lowered and not trust_sent:
-                pair_succeeded = True
-                meaningful_pair_activity = True
-                write_cmd(f"trust {address}")
-                trust_sent = True
-                detector_buffer = ""
-                continue
-            if "already paired" in lowered and not trust_sent:
-                pair_succeeded = True
-                meaningful_pair_activity = True
-                write_cmd(f"trust {address}")
-                trust_sent = True
-                detector_buffer = ""
-                continue
-            if "trust succeeded" in lowered and _is_bluez_device_paired_and_trusted(address, adapter_id=adapter_id):
-                return True
-            if any(marker in lowered for marker in _BLUETOOTHCTL_FAILURE_MARKERS):
-                joined = " | ".join(output_chunks[-8:]).strip()
-                raise BleTransportUnavailable(
-                    f"automatic BLE pairing failed{': ' + joined if joined else ''}"
-                )
-            if any(marker in lowered for marker in _BLUETOOTHCTL_SUCCESS_MARKERS) and _is_bluez_device_paired_and_trusted(address, adapter_id=adapter_id):
-                return True
-            if pair_succeeded and _is_bluez_device_paired_and_trusted(address, adapter_id=adapter_id):
-                return True
-        if _is_bluez_device_paired_and_trusted(address, adapter_id=adapter_id) and (not force_pairing_attempt or meaningful_pair_activity):
-            return True
-        joined = " | ".join(output_chunks[-8:]).strip()
-        if not pin_sent:
-            if allow_no_challenge_fallback:
-                logging.warning(
-                    "ble pairing helper address=%s no PIN challenge observed; falling back to direct BLE connect output=%s",
-                    address,
-                    joined or "-",
-                )
-                return False
-            raise BleTransportUnavailable(
-                f"automatic BLE pairing did not complete in time (no PIN challenge observed){': ' + joined if joined else ''}"
-            )
-        raise BleTransportUnavailable(
-            f"automatic BLE pairing did not complete in time{': ' + joined if joined else ''}"
+    with _bluetoothctl_session_scope(purpose="pair", address=address):
+        bluetoothctl = _bluetoothctl_binary()
+        process = subprocess.Popen(
+            [bluetoothctl],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=False,
+            bufsize=0,
         )
-    finally:
-        cleanup()
+        deadline = time.monotonic() + max(8.0, float(timeout or 12.0))
+        output_chunks: list[str] = []
+        detector_buffer = ""
+        adapter_selected = not bool(adapter_id)
+        power_requested = False
+        agent_requested = False
+        agent_ready = False
+        default_agent_requested = False
+        default_agent_requested_at = 0.0
+        default_agent_ready = False
+        pair_sent = False
+        pin_sent = False
+        confirmation_handled = False
+        pair_succeeded = False
+        trust_sent = False
+        prompt_seen = False
+        meaningful_pair_activity = False
+
+        def cleanup() -> None:
+            if process.poll() is None:
+                try:
+                    if process.stdin is not None:
+                        process.stdin.write(b"quit\n")
+                        process.stdin.flush()
+                except Exception:
+                    pass
+                try:
+                    process.terminate()
+                    process.wait(timeout=1.0)
+                except Exception:
+                    process.kill()
+
+        def write_cmd(command: str) -> None:
+            if process.stdin is None:
+                raise BleTransportUnavailable("bluetoothctl stdin is unavailable")
+            process.stdin.write(f"{command}\n".encode("utf-8"))
+            process.stdin.flush()
+
+        try:
+            while time.monotonic() < deadline:
+                if process.stdout is None:
+                    break
+                ready, _, _ = select.select([process.stdout], [], [], 0.5)
+                if not ready:
+                    if (
+                        agent_ready
+                        and default_agent_requested
+                        and not default_agent_ready
+                        and not pair_sent
+                        and default_agent_requested_at > 0
+                        and time.monotonic() - default_agent_requested_at >= 1.0
+                    ):
+                        logging.info(
+                            "ble pairing helper address=%s default-agent response delayed; sending pair anyway",
+                            address,
+                        )
+                        write_cmd(f"pair {address}")
+                        pair_sent = True
+                    continue
+                chunk = os.read(process.stdout.fileno(), 4096)
+                if not chunk:
+                    if process.poll() is not None:
+                        break
+                    continue
+                decoded = chunk.decode("utf-8", errors="ignore")
+                if not decoded:
+                    continue
+                detector_buffer += decoded.lower()
+                if len(detector_buffer) > 4096:
+                    detector_buffer = detector_buffer[-4096:]
+                lowered = detector_buffer
+                chunk_prompt_seen = "]>" in decoded or decoded.rstrip().endswith(">")
+                if chunk_prompt_seen:
+                    prompt_seen = True
+                for raw_line in decoded.splitlines():
+                    stripped = raw_line.strip()
+                    if stripped:
+                        output_chunks.append(stripped)
+                        logging.info("ble pairing helper address=%s line=%s", address, stripped)
+                if prompt_seen and adapter_id and not adapter_selected:
+                    write_cmd(f"select {adapter_id}")
+                    adapter_selected = True
+                    continue
+                if prompt_seen and not power_requested:
+                    write_cmd("power on")
+                    power_requested = True
+                    continue
+                if prompt_seen and not agent_requested:
+                    write_cmd("agent KeyboardDisplay")
+                    agent_requested = True
+                    continue
+                if "agent registered" in lowered or "agent is already registered" in lowered:
+                    agent_ready = True
+                    if not default_agent_requested:
+                        write_cmd("default-agent")
+                        default_agent_requested = True
+                        default_agent_requested_at = time.monotonic()
+                    detector_buffer = ""
+                    continue
+                if "failed to register agent object" in lowered:
+                    agent_requested = False
+                    detector_buffer = ""
+                    continue
+                if "default agent request successful" in lowered:
+                    default_agent_ready = True
+                    if not pair_sent:
+                        write_cmd(f"pair {address}")
+                        pair_sent = True
+                    detector_buffer = ""
+                    continue
+                if "no agent is registered" in lowered:
+                    default_agent_requested = False
+                    default_agent_ready = False
+                    agent_requested = False
+                    detector_buffer = ""
+                    continue
+                if not pin_sent and any(prompt in lowered for prompt in _BLUETOOTHCTL_PASSKEY_PROMPTS):
+                    write_cmd(pin)
+                    pin_sent = True
+                    meaningful_pair_activity = True
+                    detector_buffer = ""
+                    continue
+                if not confirmation_handled and any(prompt in lowered for prompt in _BLUETOOTHCTL_CONFIRM_PROMPTS):
+                    write_cmd("yes")
+                    confirmation_handled = True
+                    meaningful_pair_activity = True
+                    detector_buffer = ""
+                    continue
+                if "pairing successful" in lowered and not trust_sent:
+                    pair_succeeded = True
+                    meaningful_pair_activity = True
+                    write_cmd(f"trust {address}")
+                    trust_sent = True
+                    detector_buffer = ""
+                    continue
+                if "already paired" in lowered and not trust_sent:
+                    pair_succeeded = True
+                    meaningful_pair_activity = True
+                    write_cmd(f"trust {address}")
+                    trust_sent = True
+                    detector_buffer = ""
+                    continue
+                if "trust succeeded" in lowered and _is_bluez_device_paired_and_trusted(address, adapter_id=adapter_id):
+                    return True
+                if any(marker in lowered for marker in _BLUETOOTHCTL_FAILURE_MARKERS):
+                    joined = " | ".join(output_chunks[-8:]).strip()
+                    raise BleTransportUnavailable(
+                        f"automatic BLE pairing failed{': ' + joined if joined else ''}"
+                    )
+                if any(marker in lowered for marker in _BLUETOOTHCTL_SUCCESS_MARKERS) and _is_bluez_device_paired_and_trusted(address, adapter_id=adapter_id):
+                    return True
+                if pair_succeeded and _is_bluez_device_paired_and_trusted(address, adapter_id=adapter_id):
+                    return True
+            if _is_bluez_device_paired_and_trusted(address, adapter_id=adapter_id) and (not force_pairing_attempt or meaningful_pair_activity):
+                return True
+            joined = " | ".join(output_chunks[-8:]).strip()
+            if not pin_sent:
+                if allow_no_challenge_fallback:
+                    logging.warning(
+                        "ble pairing helper address=%s no PIN challenge observed; falling back to direct BLE connect output=%s",
+                        address,
+                        joined or "-",
+                    )
+                    return False
+                raise BleTransportUnavailable(
+                    f"automatic BLE pairing did not complete in time (no PIN challenge observed){': ' + joined if joined else ''}"
+                )
+            raise BleTransportUnavailable(
+                f"automatic BLE pairing did not complete in time{': ' + joined if joined else ''}"
+            )
+        finally:
+            cleanup()
 
 
 def _ensure_bluez_available() -> None:

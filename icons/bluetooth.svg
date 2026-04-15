@@ -6,7 +6,7 @@
     </linearGradient>
   </defs>
 
-  <g transform="rotate(-90 256 256)" stroke="url(#btGradient)" stroke-width="28" stroke-linecap="round" stroke-linejoin="round" fill="none">
+  <g transform="rotate(0 256 256)" stroke="url(#btGradient)" stroke-width="28" stroke-linecap="round" stroke-linejoin="round" fill="none">
     <path d="M256 64V448"></path>
     <path d="M256 64L352 160L256 256"></path>
     <path d="M256 256L352 352L256 448"></path>

@@ -64,6 +64,57 @@ function getContactPrefix(contactOrKey) {
   return normalizePublicKey(raw).slice(0, 12)
 }
 
+function normalizeOwnerId(value) {
+  const normalized = String(value || '').trim().toLowerCase()
+  return /^[0-9a-f]{64}$/.test(normalized) ? normalized : ''
+}
+
+function getCurrentOwnerId() {
+  return normalizeOwnerId(session.self?.public_key || session.selfPublicKey || '')
+}
+
+function pushUniqueMuteKey(keys, next) {
+  const normalized = String(next || '').trim().toLowerCase()
+  if (normalized && !keys.includes(normalized)) {
+    keys.push(normalized)
+  }
+}
+
+function appendScopedAndLegacyMuteKey(keys, baseKey, ownerId = '') {
+  const normalizedBaseKey = String(baseKey || '').trim().toLowerCase()
+  if (!normalizedBaseKey) {
+    return
+  }
+  const normalizedOwnerId = normalizeOwnerId(ownerId)
+  const currentOwnerId = getCurrentOwnerId()
+  if (normalizedOwnerId) {
+    pushUniqueMuteKey(keys, `owner:${normalizedOwnerId}:${normalizedBaseKey}`)
+    if (normalizedOwnerId === currentOwnerId) {
+      pushUniqueMuteKey(keys, normalizedBaseKey)
+    }
+    return
+  }
+  pushUniqueMuteKey(keys, normalizedBaseKey)
+  if (currentOwnerId) {
+    pushUniqueMuteKey(keys, `owner:${currentOwnerId}:${normalizedBaseKey}`)
+  }
+}
+
+function parseScopedConversationKey(rawValue) {
+  const raw = String(rawValue || '').trim().toLowerCase()
+  const ownerScopedMatch = /^owner:([0-9a-f]{64}):(channelid:.+|channel:\d+|contact:[0-9a-f]{1,12})$/i.exec(raw)
+  if (ownerScopedMatch) {
+    return {
+      ownerId: ownerScopedMatch[1].toLowerCase(),
+      baseKey: ownerScopedMatch[2].toLowerCase(),
+    }
+  }
+  return {
+    ownerId: '',
+    baseKey: raw,
+  }
+}
+
 function buildSelfContact() {
   const publicKey = normalizePublicKey(session.self?.public_key || session.selfPublicKey || '')
   if (!publicKey) {
@@ -246,16 +297,10 @@ function animateRailGlowTransition() {
 const mutedConversationsMap = computed(() => normalizeMutedConversationsMap(session.settingsPayload?.settings?.muted_conversations))
 
 function getConversationMuteKey(kind, value) {
-  const normalizedKind = String(kind || '').trim().toLowerCase()
-  if (normalizedKind === 'channel') {
-    const channelIdx = Number(value)
-    return Number.isFinite(channelIdx) && channelIdx >= 0 ? `channel:${channelIdx}` : ''
+  if (String(kind || '').trim().toLowerCase() === 'channel') {
+    return getChannelMuteKeys(value)[0] || ''
   }
-  if (normalizedKind === 'contact') {
-    const prefix = getContactPrefix(value)
-    return prefix ? `contact:${prefix}` : ''
-  }
-  return ''
+  return getContactMuteKeys(value)[0] || ''
 }
 
 function getConversationMuteModeByKey(muteKey) {
@@ -278,23 +323,18 @@ function getHighestPriorityMuteMode(modes = []) {
 
 function getChannelMuteKeys(value, fallback = null) {
   const keys = []
-  const pushUnique = (next) => {
-    const normalized = String(next || '').trim().toLowerCase()
-    if (normalized && !keys.includes(normalized)) {
-      keys.push(normalized)
-    }
-  }
   const appendIdentityAndIdx = (source) => {
     if (!source || typeof source !== 'object') {
       return
     }
+    const ownerId = normalizeOwnerId(source.ownerId || source.owner_id || '')
     const identity = String(source.channelIdentity || source.channel_identity || '').trim()
     const idx = Number(source.channelIdx ?? source.channel_idx ?? source.idx ?? -1)
     if (identity) {
-      pushUnique(`channelid:${identity}`)
+      appendScopedAndLegacyMuteKey(keys, `channelid:${identity}`, ownerId)
     }
     if (Number.isFinite(idx) && idx >= 0) {
-      pushUnique(`channel:${idx}`)
+      appendScopedAndLegacyMuteKey(keys, `channel:${idx}`, ownerId)
     }
   }
   appendIdentityAndIdx(value)
@@ -302,22 +342,45 @@ function getChannelMuteKeys(value, fallback = null) {
   if (keys.length) {
     return keys
   }
-  const normalized = String(value || '').trim()
+  const parsed = parseScopedConversationKey(value)
+  const normalized = String(parsed.baseKey || '').trim()
   if (!normalized) {
     return keys
   }
   if (normalized.startsWith('channelid:') || normalized.startsWith('channel:')) {
-    pushUnique(normalized)
+    appendScopedAndLegacyMuteKey(keys, normalized, parsed.ownerId)
     return keys
   }
   if (/^-?\d+$/.test(normalized)) {
     const idx = Number(normalized)
     if (Number.isFinite(idx) && idx >= 0) {
-      pushUnique(`channel:${idx}`)
+      appendScopedAndLegacyMuteKey(keys, `channel:${idx}`, parsed.ownerId)
     }
     return keys
   }
-  pushUnique(`channelid:${normalized}`)
+  appendScopedAndLegacyMuteKey(keys, `channelid:${normalized}`, parsed.ownerId)
+  return keys
+}
+
+function getContactMuteKeys(value) {
+  const keys = []
+  if (value && typeof value === 'object') {
+    const ownerId = normalizeOwnerId(value.ownerId || value.owner_id || '')
+    const prefix = getContactPrefix(value)
+    if (prefix) {
+      appendScopedAndLegacyMuteKey(keys, `contact:${prefix}`, ownerId)
+    }
+    return keys
+  }
+  const parsed = parseScopedConversationKey(value)
+  if (parsed.baseKey.startsWith('contact:')) {
+    appendScopedAndLegacyMuteKey(keys, parsed.baseKey, parsed.ownerId)
+    return keys
+  }
+  const prefix = getContactPrefix(value)
+  if (prefix) {
+    appendScopedAndLegacyMuteKey(keys, `contact:${prefix}`, parsed.ownerId)
+  }
   return keys
 }
 
@@ -345,8 +408,10 @@ const totalRegularUnreadCount = computed(() => {
 const totalDirectUnreadCount = computed(() => {
   const contactUnreadCounts = unreadSummary.value.contact_unread_counts || {}
   return Object.entries(contactUnreadCounts).reduce((sum, [contactKey, rawCount]) => {
-    const muteKey = getConversationMuteKey('contact', contactKey)
-    if (isConversationRegularMutedByKey(muteKey)) {
+    const muteMode = getHighestPriorityMuteMode(
+      getContactMuteKeys(contactKey).map((muteKey) => getConversationMuteModeByKey(muteKey)),
+    )
+    if (muteMode === 'regular' || muteMode === 'all') {
       return sum
     }
     return sum + Number(rawCount || 0)
@@ -365,8 +430,10 @@ const totalMentionCount = computed(() => {
   }, 0)
   const contactMentionCounts = unreadSummary.value.contact_mention_counts || {}
   const contactsTotal = Object.entries(contactMentionCounts).reduce((sum, [contactKey, rawCount]) => {
-    const muteKey = getConversationMuteKey('contact', contactKey)
-    if (getConversationMuteModeByKey(muteKey) === 'all') {
+    const muteMode = getHighestPriorityMuteMode(
+      getContactMuteKeys(contactKey).map((muteKey) => getConversationMuteModeByKey(muteKey)),
+    )
+    if (muteMode === 'all') {
       return sum
     }
     return sum + Number(rawCount || 0)
@@ -573,37 +640,52 @@ function findChannelByNotificationKey(key) {
     return null
   }
   return session.channels.find((channel) => {
+    const channelOwnerId = normalizeOwnerId(channel?.owner_id || '')
     const channelIdentity = String(channel?.channel_identity || '').trim()
     const channelIdx = String(channel?.idx ?? '').trim()
+    if (parsedKey.ownerId && channelOwnerId && parsedKey.ownerId !== channelOwnerId) {
+      return false
+    }
     return normalizedKey === channelIdentity || normalizedKey === channelIdx
   }) || null
 }
 
 function parseChannelNotificationKey(key) {
   const raw = String(key || '').trim()
-  const ownerIdxMatch = /^([0-9a-f]{64}):idx:(\d+)$/i.exec(raw)
-  if (ownerIdxMatch) {
+  const parsed = parseScopedConversationKey(raw)
+  const normalized = String(parsed.baseKey || '').trim()
+  const identityMatch = /^channelid:(.+)$/i.exec(normalized)
+  if (identityMatch) {
     return {
       raw,
-      ownerId: ownerIdxMatch[1].toLowerCase(),
-      idx: Number(ownerIdxMatch[2]),
+      ownerId: parsed.ownerId,
+      idx: null,
+      identity: identityMatch[1],
+    }
+  }
+  const idxMatch = /^channel:(\d+)$/i.exec(normalized)
+  if (idxMatch) {
+    return {
+      raw,
+      ownerId: parsed.ownerId,
+      idx: Number(idxMatch[1]),
       identity: '',
     }
   }
-  const numericIdx = Number(raw)
+  const numericIdx = Number(normalized)
   if (Number.isFinite(numericIdx) && raw !== '') {
     return {
       raw,
-      ownerId: '',
+      ownerId: parsed.ownerId,
       idx: numericIdx,
       identity: '',
     }
   }
   return {
     raw,
-    ownerId: '',
+    ownerId: parsed.ownerId,
     idx: null,
-    identity: raw,
+    identity: normalized || raw,
   }
 }
 
@@ -629,13 +711,22 @@ function buildChannelNotificationTarget(channelKey, fallback = {}) {
 }
 
 function findContactByNotificationKey(key) {
-  const normalizedKey = normalizePublicKey(key)
+  const parsed = parseScopedConversationKey(key)
+  const normalizedKey = normalizePublicKey(
+    parsed.baseKey.startsWith('contact:')
+      ? parsed.baseKey.slice('contact:'.length)
+      : key,
+  )
   if (!normalizedKey) {
     return null
   }
   const contact = session.contacts.find((contact) => {
+    const contactOwnerId = normalizeOwnerId(contact?.owner_id || '')
     const publicKey = normalizePublicKey(contact?.public_key)
     const prefix = getContactPrefix(contact)
+    if (parsed.ownerId && contactOwnerId && parsed.ownerId !== contactOwnerId) {
+      return false
+    }
     return normalizedKey === publicKey || normalizedKey === prefix
   }) || null
   if (contact) {
@@ -809,14 +900,19 @@ const mentionNotificationEntries = computed(() => {
     return unreadMentionEntries.map((entry) => {
       const conversationKind = String(entry?.conversation_kind || '').trim().toLowerCase()
       if (conversationKind === 'channel') {
-        const target = buildChannelNotificationTarget(entry?.channel_identity || entry?.channel_idx, entry)
+        const summaryKey = getChannelMuteKeys({
+          owner_id: entry?.owner_id || '',
+          channel_identity: entry?.channel_identity || '',
+          idx: entry?.channel_idx,
+        })[0] || String(entry?.channel_identity || entry?.channel_idx || '').trim()
+        const target = buildChannelNotificationTarget(summaryKey, entry)
         return {
           kind: 'channel',
           key: `mention:channel:${Number(entry?.id || 0) || `${target.channelIdentity}:${target.channelIdx}`}`,
           title: target.title,
           preview: buildMentionPreviewText(entry?.text, target.preview),
           avatarSymbol: target.avatarSymbol,
-          unreadCount: Number(unreadSummary.value.channel_unread_counts?.[target.channelIdentity] || unreadSummary.value.channel_unread_counts?.[String(target.channelIdx)] || 0),
+          unreadCount: Number(unreadSummary.value.channel_unread_counts?.[summaryKey] || unreadSummary.value.channel_unread_counts?.[target.channelIdentity] || unreadSummary.value.channel_unread_counts?.[String(target.channelIdx)] || 0),
           mentionCount: 1,
           highlightTone: 'mention',
           value: target.channelIdx,
@@ -824,7 +920,12 @@ const mentionNotificationEntries = computed(() => {
           focusMessageId: Number(entry?.id || 0),
         }
       }
-      const contact = findContactByNotificationKey(entry?.public_key || entry?.pubkey_prefix)
+      const contactKey = getContactMuteKeys({
+        owner_id: entry?.owner_id || '',
+        public_key: entry?.public_key || '',
+        pubkey_prefix: entry?.pubkey_prefix || '',
+      })[0] || String(entry?.public_key || entry?.pubkey_prefix || '').trim()
+      const contact = findContactByNotificationKey(contactKey)
       const prefix = String(entry?.pubkey_prefix || getContactPrefix(contact) || '').trim().toLowerCase()
       const publicKey = String(contact?.public_key || prefix).trim()
       return {
@@ -833,7 +934,7 @@ const mentionNotificationEntries = computed(() => {
         title: contactDisplayName(contact || { public_key: prefix, pubkey_prefix: prefix }),
         preview: buildMentionPreviewText(entry?.text, formatContactPreview(contact || {})),
         avatarSymbol: contactAvatarText(contact || { public_key: prefix, pubkey_prefix: prefix }),
-        unreadCount: Number(unreadSummary.value.contact_unread_counts?.[prefix] || 0),
+        unreadCount: Number(unreadSummary.value.contact_unread_counts?.[contactKey] || unreadSummary.value.contact_unread_counts?.[prefix] || 0),
         mentionCount: 1,
         highlightTone: 'mention',
         value: publicKey,
@@ -877,8 +978,10 @@ const mentionNotificationEntries = computed(() => {
     }
     const contact = findContactByNotificationKey(contactKey)
     const prefix = getContactPrefix(contact) || normalizePublicKey(contactKey).slice(0, 12)
-    const muteKey = getConversationMuteKey('contact', prefix)
-    if (getConversationMuteModeByKey(muteKey) === 'all') {
+    const muteMode = getHighestPriorityMuteMode(
+      getContactMuteKeys(contact || contactKey).map((muteKey) => getConversationMuteModeByKey(muteKey)),
+    )
+    if (muteMode === 'all') {
       continue
     }
     entries.push({
@@ -887,11 +990,11 @@ const mentionNotificationEntries = computed(() => {
       title: contactDisplayName(contact || { public_key: prefix, pubkey_prefix: prefix }),
       preview: formatContactPreview(contact || {}),
       avatarSymbol: contactAvatarText(contact || { public_key: prefix, pubkey_prefix: prefix }),
-      unreadCount: Number(unreadSummary.value.contact_unread_counts?.[prefix] || unreadSummary.value.contact_unread_counts?.[contactKey] || 0),
+      unreadCount: Number(unreadSummary.value.contact_unread_counts?.[contactKey] || unreadSummary.value.contact_unread_counts?.[prefix] || 0),
       mentionCount: count,
       highlightTone: 'mention',
       value: String(contact?.public_key || prefix).trim(),
-      focusMessageId: Number(unreadSummary.value.contact_first_mention_ids?.[prefix] || unreadSummary.value.contact_first_mention_ids?.[contactKey] || unreadSummary.value.contact_first_unread_ids?.[prefix] || 0),
+      focusMessageId: Number(unreadSummary.value.contact_first_mention_ids?.[contactKey] || unreadSummary.value.contact_first_mention_ids?.[prefix] || unreadSummary.value.contact_first_unread_ids?.[contactKey] || 0),
     })
   }
   return entries
@@ -934,8 +1037,10 @@ const directNotificationEntries = computed(() => {
     }
     const contact = findContactByNotificationKey(contactKey)
     const prefix = getContactPrefix(contact) || normalizePublicKey(contactKey).slice(0, 12)
-    const muteKey = getConversationMuteKey('contact', prefix)
-    if (isConversationRegularMutedByKey(muteKey)) {
+    const muteMode = getHighestPriorityMuteMode(
+      getContactMuteKeys(contact || contactKey).map((muteKey) => getConversationMuteModeByKey(muteKey)),
+    )
+    if (muteMode === 'regular' || muteMode === 'all') {
       continue
     }
     entries.push({
@@ -945,10 +1050,10 @@ const directNotificationEntries = computed(() => {
       preview: formatContactPreview(contact || {}),
       avatarSymbol: contactAvatarText(contact || { public_key: prefix, pubkey_prefix: prefix }),
       unreadCount: count,
-      mentionCount: Number(unreadSummary.value.contact_mention_counts?.[prefix] || unreadSummary.value.contact_mention_counts?.[contactKey] || 0),
+      mentionCount: Number(unreadSummary.value.contact_mention_counts?.[contactKey] || unreadSummary.value.contact_mention_counts?.[prefix] || 0),
       highlightTone: 'direct',
       value: String(contact?.public_key || prefix).trim(),
-      focusMessageId: Number(unreadSummary.value.contact_first_unread_ids?.[prefix] || unreadSummary.value.contact_first_unread_ids?.[contactKey] || unreadSummary.value.contact_first_mention_ids?.[prefix] || 0),
+      focusMessageId: Number(unreadSummary.value.contact_first_unread_ids?.[contactKey] || unreadSummary.value.contact_first_unread_ids?.[prefix] || unreadSummary.value.contact_first_mention_ids?.[contactKey] || 0),
     })
   }
   return entries

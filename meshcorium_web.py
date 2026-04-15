@@ -1303,6 +1303,45 @@ def _cancel_pending_reconnect(port: str) -> None:
         event.set()
 
 
+def _list_available_serial_transport_ids() -> set[str]:
+    available: set[str] = set()
+    try:
+        for item in list(DEFAULT_CONNECTION_ROUTER.discover(SERIAL_TRANSPORT_TYPE) or []):
+            transport_id = _normalize_port_value(
+                (item or {}).get("transport_id")
+                or (item or {}).get("device")
+                or (item or {}).get("port")
+            )
+            if transport_id:
+                available.add(transport_id)
+    except Exception:
+        logging.exception("failed to discover available serial transports while pruning reconnects")
+    return available
+
+
+def _prune_unavailable_serial_reconnects(*, active_port: str = "") -> None:
+    normalized_active_port = _normalize_port_value(active_port)
+    available_ports = _list_available_serial_transport_ids()
+    stale_ports: list[str] = []
+    with PENDING_RECONNECTS_GUARD:
+        pending_ports = list(PENDING_RECONNECTS.keys())
+    for pending_port in pending_ports:
+        normalized_pending_port = _normalize_port_value(pending_port)
+        if not normalized_pending_port or normalized_pending_port == normalized_active_port:
+            continue
+        if normalized_pending_port in available_ports:
+            continue
+        stale_ports.append(normalized_pending_port)
+    for stale_port in stale_ports:
+        logging.info(
+            "pruning stale serial reconnect port=%s active_port=%s available_ports=%s",
+            stale_port,
+            normalized_active_port,
+            sorted(available_ports),
+        )
+        _cancel_pending_reconnect(stale_port)
+
+
 def _classify_background_session_exception(exc: Exception, *, queue_drain_active: bool = False) -> dict:
     message = str(exc or "").strip()
     lowered = message.lower()
@@ -4524,6 +4563,7 @@ def _get_effective_node_contact_limit(live_contacts: list[dict] | None = None) -
 
 def _compact_contact_for_client(contact: dict) -> dict:
     return {
+        "owner_id": _normalize_owner_id(contact.get("owner_id")),
         "public_key": str(contact.get("public_key") or "").lower(),
         "adv_type": int(contact.get("adv_type") or 0),
         "flags": int(contact.get("flags") or 0),
@@ -7588,6 +7628,9 @@ def _reset_background_session_reconnect_state(session: BackgroundCompanionSessio
 
 def _start_background_session(config: dict, *, preserve_reconnect_state: bool = True) -> BackgroundCompanionSession:
     port = str(config["port"])
+    transport_type = str(config.get("transport_type") or SERIAL_TRANSPORT_TYPE).strip().lower() or SERIAL_TRANSPORT_TYPE
+    if transport_type == SERIAL_TRANSPORT_TYPE:
+        _prune_unavailable_serial_reconnects(active_port=port)
     _cancel_pending_reconnect(port)
     existing = _get_background_session(port)
     if existing:
@@ -7726,8 +7769,64 @@ def _run_command_via_background_session(port: str, command: dict, timeout_secs: 
 
 def _resolve_owner_scope(owner_id: str | None = None, access_all: bool | None = None) -> tuple[str, bool]:
     scoped_owner_id = _normalize_owner_id(owner_id if owner_id is not None else getattr(MESSAGE_SCOPE, "owner_id", ""))
-    scoped_access_all = getattr(MESSAGE_SCOPE, "access_all", _get_access_all_meshcorium_contacts())
+    scoped_access_all = getattr(MESSAGE_SCOPE, "access_all", _get_access_all_meshcorium_messages())
     return scoped_owner_id, bool(scoped_access_all if access_all is None else access_all)
+
+
+def _build_scoped_channel_conversation_key(
+    *,
+    row_owner_id: str | None = None,
+    current_owner_id: str | None = None,
+    channel_idx: object = None,
+    channel_identity: object = "",
+    access_all: bool | None = None,
+) -> str:
+    normalized_row_owner_id = _normalize_owner_id(row_owner_id)
+    normalized_current_owner_id = _normalize_owner_id(current_owner_id)
+    normalized_identity = str(channel_identity or "").strip()
+    try:
+        normalized_channel_idx = int(channel_idx)
+    except (TypeError, ValueError):
+        normalized_channel_idx = -1
+    if not normalized_identity and _is_official_meshcore_public_channel_idx(normalized_channel_idx):
+        normalized_identity = _build_channel_identity(MESHCORE_PUBLIC_CHANNEL_NAME, MESHCORE_PUBLIC_CHANNEL_PSK_HEX)
+    if normalized_identity:
+        base_key = f"channelid:{normalized_identity}"
+    else:
+        if normalized_channel_idx < 0:
+            return ""
+        base_key = f"channel:{normalized_channel_idx}"
+    if (
+        bool(access_all)
+        and normalized_row_owner_id
+        and normalized_current_owner_id
+        and normalized_row_owner_id != normalized_current_owner_id
+    ):
+        return f"owner:{normalized_row_owner_id}:{base_key}"
+    return base_key
+
+
+def _build_scoped_contact_conversation_key(
+    *,
+    row_owner_id: str | None = None,
+    current_owner_id: str | None = None,
+    pubkey_prefix: object = "",
+    access_all: bool | None = None,
+) -> str:
+    normalized_prefix = str(pubkey_prefix or "").strip().lower()[:12]
+    if not normalized_prefix:
+        return ""
+    base_key = f"contact:{normalized_prefix}"
+    normalized_row_owner_id = _normalize_owner_id(row_owner_id)
+    normalized_current_owner_id = _normalize_owner_id(current_owner_id)
+    if (
+        bool(access_all)
+        and normalized_row_owner_id
+        and normalized_current_owner_id
+        and normalized_row_owner_id != normalized_current_owner_id
+    ):
+        return f"owner:{normalized_row_owner_id}:{base_key}"
+    return base_key
 
 
 def _get_scoped_channel_identity() -> str:
@@ -8933,7 +9032,7 @@ def _list_scoped_channel_unread_mentions(
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             f"""
-            SELECT id, channel_idx, channel_identity, sender_timestamp, text
+            SELECT id, owner_id, channel_idx, channel_identity, sender_timestamp, text
             FROM messages
             WHERE {selector_where}
               AND from_self = 0
@@ -8948,6 +9047,7 @@ def _list_scoped_channel_unread_mentions(
         {
             "conversation_kind": "channel",
             "id": int(row["id"] or 0),
+            "owner_id": _normalize_owner_id(row["owner_id"]),
             "channel_idx": None if row["channel_idx"] is None else int(row["channel_idx"]),
             "channel_identity": str(row["channel_identity"] or "").strip(),
             "pubkey_prefix": "",
@@ -8977,6 +9077,7 @@ def _list_contact_unread_mentions(
             f"""
             SELECT
                 id,
+                owner_id,
                 pubkey_prefix,
                 sender_timestamp,
                 text
@@ -8994,6 +9095,7 @@ def _list_contact_unread_mentions(
         {
             "conversation_kind": "contact",
             "id": int(row["id"] or 0),
+            "owner_id": _normalize_owner_id(row["owner_id"]),
             "channel_idx": None,
             "channel_identity": "",
             "pubkey_prefix": "" if row["pubkey_prefix"] is None else str(row["pubkey_prefix"]).lower(),
@@ -9143,6 +9245,7 @@ def list_unread_mentions(
             SELECT
                 'channel' AS conversation_kind,
                 id,
+                owner_id,
                 channel_idx,
                 channel_identity,
                 NULL AS pubkey_prefix,
@@ -9158,6 +9261,7 @@ def list_unread_mentions(
             SELECT
                 'contact' AS conversation_kind,
                 id,
+                owner_id,
                 NULL AS channel_idx,
                 NULL AS channel_identity,
                 pubkey_prefix,
@@ -9177,6 +9281,7 @@ def list_unread_mentions(
         {
             "conversation_kind": str(row["conversation_kind"] or ""),
             "id": int(row["id"] or 0),
+            "owner_id": _normalize_owner_id(row["owner_id"]),
             "channel_idx": None if row["channel_idx"] is None else int(row["channel_idx"]),
             "channel_identity": "" if row["channel_identity"] is None else str(row["channel_identity"]).strip(),
             "pubkey_prefix": "" if row["pubkey_prefix"] is None else str(row["pubkey_prefix"]).lower(),
@@ -9526,6 +9631,7 @@ def _build_messages_conversation_directory(
         _upsert_channel_entry(dict(channel or {}), is_on_node=True)
     for slot in scoped_slots:
         _upsert_channel_entry({
+            "owner_id": str(slot.get("owner_id") or ""),
             "idx": int(slot.get("channel_idx") or -1),
             "name": str(slot.get("channel_name") or ""),
             "secret_hex": str(slot.get("channel_secret_hex") or ""),
@@ -12751,9 +12857,18 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                 include_entries = bool(body.get("include_entries", True))
                 with _messages_owner_scope(port=conn["port"]):
                     owner_id = _resolve_owner_id_for_port(conn["port"])
+                    access_all = _get_access_all_meshcorium_messages()
                     channel_unread_summary, channel_mention_summary = _build_channel_unread_payload_for_port(conn["port"], mention_name)
-                    contact_unread_summary = get_contact_unread_summary(mention_name, owner_id=owner_id)
-                    contact_mention_summary = get_contact_mention_summary(mention_name, owner_id=owner_id)
+                    contact_unread_summary = get_contact_unread_summary(
+                        mention_name,
+                        owner_id=owner_id,
+                        access_all=access_all,
+                    )
+                    contact_mention_summary = get_contact_mention_summary(
+                        mention_name,
+                        owner_id=owner_id,
+                        access_all=access_all,
+                    )
                     self._send_json(
                         {
                             "channel_unread_counts": {key: int(value["unread_count"]) for key, value in channel_unread_summary.items()},

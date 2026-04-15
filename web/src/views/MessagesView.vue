@@ -227,6 +227,10 @@ const footerStatusText = computed(() => {
 
 const unreadSummary = computed(() => session.unreadSummary || {})
 const accessAllMeshcoriumMessages = computed(() => Boolean(session.settingsPayload?.settings?.access_all_meshcorium_messages !== false))
+const accessAllMeshcoriumChannels = computed(() => {
+  const channels = Array.isArray(session.channels) ? session.channels : []
+  return channels.some((channel) => Boolean(channel?.access_all_messages_enabled))
+})
 
 function channelListMergeKey(channel) {
   const rawIdentity = String(channel?.channel_identity || '').trim()
@@ -249,6 +253,18 @@ function channelDialogOrderKey(channel) {
   return channelListMergeKey(channel)
 }
 
+function buildOfficialPublicChannelFallback() {
+  return {
+    idx: 0,
+    name: OFFICIAL_PUBLIC_CHANNEL_NAME,
+    secret_hex: '',
+    hash: '',
+    channel_identity: `public::${OFFICIAL_PUBLIC_CHANNEL_NAME}`,
+    is_public: true,
+    is_on_node: true,
+  }
+}
+
 const conversationChannelsSource = computed(() => {
   const liveChannels = Array.isArray(session.channels) ? session.channels : []
   const merged = new Map()
@@ -264,7 +280,7 @@ const conversationChannelsSource = computed(() => {
       is_on_node: Boolean(current?.is_on_node) || Boolean(isOnNode) || Boolean(channel?.is_on_node),
     })
   }
-  if (accessAllMeshcoriumMessages.value) {
+  if (accessAllMeshcoriumMessages.value && accessAllMeshcoriumChannels.value) {
     const directoryChannels = Array.isArray(messageConversationDirectory.value?.channels) ? messageConversationDirectory.value.channels : []
     for (const channel of directoryChannels) {
       upsertChannel(channel, false)
@@ -272,6 +288,13 @@ const conversationChannelsSource = computed(() => {
   }
   for (const channel of liveChannels) {
     upsertChannel(channel, true)
+  }
+  const publicChannelKey = channelListMergeKey(buildOfficialPublicChannelFallback())
+  if (
+    session.connected
+    && !merged.has(publicChannelKey)
+  ) {
+    upsertChannel(buildOfficialPublicChannelFallback(), true)
   }
   return Array.from(merged.values())
 })
@@ -541,22 +564,7 @@ function normalizeMutedConversationsMap(value) {
 const mutedConversationsMap = computed(() => normalizeMutedConversationsMap(session.settingsPayload?.settings?.muted_conversations))
 
 function getConversationMuteKey(kind, value) {
-  const normalizedKind = String(kind || '').trim().toLowerCase()
-  if (normalizedKind === 'channel') {
-    const channelIdentity = typeof value === 'object' && value
-      ? String(value.channel_identity || '').trim()
-      : ''
-    if (channelIdentity) {
-      return `channelid:${channelIdentity}`
-    }
-    const channelIdx = Number(typeof value === 'object' && value ? value.idx : value)
-    return Number.isFinite(channelIdx) && channelIdx >= 0 ? `channel:${channelIdx}` : ''
-  }
-  if (normalizedKind === 'contact') {
-    const prefix = getContactPrefix(value)
-    return prefix ? `contact:${prefix}` : ''
-  }
-  return ''
+  return getConversationMuteKeys(kind, value)[0] || ''
 }
 
 function getChannelMuteKey(channelOrIdx) {
@@ -565,6 +573,110 @@ function getChannelMuteKey(channelOrIdx) {
 
 function getContactMuteKey(contactOrPrefix) {
   return getConversationMuteKey('contact', contactOrPrefix)
+}
+
+function normalizeOwnerId(value) {
+  const normalized = String(value || '').trim().toLowerCase()
+  return /^[0-9a-f]{64}$/.test(normalized) ? normalized : ''
+}
+
+function getCurrentOwnerId() {
+  return normalizeOwnerId(session.self?.public_key || session.selfPublicKey || '')
+}
+
+function pushUniqueMuteKey(keys, next) {
+  const normalized = String(next || '').trim().toLowerCase()
+  if (normalized && !keys.includes(normalized)) {
+    keys.push(normalized)
+  }
+}
+
+function appendScopedAndLegacyMuteKey(keys, baseKey, ownerId = '') {
+  const normalizedBaseKey = String(baseKey || '').trim().toLowerCase()
+  if (!normalizedBaseKey) {
+    return
+  }
+  const normalizedOwnerId = normalizeOwnerId(ownerId)
+  const currentOwnerId = getCurrentOwnerId()
+  if (normalizedOwnerId) {
+    pushUniqueMuteKey(keys, `owner:${normalizedOwnerId}:${normalizedBaseKey}`)
+    if (normalizedOwnerId === currentOwnerId) {
+      pushUniqueMuteKey(keys, normalizedBaseKey)
+    }
+    return
+  }
+  pushUniqueMuteKey(keys, normalizedBaseKey)
+  if (currentOwnerId) {
+    pushUniqueMuteKey(keys, `owner:${currentOwnerId}:${normalizedBaseKey}`)
+  }
+}
+
+function parseScopedConversationKey(rawValue) {
+  const raw = String(rawValue || '').trim().toLowerCase()
+  const ownerScopedMatch = /^owner:([0-9a-f]{64}):(channelid:.+|channel:\d+|contact:[0-9a-f]{1,12})$/i.exec(raw)
+  if (ownerScopedMatch) {
+    return {
+      ownerId: ownerScopedMatch[1].toLowerCase(),
+      baseKey: ownerScopedMatch[2].toLowerCase(),
+    }
+  }
+  return {
+    ownerId: '',
+    baseKey: raw,
+  }
+}
+
+function getConversationMuteKeys(kind, value) {
+  const normalizedKind = String(kind || '').trim().toLowerCase()
+  const keys = []
+  if (normalizedKind === 'channel') {
+    if (value && typeof value === 'object') {
+      const ownerId = normalizeOwnerId(value.owner_id || value.ownerId || '')
+      const channelIdentity = String(value.channel_identity || value.channelIdentity || '').trim()
+      const channelIdx = Number(value.idx ?? value.channel_idx ?? value.channelIdx ?? -1)
+      if (channelIdentity) {
+        appendScopedAndLegacyMuteKey(keys, `channelid:${channelIdentity}`, ownerId)
+      }
+      if (Number.isFinite(channelIdx) && channelIdx >= 0) {
+        appendScopedAndLegacyMuteKey(keys, `channel:${channelIdx}`, ownerId)
+      }
+      return keys
+    }
+    const parsed = parseScopedConversationKey(value)
+    if (parsed.baseKey.startsWith('channelid:') || parsed.baseKey.startsWith('channel:')) {
+      appendScopedAndLegacyMuteKey(keys, parsed.baseKey, parsed.ownerId)
+      return keys
+    }
+    const channelIdx = Number(String(value || '').trim())
+    if (Number.isFinite(channelIdx) && String(value || '').trim() !== '' && channelIdx >= 0) {
+      appendScopedAndLegacyMuteKey(keys, `channel:${channelIdx}`, parsed.ownerId)
+      return keys
+    }
+    if (String(value || '').trim()) {
+      appendScopedAndLegacyMuteKey(keys, `channelid:${String(value || '').trim()}`, parsed.ownerId)
+    }
+    return keys
+  }
+  if (normalizedKind === 'contact') {
+    if (value && typeof value === 'object') {
+      const ownerId = normalizeOwnerId(value.owner_id || value.ownerId || '')
+      const prefix = getContactPrefix(value)
+      if (prefix) {
+        appendScopedAndLegacyMuteKey(keys, `contact:${prefix}`, ownerId)
+      }
+      return keys
+    }
+    const parsed = parseScopedConversationKey(value)
+    if (parsed.baseKey.startsWith('contact:')) {
+      appendScopedAndLegacyMuteKey(keys, parsed.baseKey, parsed.ownerId)
+      return keys
+    }
+    const prefix = getContactPrefix(value)
+    if (prefix) {
+      appendScopedAndLegacyMuteKey(keys, `contact:${prefix}`, parsed.ownerId)
+    }
+  }
+  return keys
 }
 
 function getConversationMuteModeByKey(muteKey) {
@@ -586,46 +698,22 @@ function getHighestPriorityMuteMode(modes = []) {
 }
 
 function getChannelMuteKeys(channelOrIdx) {
-  const keys = []
-  const pushUnique = (next) => {
-    const normalized = String(next || '').trim().toLowerCase()
-    if (normalized && !keys.includes(normalized)) {
-      keys.push(normalized)
-    }
-  }
-  if (channelOrIdx && typeof channelOrIdx === 'object') {
-    const channelIdentity = String(channelOrIdx.channel_identity || '').trim()
-    const channelIdx = Number(channelOrIdx.idx ?? -1)
-    if (channelIdentity) {
-      pushUnique(`channelid:${channelIdentity}`)
-    }
-    if (Number.isFinite(channelIdx) && channelIdx >= 0) {
-      pushUnique(`channel:${channelIdx}`)
-    }
-    return keys
-  }
-  const normalized = String(channelOrIdx || '').trim()
-  if (!normalized) {
-    return keys
-  }
-  if (normalized.startsWith('channelid:') || normalized.startsWith('channel:')) {
-    pushUnique(normalized)
-    return keys
-  }
-  if (/^-?\d+$/.test(normalized)) {
-    const channelIdx = Number(normalized)
-    if (Number.isFinite(channelIdx) && channelIdx >= 0) {
-      pushUnique(`channel:${channelIdx}`)
-    }
-    return keys
-  }
-  pushUnique(`channelid:${normalized}`)
-  return keys
+  return getConversationMuteKeys('channel', channelOrIdx)
+}
+
+function getContactMuteKeys(contactOrPrefix) {
+  return getConversationMuteKeys('contact', contactOrPrefix)
 }
 
 function getChannelMuteMode(channelOrIdx) {
   return getHighestPriorityMuteMode(
     getChannelMuteKeys(channelOrIdx).map((muteKey) => getConversationMuteModeByKey(muteKey)),
+  )
+}
+
+function getContactMuteMode(contactOrPrefix) {
+  return getHighestPriorityMuteMode(
+    getContactMuteKeys(contactOrPrefix).map((muteKey) => getConversationMuteModeByKey(muteKey)),
   )
 }
 
@@ -636,7 +724,9 @@ function getConversationMuteModeForEntry(entry) {
   if (entry.kind === 'channel') {
     return getChannelMuteMode(entry.channel)
   }
-  return getConversationMuteModeByKey(getContactMuteKey(entry.contact))
+  return getHighestPriorityMuteMode(
+    getContactMuteKeys(entry.contact).map((muteKey) => getConversationMuteModeByKey(muteKey)),
+  )
 }
 
 function getCurrentConversationMuteKey() {
@@ -644,7 +734,7 @@ function getCurrentConversationMuteKey() {
     return getChannelMuteKey(selectedChannel.value || selectedChannelIdx.value)
   }
   if (selectedConversationKind.value === 'contact' && selectedContactKey.value) {
-    return getContactMuteKey(selectedContactKey.value)
+    return getContactMuteKey(selectedContact.value || selectedContactKey.value)
   }
   return ''
 }
@@ -672,44 +762,83 @@ function conversationMuteIndicatorLabel(mode) {
   return t(mode === 'all' ? 'messages.chatMenu.muteIndicatorAll' : 'messages.chatMenu.muteIndicatorRegular')
 }
 
+function hasOwnSummaryValue(summaryMap, key) {
+  return Boolean(summaryMap) && Object.prototype.hasOwnProperty.call(summaryMap, key)
+}
+
+function resolveChannelSummaryCount(summaryMap, channel, fallbackValue = null) {
+  for (const key of getChannelMuteKeys(channel)) {
+    const parsed = parseScopedConversationKey(key)
+    if (hasOwnSummaryValue(summaryMap, parsed.baseKey)) {
+      return Number(summaryMap[parsed.baseKey] || 0)
+    }
+    if (hasOwnSummaryValue(summaryMap, key)) {
+      return Number(summaryMap[key] || 0)
+    }
+  }
+  return fallbackValue == null ? null : Number(fallbackValue || 0)
+}
+
+function resolveContactSummaryCount(summaryMap, contact, fallbackValue = null) {
+  for (const key of getContactMuteKeys(contact)) {
+    const parsed = parseScopedConversationKey(key)
+    const legacyPrefix = parsed.baseKey.startsWith('contact:') ? parsed.baseKey.slice('contact:'.length) : ''
+    if (legacyPrefix && hasOwnSummaryValue(summaryMap, legacyPrefix)) {
+      return Number(summaryMap[legacyPrefix] || 0)
+    }
+    if (hasOwnSummaryValue(summaryMap, key)) {
+      return Number(summaryMap[key] || 0)
+    }
+    if (hasOwnSummaryValue(summaryMap, parsed.baseKey)) {
+      return Number(summaryMap[parsed.baseKey] || 0)
+    }
+  }
+  return fallbackValue == null ? null : Number(fallbackValue || 0)
+}
+
 function displayedChannelUnreadCount(channel) {
   if (getChannelMuteMode(channel) === 'regular' || getChannelMuteMode(channel) === 'all') {
     return 0
   }
-  const identity = String(channel?.channel_identity || '').trim()
-  return Number(channel?.unread_count ?? (
-    (identity ? unreadSummary.value.channel_unread_counts[identity] : 0)
-    || unreadSummary.value.channel_unread_counts[String(channel?.idx ?? '')]
-    || 0
-  ))
+  return resolveChannelSummaryCount(
+    unreadSummary.value.channel_unread_counts,
+    channel,
+    channel?.unread_count ?? 0,
+  )
 }
 
 function displayedChannelMentionCount(channel) {
   if (getChannelMuteMode(channel) === 'all') {
     return 0
   }
-  const identity = String(channel?.channel_identity || '').trim()
-  return Number(channel?.mention_count ?? (
-    (identity ? unreadSummary.value.channel_mention_counts[identity] : 0)
-    || unreadSummary.value.channel_mention_counts[String(channel?.idx ?? '')]
-    || 0
-  ))
+  return resolveChannelSummaryCount(
+    unreadSummary.value.channel_mention_counts,
+    channel,
+    channel?.mention_count ?? 0,
+  )
 }
 
 function displayedContactUnreadCount(contact) {
-  const muteKey = getContactMuteKey(contact)
-  if (isConversationRegularMutedByKey(muteKey)) {
+  const muteMode = getContactMuteMode(contact)
+  if (muteMode === 'regular' || muteMode === 'all') {
     return 0
   }
-  return Number(contact?.unread_count ?? (unreadSummary.value.contact_unread_counts[getContactPrefix(contact)] || 0))
+  return resolveContactSummaryCount(
+    unreadSummary.value.contact_unread_counts,
+    contact,
+    contact?.unread_count ?? 0,
+  )
 }
 
 function displayedContactMentionCount(contact) {
-  const muteKey = getContactMuteKey(contact)
-  if (isConversationMentionMutedByKey(muteKey)) {
+  if (getContactMuteMode(contact) === 'all') {
     return 0
   }
-  return Number(contact?.mention_count ?? (unreadSummary.value.contact_mention_counts[getContactPrefix(contact)] || 0))
+  return resolveContactSummaryCount(
+    unreadSummary.value.contact_mention_counts,
+    contact,
+    contact?.mention_count ?? 0,
+  )
 }
 
 function formatLocalizedNumber(value, options = {}) {
@@ -838,9 +967,13 @@ const {
     displayedChannelMentionCount,
     displayedContactUnreadCount,
     displayedContactMentionCount,
+    getChannelMuteKey,
+    getContactMuteKey,
     getConversationMuteModeForEntry,
     conversationMuteIndicatorLabel,
     normalizePublicKey,
+    resolveChannelSummaryCount,
+    resolveContactSummaryCount,
   },
 })
 
@@ -929,7 +1062,7 @@ const hydrationConversationSignature = computed(() => {
   const loadedChannels = Math.max(0, Number(conversationChannelsSource.value.length || 0))
   const channelKeys = channelScrollerRows.value.map((row) => String(row.channelKey || row.value || '')).join('|')
   const directKeys = directConversationRows.value
-    .map((row) => `${row.value}:${Number(row.contact?.last_message_at || 0)}`)
+    .map((row) => `${row.conversationKey || row.value}:${Number(row.contact?.last_message_at || 0)}`)
     .join('|')
   return `${expectedContacts}/${loadedContacts}::${expectedChannels}/${loadedChannels}::${channelKeys}::${directKeys}`
 })
@@ -1251,11 +1384,20 @@ function buildMentionPreviewText(text, fallback = '') {
 function findChannelNotificationRowByMentionEntry(entry) {
   const channelIdentity = String(entry?.channel_identity || '').trim()
   const rawChannelIdx = Number(entry?.channel_idx ?? -1)
+  const ownerId = normalizeOwnerId(entry?.owner_id || '')
+  const conversationKey = getChannelMuteKey({
+    owner_id: ownerId,
+    idx: rawChannelIdx,
+    channel_identity: channelIdentity,
+  })
   return channelScrollerRows.value.find((row) => {
-    if (channelIdentity && String(row?.channel?.channel_identity || '').trim() === channelIdentity) {
+    if (conversationKey && String(row?.channelKey || '').trim().toLowerCase() === conversationKey.toLowerCase()) {
       return true
     }
-    return rawChannelIdx >= 0 && Number(row?.channel?.idx ?? -1) === rawChannelIdx
+    if (!ownerId && channelIdentity && String(row?.channel?.channel_identity || '').trim() === channelIdentity) {
+      return true
+    }
+    return !ownerId && rawChannelIdx >= 0 && Number(row?.channel?.idx ?? -1) === rawChannelIdx
   }) || null
 }
 
@@ -1264,7 +1406,16 @@ function findContactNotificationRowByMentionEntry(entry) {
   if (!prefix) {
     return null
   }
-  return directConversationRows.value.find((row) => String(row?.prefix || '').trim().toLowerCase() === prefix) || null
+  const conversationKey = getContactMuteKey({
+    owner_id: entry?.owner_id || '',
+    pubkey_prefix: prefix,
+  })
+  return directConversationRows.value.find((row) => {
+    if (conversationKey && String(row?.conversationKey || '').trim().toLowerCase() === conversationKey.toLowerCase()) {
+      return true
+    }
+    return String(row?.prefix || '').trim().toLowerCase() === prefix
+  }) || null
 }
 
 const phoneSignalLevel = computed(() => {
@@ -1372,6 +1523,11 @@ const mentionNotificationEntries = computed(() => {
       const conversationKind = String(entry?.conversation_kind || '').trim().toLowerCase()
       if (conversationKind === 'channel') {
         const row = findChannelNotificationRowByMentionEntry(entry)
+        const summaryKey = getChannelMuteKey({
+          owner_id: entry?.owner_id || '',
+          channel_identity: entry?.channel_identity || '',
+          idx: entry?.channel_idx,
+        })
         const channelName = String(entry?.channel_name || '').trim()
         const rawChannelIdx = Number(entry?.channel_idx ?? -1)
         const title = row?.title || displayChannelTitle(channelName, rawChannelIdx, String(entry?.channel_identity || '').trim())
@@ -1387,7 +1543,7 @@ const mentionNotificationEntries = computed(() => {
           title,
           preview: buildMentionPreviewText(entry?.text, row?.preview),
           avatarSymbol,
-          unreadCount: row?.unreadCount || 0,
+          unreadCount: row?.unreadCount || Number(unreadSummary.value.channel_unread_counts?.[summaryKey] || 0),
           mentionCount: 1,
           highlightTone: 'mention',
           value,
@@ -1396,17 +1552,21 @@ const mentionNotificationEntries = computed(() => {
       }
       const row = findContactNotificationRowByMentionEntry(entry)
       const prefix = String(entry?.pubkey_prefix || '').trim().toLowerCase()
+      const conversationKey = getContactMuteKey({
+        owner_id: entry?.owner_id || '',
+        pubkey_prefix: prefix,
+      })
       const title = row?.displayName || prefix.toUpperCase() || t('messages.fallback.unnamedContact')
       const avatarSymbol = row?.avatarSymbol || title.slice(0, 2).toUpperCase()
       const value = row?.value || prefix
       return {
         kind: 'contact',
-        key: `mention:contact:${Number(entry?.id || 0) || prefix}`,
-        title,
-        preview: buildMentionPreviewText(entry?.text, row?.preview),
-        avatarSymbol,
-        unreadCount: row?.unreadCount || 0,
-        mentionCount: 1,
+          key: `mention:contact:${Number(entry?.id || 0) || prefix}`,
+          title,
+          preview: buildMentionPreviewText(entry?.text, row?.preview),
+          avatarSymbol,
+          unreadCount: row?.unreadCount || Number(unreadSummary.value.contact_unread_counts?.[conversationKey] || unreadSummary.value.contact_unread_counts?.[prefix] || 0),
+          mentionCount: 1,
         highlightTone: 'mention',
         value,
         focusMessageId: Number(entry?.id || 0),
@@ -1443,7 +1603,7 @@ const mentionNotificationEntries = computed(() => {
     }
     entries.push({
       kind: 'contact',
-      key: `mention:contact:${row.prefix}`,
+      key: `mention:contact:${row.conversationKey}`,
       title: row.displayName,
       preview: row.preview,
       avatarSymbol: row.avatarSymbol,
@@ -1451,7 +1611,7 @@ const mentionNotificationEntries = computed(() => {
       mentionCount: row.mentionCount,
       highlightTone: 'mention',
       value: row.value,
-      focusMessageId: Number(unreadSummary.value.contact_first_mention_ids[row.prefix] || unreadSummary.value.contact_first_unread_ids[row.prefix] || 0),
+      focusMessageId: Number(unreadSummary.value.contact_first_mention_ids[row.conversationKey] || unreadSummary.value.contact_first_mention_ids[row.prefix] || unreadSummary.value.contact_first_unread_ids[row.conversationKey] || unreadSummary.value.contact_first_unread_ids[row.prefix] || 0),
     })
   }
   return entries
@@ -1482,7 +1642,7 @@ const regularNotificationEntries = computed(() => {
     }
     entries.push({
       kind: 'contact',
-      key: `regular:contact:${row.prefix}`,
+      key: `regular:contact:${row.conversationKey}`,
       title: row.displayName,
       preview: row.preview,
       avatarSymbol: row.avatarSymbol,
@@ -1490,7 +1650,7 @@ const regularNotificationEntries = computed(() => {
       mentionCount: row.mentionCount,
       highlightTone: 'unread',
       value: row.value,
-      focusMessageId: Number(unreadSummary.value.contact_first_unread_ids[row.prefix] || unreadSummary.value.contact_first_mention_ids[row.prefix] || 0),
+      focusMessageId: Number(unreadSummary.value.contact_first_unread_ids[row.conversationKey] || unreadSummary.value.contact_first_unread_ids[row.prefix] || unreadSummary.value.contact_first_mention_ids[row.conversationKey] || unreadSummary.value.contact_first_mention_ids[row.prefix] || 0),
     })
   }
   return entries
@@ -2555,17 +2715,42 @@ function queueUnreadRefresh(delayMs = 120) {
 
 function getConversationReadMarkerTarget() {
   if (selectedConversationKind.value === 'contact') {
-    const prefix = normalizePublicKey(selectedContactKey.value)
-    if (!prefix) {
-      return null
+    for (const key of getContactMuteKeys(selectedContact.value || selectedContactKey.value)) {
+      const parsed = parseScopedConversationKey(key)
+      const legacyPrefix = parsed.baseKey.startsWith('contact:') ? parsed.baseKey.slice('contact:'.length) : ''
+      const targetId = Number(
+        unreadSummary.value.contact_first_unread_ids[key]
+          || unreadSummary.value.contact_first_mention_ids[key]
+          || unreadSummary.value.contact_first_unread_ids[legacyPrefix]
+          || unreadSummary.value.contact_first_mention_ids[legacyPrefix]
+          || 0,
+      )
+      if (targetId > 0) {
+        return targetId
+      }
     }
-    return Number(unreadSummary.value.contact_first_unread_ids[prefix] || unreadSummary.value.contact_first_mention_ids[prefix] || 0) || null
-  }
-  const channelKey = selectedChannelIdx.value == null ? '' : String(selectedChannelIdx.value)
-  if (!channelKey) {
     return null
   }
-  return Number(unreadSummary.value.channel_first_unread_ids[channelKey] || unreadSummary.value.channel_first_mention_ids[channelKey] || 0) || null
+  for (const channelKey of getChannelMuteKeys(selectedChannel.value || {
+    idx: selectedChannelIdx.value,
+    channel_identity: selectedChannelIdentity.value,
+  })) {
+    const parsed = parseScopedConversationKey(channelKey)
+    const legacyChannelKey = parsed.baseKey.startsWith('channelid:')
+      ? parsed.baseKey.slice('channelid:'.length)
+      : (parsed.baseKey.startsWith('channel:') ? parsed.baseKey.slice('channel:'.length) : '')
+    const targetId = Number(
+      unreadSummary.value.channel_first_unread_ids[channelKey]
+        || unreadSummary.value.channel_first_mention_ids[channelKey]
+        || unreadSummary.value.channel_first_unread_ids[legacyChannelKey]
+        || unreadSummary.value.channel_first_mention_ids[legacyChannelKey]
+        || 0,
+    )
+    if (targetId > 0) {
+      return targetId
+    }
+  }
+  return null
 }
 
 function mergeUniqueMessages(prependMessages, existingMessages) {
@@ -2676,6 +2861,21 @@ function hasHydratedConversationEntries() {
   return (Date.now() - lastHydrationChangeAt.value) >= HYDRATION_DIALOG_SETTLE_MS
 }
 
+function hasUsableConversationWorkspace() {
+  if (!session.connected || loadingConversationDirectory.value) {
+    return false
+  }
+  if (conversationListItems.value.length > 0 || currentConversation.value) {
+    return true
+  }
+  if (!session.collectionsReady) {
+    return false
+  }
+  const expectedContacts = Math.max(0, Number(session.sessionSnapshot?.contacts_count ?? conversationContactsSource.value.length) || 0)
+  const expectedChannels = Math.max(0, Number(session.sessionSnapshot?.channels_count ?? conversationChannelsSource.value.length) || 0)
+  return expectedContacts === 0 && expectedChannels === 0
+}
+
 function cancelHydrationCompletionCheck() {
   if (hydrationCompletionTimerId) {
     window.clearTimeout(hydrationCompletionTimerId)
@@ -2711,6 +2911,10 @@ async function maybeFinishMessagesHydration({ forceSync = false, loadHistoryIfNe
   if (!session.connected) {
     finishMessagesHydration()
     return false
+  }
+  if (hasUsableConversationWorkspace()) {
+    finishMessagesHydration()
+    return true
   }
   if (forceSync) {
     try {
@@ -4718,6 +4922,9 @@ watch(() => conversationListItems.value.length, async () => {
   await nextTick()
   updateConversationListMetrics()
   ensureConversationRowResizeObserver()
+  if (session.messagesHydrating) {
+    void maybeFinishMessagesHydration({ loadHistoryIfNeeded: !messages.value.length })
+  }
 })
 
 watch(() => hydrationConversationSignature.value, () => {
@@ -4726,6 +4933,13 @@ watch(() => hydrationConversationSignature.value, () => {
   }
   markHydrationListChanged()
   scheduleHydrationCompletionCheck()
+})
+
+watch(() => loadingConversationDirectory.value, (nextValue) => {
+  if (!session.messagesHydrating || nextValue) {
+    return
+  }
+  void maybeFinishMessagesHydration({ loadHistoryIfNeeded: !messages.value.length })
 })
 
 watch(() => session.messagesHydrating, (nextValue) => {

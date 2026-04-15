@@ -36,6 +36,7 @@ export function useMessagesConversationList(options) {
         return {
           kind: 'contact',
           contact,
+          conversationKey: helpers.getContactMuteKey(contact),
           prefix,
           displayName,
           preview: helpers.formatContactPreview(contact),
@@ -44,8 +45,16 @@ export function useMessagesConversationList(options) {
           avatarIsEmoji: Boolean(avatarEmoji),
           kindLabel: t(`messages.contactKinds.${helpers.contactKindLabel(contact)}`),
           contactBadge: helpers.contactKindBadgeLabel(contact),
-          rawUnreadCount: Number(contact?.unread_count ?? (unreadSummary.value.contact_unread_counts[prefix] || 0)),
-          rawMentionCount: Number(contact?.mention_count ?? (unreadSummary.value.contact_mention_counts[prefix] || 0)),
+          rawUnreadCount: helpers.resolveContactSummaryCount(
+            unreadSummary.value.contact_unread_counts,
+            contact,
+            contact?.unread_count ?? 0,
+          ),
+          rawMentionCount: helpers.resolveContactSummaryCount(
+            unreadSummary.value.contact_mention_counts,
+            contact,
+            contact?.mention_count ?? 0,
+          ),
           unreadCount: helpers.displayedContactUnreadCount(contact),
           mentionCount: helpers.displayedContactMentionCount(contact),
           value: helpers.normalizePublicKey(contact?.public_key),
@@ -92,7 +101,7 @@ export function useMessagesConversationList(options) {
       return {
         kind: 'channel',
         channel,
-        channelKey: normalizedChannelIdentity || (normalizedChannelIdx >= 0 ? String(normalizedChannelIdx) : ''),
+        channelKey: helpers.getChannelMuteKey(channel) || normalizedChannelIdentity || (normalizedChannelIdx >= 0 ? String(normalizedChannelIdx) : ''),
         reorderKey: helpers.channelDialogOrderKey(channel),
         title: helpers.displayChannelTitle(channel?.name, normalizedChannelIdx, normalizedChannelIdentity),
         meta: helpers.isPublicChannel(channel) ? t('messages.visibility.public') : t('messages.visibility.private'),
@@ -101,16 +110,16 @@ export function useMessagesConversationList(options) {
         avatarSymbol: helpers.channelAvatarSymbol(channel),
         unreadCount: helpers.displayedChannelUnreadCount(channel),
         mentionCount: helpers.displayedChannelMentionCount(channel),
-        rawUnreadCount: Number(channel?.unread_count ?? (
-          (normalizedChannelIdentity ? unreadSummary.value.channel_unread_counts[normalizedChannelIdentity] : 0)
-          || unreadSummary.value.channel_unread_counts[normalizedChannelIdx >= 0 ? String(normalizedChannelIdx) : '']
-          || 0
-        )),
-        rawMentionCount: Number(channel?.mention_count ?? (
-          (normalizedChannelIdentity ? unreadSummary.value.channel_mention_counts[normalizedChannelIdentity] : 0)
-          || unreadSummary.value.channel_mention_counts[normalizedChannelIdx >= 0 ? String(normalizedChannelIdx) : '']
-          || 0
-        )),
+        rawUnreadCount: helpers.resolveChannelSummaryCount(
+          unreadSummary.value.channel_unread_counts,
+          channel,
+          channel?.unread_count ?? 0,
+        ),
+        rawMentionCount: helpers.resolveChannelSummaryCount(
+          unreadSummary.value.channel_mention_counts,
+          channel,
+          channel?.mention_count ?? 0,
+        ),
         muteMode,
         muteLabel: muteMode !== 'none' ? helpers.conversationMuteIndicatorLabel(muteMode) : '',
         isProtectedChannel,
@@ -123,7 +132,7 @@ export function useMessagesConversationList(options) {
   const scrollerEntryModels = computed(() => {
     const channelRows = channelScrollerRows.value.map((row) => ({
       ...row,
-      key: `channel:${String(row.channel?.channel_identity ?? '').trim() || String(row.channel?.idx ?? '')}`,
+      key: `channel:${normalizeConversationRowSuffix(row.channelKey)}`,
       selected: selectedConversationKind.value === 'channel' && (
         (String(row.channel?.channel_identity || '').trim() && String(row.channel?.channel_identity || '').trim() === String(selectedChannelIdentity?.value || '').trim())
         || Number(row.channel?.idx) === Number(selectedChannelIdx.value)
@@ -131,7 +140,7 @@ export function useMessagesConversationList(options) {
     }))
     const contactRows = directConversationRows.value.map((row) => ({
       ...row,
-      key: `contact:${row.value}`,
+      key: `contact:${normalizeConversationRowSuffix(row.conversationKey || row.value)}`,
       selected: selectedConversationKind.value === 'contact' && row.value === helpers.normalizePublicKey(selectedContactKey.value),
     }))
     return [...channelRows, ...contactRows]
@@ -271,6 +280,10 @@ export function useMessagesConversationList(options) {
     conversationRowElements.set(normalizedKey, element)
     ensureConversationRowResizeObserver()
     conversationRowResizeObserver?.observe(element)
+  }
+
+  function normalizeConversationRowSuffix(value) {
+    return String(value || '').trim() || 'unknown'
   }
 
   return {

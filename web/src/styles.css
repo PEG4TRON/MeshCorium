@@ -6671,10 +6671,7 @@ button {
 }
 
 .mc-settings-about-hero {
-  position: sticky;
-  top: 0;
-  z-index: 3;
-  backdrop-filter: blur(18px);
+  position: relative;
 }
 
 .mc-settings-about-hero-head {
