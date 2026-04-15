@@ -8,14 +8,13 @@ Basic project overview:
 
 MeshCorium is a self-hosted MeshCore client with a hybrid contact system and a local web interface for working with a MeshCore node through companion firmware.
 
-The development tree keeps the Docker Compose packaging variant from `v0.5.3` and now adds a functional BLE connection path alongside the permanent USB serial transport.
+`MeshCorium v0.6.0 -- Docker + USB + BLE` ships the Docker Compose packaging variant, permanent USB serial transport, and BLE node connection through Linux / BlueZ.
 
-## Development Status
+## Release Status
 
-The latest published baseline is `v0.5.3 -- Docker + USB`.
-The current `dev` branch is ahead of that release in user-facing functionality.
+The latest published release is `MeshCorium v0.6.0 -- Docker + USB + BLE`.
 
-Key `dev` differences relative to `v0.5.3`:
+Key `v0.6.0` differences relative to `v0.5.3 -- Docker + USB`:
 
 - BLE node connection is now available next to USB serial through a Linux / BlueZ transport adapter.
 - USB serial remains permanent and is not being removed.
@@ -27,14 +26,14 @@ Key `dev` differences relative to `v0.5.3`:
 - UI/UX was refreshed across the connection float, phonebar, dropdowns, sync animations, route loading, battery display, and notification/message flows.
 - BLE/Wi-Fi battery percentage, battery profiles, and DB-backed battery history charts were added.
 - The launcher was hardened around venv setup, frontend build fallback, and USB serial access groups.
-- Docker was aligned with the dev runtime: it now includes the current backend modules, uses host BlueZ through D-Bus for BLE, and exposes host `/dev` so USB serial discovery behaves like the ordinary launcher path.
+- Docker was aligned with the current runtime: it now includes the current backend modules, uses host BlueZ through D-Bus for BLE, and exposes host `/dev` so USB serial discovery behaves like the ordinary launcher path.
 
-Runtime variants remain:
+Runtime variants:
 
 - ordinary local launcher / systemd operation
-- Docker Compose operation from the `v0.5.3` packaging work
+- Docker Compose operation with USB and BLE host integration
 
-Upgrade information from `v0.5.0` is documented in:
+Upgrade information is documented in:
 
 - [README_RU.md](./README_RU.md)
 - [README_EN.md](./README_EN.md)

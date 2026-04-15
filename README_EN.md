@@ -11,14 +11,14 @@ Current transports:
 - `USB serial`
 - `BLE`
 
-`dev` branch status after `v0.5.3 -- Docker + USB`:
+`MeshCorium v0.6.0 -- Docker + USB + BLE` release status:
 
 - `USB serial` — permanent and validated connection path, not being removed from the project
 - `BLE` — additional companion-node connection path through Linux / BlueZ, available alongside USB serial
 - `Wi-Fi` — UI placeholder only, real transport not implemented yet
-- `Docker Compose` — deployment variant introduced in `v0.5.3`, kept alongside the ordinary launcher/systemd flow
+- `Docker Compose` — deployment variant kept alongside the ordinary launcher/systemd flow
 
-BLE in `dev` is implemented through a dedicated transport adapter and is available in the connection UI. It is still a new path that needs validation across different Linux hosts and BLE adapters.
+BLE is implemented through a dedicated transport adapter and is available in the connection UI. It is still a new connection path whose behavior depends on the Linux host, BlueZ, and the specific BLE adapter.
 
 ## Key Features
 
@@ -37,11 +37,11 @@ BLE in `dev` is implemented through a dedicated transport adapter and is availab
 - remote repeater/room-server management through the companion session
 - systemd-friendly launcher for local installation as a service
 
-## Main Difference Between `dev` And The Latest `v0.5.3` Release
+## Main Difference Between `v0.6.0` And `v0.5.3`
 
 `v0.5.3` was a `Docker + USB` release: Docker deployment was added to the stable USB serial workflow, while BLE was still mostly groundwork.
 
-The `dev` branch adds and extends the following functional areas:
+`v0.6.0` adds and extends the following functional areas:
 
 - BLE companion-node connection through Linux / BlueZ: scan, node selection, PIN entry, connect, unpair, pairing status display, and separate BLE node history.
 - A transport-adapter model: backend code uses universal transport calls while USB serial and BLE are handled by their own adapters.
@@ -127,7 +127,7 @@ This release also ships a Docker-based runtime variant:
 
 This does not replace the ordinary launcher or systemd flow. It is an additional way to run the same build.
 
-In `dev`, the Docker variant is aligned with the current application code:
+In `v0.6.0`, the Docker variant is aligned with the current application code:
 
 - the image builds the current Vue frontend during Docker build
 - the backend includes the new known-node, DB import/export, and BLE transport modules
@@ -179,7 +179,7 @@ Recommended update flow:
    - `data/meshcorium_contacts.sqlite3`
    - `data/client_settings.json`
 
-3. Extract `v0.5.3 -- Docker + USB` into a new directory next to the old installation.
+3. Extract `MeshCorium v0.6.0 -- Docker + USB + BLE` into a new directory next to the old installation.
 
 4. Copy the preserved data files from the old `v0.5.0` installation into the new `data/` directory.
 
@@ -203,7 +203,7 @@ Update notes:
   - `expected CONTACTS_START, got code 18`
   this release includes backend hardening for that startup failure mode.
 - If `v0.5.1` still showed generic connect/bootstrap timeouts, this release adds deeper backend startup telemetry and transport/runtime hardening for diagnosis and stabilization.
-- Keep the old installation directory as a rollback copy until `v0.5.3` is confirmed to work correctly.
+- Keep the old installation directory as a rollback copy until `v0.6.0` is confirmed to work correctly.
 
 ## Remove The systemd Service
 
@@ -214,7 +214,7 @@ Update notes:
 ## Useful Notes
 
 - If `web/dist` is already present, the launcher can use the existing frontend build as a fallback.
-- The current release profile is focused on `USB` companion-node connectivity.
+- The current release profile supports `USB serial`, `BLE`, and Docker Compose operation.
 - Local runtime data typically lives in:
   - `data/`
   - `logs/`
