@@ -976,6 +976,11 @@ export default {
       summaryNoMentions: 'Found {chats} chat(s) with {unread} unread messages.',
       summaryWithMentions: 'Found {chats} chat(s) with {unread} unread messages. Mentions: {mentions}.',
     },
+    browser: {
+      title: 'New MeshCorium notifications',
+      bodyNoMentions: 'Unread messages: {unread}.',
+      bodyWithMentions: 'Unread messages: {unread}. Mentions: {mentions}.',
+    },
     sound: {
       on: 'Notification sounds enabled',
       off: 'Notification sounds disabled',

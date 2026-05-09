@@ -11,10 +11,12 @@ import { useSessionStore } from './stores/session'
 const route = useRoute()
 const session = useSessionStore()
 const { t } = useI18n()
+const unreadTitleBadge = computed(() => Math.max(0, Number(session.browserUnreadBadgeCount || 0)))
 const pageTitle = computed(() => {
   const titleKey = String(route.meta?.titleKey || '').trim()
   const routeTitle = titleKey ? String(t(titleKey)).trim() : String(route.meta?.title || '').trim()
-  return routeTitle ? `${routeTitle} | Meshcorium` : 'Meshcorium'
+  const baseTitle = routeTitle ? `${routeTitle} | Meshcorium` : 'Meshcorium'
+  return unreadTitleBadge.value > 0 ? `(${unreadTitleBadge.value > 99 ? '99+' : unreadTitleBadge.value}) ${baseTitle}` : baseTitle
 })
 
 useTitle(pageTitle)

@@ -52,6 +52,7 @@ let railGlowReleaseTimer = 0
 let unreadRefreshTimer = 0
 let consoleEventSourceKey = ''
 let notificationEventSourceKey = ''
+let browserNotificationGestureArmed = false
 
 function normalizePublicKey(value) {
   return String(value || '').trim().toLowerCase()
@@ -1456,6 +1457,29 @@ function handleShellEscape(event) {
   }
 }
 
+function disarmBrowserNotificationGesture() {
+  if (!browserNotificationGestureArmed) {
+    return
+  }
+  browserNotificationGestureArmed = false
+  window.removeEventListener('pointerdown', handleBrowserNotificationGesture)
+  window.removeEventListener('keydown', handleBrowserNotificationGesture)
+}
+
+function handleBrowserNotificationGesture() {
+  void session.requestBrowserNotificationPermission()
+  disarmBrowserNotificationGesture()
+}
+
+function armBrowserNotificationGesture() {
+  if (browserNotificationGestureArmed || session.browserNotificationPermission !== 'default') {
+    return
+  }
+  browserNotificationGestureArmed = true
+  window.addEventListener('pointerdown', handleBrowserNotificationGesture, { passive: true })
+  window.addEventListener('keydown', handleBrowserNotificationGesture)
+}
+
 watch(() => [session.radioStats?.last_tx_secs, session.radioStats?.tx_air_secs], ([nextLastTx, nextAirTx], [prevLastTx, prevAirTx] = []) => {
   if (
     (nextLastTx != null && prevLastTx != null && Number(nextLastTx) > Number(prevLastTx))
@@ -1558,6 +1582,7 @@ watch(visibility, (value) => {
 onMounted(async () => {
   window.addEventListener('keydown', handleShellEscape)
   window.addEventListener('resize', scheduleRailGlowMeasure)
+  armBrowserNotificationGesture()
   resumePhonebarTick()
   resumeAutoRefresh()
   await refreshShellState({ includePorts: true, suppressStatus: true })
@@ -1573,6 +1598,7 @@ onBeforeUnmount(() => {
   pauseAutoRefresh()
   stopConsoleListening()
   stopNotificationListening()
+  disarmBrowserNotificationGesture()
   if (unreadRefreshTimer) {
     window.clearTimeout(unreadRefreshTimer)
     unreadRefreshTimer = 0

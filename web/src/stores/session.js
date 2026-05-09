@@ -224,9 +224,13 @@ export const useSessionStore = defineStore('session', () => {
   const radioTxObservedAt = ref(0)
   const unreadSummary = ref(buildUnreadSummary())
   const unreadSummaryPrimed = ref(false)
+  const browserNotificationPermission = ref(getBrowserNotificationPermission())
   const notificationAudioCache = new Map()
   let contactsRequestPromise = null
   const transientDisconnectSuppressedUntil = ref(0)
+  let browserUnreadSummaryPrimed = false
+  let browserNotificationRequestPromise = null
+  let lastBrowserNotificationAt = 0
 
   function setStatus(message, isError = false) {
     statusText.value = String(message || '')
@@ -478,6 +482,115 @@ export const useSessionStore = defineStore('session', () => {
     }
   }
 
+  function getBrowserNotificationPermission() {
+    if (typeof Notification === 'undefined') {
+      return 'unsupported'
+    }
+    return String(Notification.permission || 'default')
+  }
+
+  function buildBrowserUnreadTotals(summary = {}) {
+    const regular = Math.max(0, Number(sumAudibleUnread(summary) || 0))
+    const direct = Math.max(0, Number(sumAudibleDirectUnread(summary) || 0))
+    const mentions = Math.max(0, Number(sumAudibleMentions(summary) || 0))
+    return {
+      regular,
+      direct,
+      mentions,
+      unread: regular + direct,
+      badge: regular + direct + mentions,
+    }
+  }
+
+  const browserUnreadTotals = computed(() => buildBrowserUnreadTotals(unreadSummary.value))
+  const browserUnreadBadgeCount = computed(() => Math.max(0, Number(browserUnreadTotals.value.badge || 0)))
+
+  async function requestBrowserNotificationPermission() {
+    browserNotificationPermission.value = getBrowserNotificationPermission()
+    if (browserNotificationPermission.value !== 'default') {
+      return browserNotificationPermission.value
+    }
+    if (typeof Notification === 'undefined' || typeof Notification.requestPermission !== 'function') {
+      browserNotificationPermission.value = 'unsupported'
+      return browserNotificationPermission.value
+    }
+    if (browserNotificationRequestPromise) {
+      return browserNotificationRequestPromise
+    }
+    browserNotificationRequestPromise = Promise.resolve(Notification.requestPermission())
+      .then((permission) => {
+        browserNotificationPermission.value = String(permission || getBrowserNotificationPermission())
+        return browserNotificationPermission.value
+      })
+      .catch(() => {
+        browserNotificationPermission.value = getBrowserNotificationPermission()
+        return browserNotificationPermission.value
+      })
+      .finally(() => {
+        browserNotificationRequestPromise = null
+      })
+    return browserNotificationRequestPromise
+  }
+
+  function formatBrowserNotificationBody(totals) {
+    const unread = Math.max(0, Number(totals.unread || 0))
+    const mentions = Math.max(0, Number(totals.mentions || 0))
+    if (mentions > 0) {
+      return t('notifications.browser.bodyWithMentions', { unread, mentions })
+    }
+    return t('notifications.browser.bodyNoMentions', { unread })
+  }
+
+  function showBrowserUnreadNotification(totals) {
+    browserNotificationPermission.value = getBrowserNotificationPermission()
+    if (browserNotificationPermission.value !== 'granted' || typeof Notification === 'undefined') {
+      return
+    }
+    const now = Date.now()
+    if (now - lastBrowserNotificationAt < 2000) {
+      return
+    }
+    lastBrowserNotificationAt = now
+    const notification = new Notification(t('notifications.browser.title'), {
+      body: formatBrowserNotificationBody(totals),
+      icon: '/icons/Meshcorium3.png',
+      badge: '/icons/bell-icon.svg',
+      tag: 'meshcorium-unread',
+      renotify: true,
+      silent: true,
+    })
+    notification.onclick = () => {
+      try {
+        window.focus()
+      } catch {
+        // Browser focus can be denied; notification delivery should not fail.
+      }
+      notification.close()
+    }
+  }
+
+  function maybeShowUnreadBrowserNotification(previousSummary = {}, nextSummary = {}) {
+    if (!connected.value) {
+      browserUnreadSummaryPrimed = true
+      return
+    }
+    const previousTotals = buildBrowserUnreadTotals(previousSummary)
+    const nextTotals = buildBrowserUnreadTotals(nextSummary)
+    if (!browserUnreadSummaryPrimed) {
+      browserUnreadSummaryPrimed = true
+      return
+    }
+    const increased = (
+      nextTotals.regular > previousTotals.regular
+      || nextTotals.direct > previousTotals.direct
+      || nextTotals.mentions > previousTotals.mentions
+    )
+    if (!increased || nextTotals.badge <= 0) {
+      return
+    }
+    showBrowserUnreadNotification(nextTotals)
+  }
+
   function maybePlayUnreadSummarySound(previousSummary = {}, nextSummary = {}) {
     if (!connected.value) {
       unreadSummaryPrimed.value = true
@@ -519,6 +632,7 @@ export const useSessionStore = defineStore('session', () => {
   function applyUnreadSummary(data = {}) {
     const nextSummary = buildUnreadSummary(data)
     maybePlayUnreadSummarySound(unreadSummary.value, nextSummary)
+    maybeShowUnreadBrowserNotification(unreadSummary.value, nextSummary)
     unreadSummary.value = nextSummary
   }
 
@@ -534,6 +648,7 @@ export const useSessionStore = defineStore('session', () => {
   function clearUnreadSummary() {
     unreadSummary.value = buildUnreadSummary()
     unreadSummaryPrimed.value = false
+    browserUnreadSummaryPrimed = false
   }
 
   async function api(path, options = {}) {
@@ -1287,6 +1402,9 @@ export const useSessionStore = defineStore('session', () => {
     messagesHydrating,
     radioTxObservedAt,
     unreadSummary,
+    browserNotificationPermission,
+    browserUnreadTotals,
+    browserUnreadBadgeCount,
     connected,
     device,
     self,
@@ -1314,6 +1432,7 @@ export const useSessionStore = defineStore('session', () => {
     setMessagesHydrating,
     noteRadioTransmission,
     clearRadioTransmission,
+    requestBrowserNotificationPermission,
     applyUnreadSummary,
     patchUnreadSummary,
     clearUnreadSummary,

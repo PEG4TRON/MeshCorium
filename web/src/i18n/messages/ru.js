@@ -976,6 +976,11 @@ export default {
       summaryNoMentions: 'Найдено {chats} чат(ов) с {unread} непрочитанными сообщениями.',
       summaryWithMentions: 'Найдено {chats} чат(ов) с {unread} непрочитанными сообщениями. Упоминаний: {mentions}.',
     },
+    browser: {
+      title: 'Новые уведомления MeshCorium',
+      bodyNoMentions: 'Непрочитанных сообщений: {unread}.',
+      bodyWithMentions: 'Непрочитанных сообщений: {unread}. Упоминаний: {mentions}.',
+    },
     sound: {
       on: 'Звуки уведомлений включены',
       off: 'Звуки уведомлений выключены',
