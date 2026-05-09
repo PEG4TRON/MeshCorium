@@ -12,7 +12,7 @@ MeshCorium is a self-hosted MeshCore client with a hybrid contact system and a l
 
 ## Preview
 
-[![Watch the MeshCorium video overview](https://img.youtube.com/vi/m--5rg7x7uU/hqdefault.jpg)](https://youtu.be/m--5rg7x7uU)
+[Демонстрация работы meshcorium](https://youtu.be/m--5rg7x7uU)
 
 ![MeshCorium screenshot](./SCREENSHOT.png)
 
