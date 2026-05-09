@@ -8,13 +8,19 @@ Basic project overview:
 
 MeshCorium is a self-hosted MeshCore client with a hybrid contact system and a local web interface for working with a MeshCore node through companion firmware.
 
-`MeshCorium v0.6.0 -- Docker + USB + BLE` ships the Docker Compose packaging variant, permanent USB serial transport, and BLE node connection through Linux / BlueZ.
+`MeshCorium v0.6.1 -- Docker + USB + BLE` ships the Docker Compose packaging variant, permanent USB serial transport, BLE node connection through Linux / BlueZ, and browser-side unread notifications.
 
 ## Release Status
 
-The latest published release is `MeshCorium v0.6.0 -- Docker + USB + BLE`.
+The latest published release is `MeshCorium v0.6.1 -- Docker + USB + BLE`.
 
-Key `v0.6.0` differences relative to `v0.5.3 -- Docker + USB`:
+Key `v0.6.1` differences relative to `v0.6.0`:
+
+- Browser notifications now fire on unread growth across all unread types after mute and owner-scope filtering.
+- The browser tab title now shows a combined unread badge while unread messages are pending.
+- Docker release metadata was bumped to `v0.6.1`, and the Docker bundle still builds the current frontend/backend version from the release tree.
+
+Core `v0.6.x` differences relative to `v0.5.3 -- Docker + USB`:
 
 - BLE node connection is now available next to USB serial through a Linux / BlueZ transport adapter.
 - USB serial remains permanent and is not being removed.

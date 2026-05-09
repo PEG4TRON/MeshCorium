@@ -4,6 +4,21 @@
 
 No unreleased changes yet.
 
+## v0.6.1
+
+Release `MeshCorium v0.6.1 -- Docker + USB + BLE` is based on `v0.6.0` and keeps the same runtime variants while adding browser-side unread notifications and unread badge propagation into the tab title.
+
+### Notifications and browser UX
+
+- Browser notifications are now emitted for unread growth across all unread types after the current owner-scope and mute filters are applied.
+- The browser tab title now receives a combined unread badge so MeshCorium remains visible even when the tab is in the background.
+- Notification permission is requested from a real user gesture inside the shell so browser delivery works without breaking initial page load.
+
+### Docker and runtime
+
+- Docker release metadata now uses `v0.6.1` labels.
+- The release Docker bundle continues to build the frontend inside Docker build and includes the current backend/frontend code used by the ordinary launcher runtime.
+
 ## v0.6.0
 
 Release `MeshCorium v0.6.0 -- Docker + USB + BLE` promotes the post-`v0.5.3` development work into a release. The key difference from `v0.5.3 -- Docker + USB` is that BLE is now shipped as an available node connection path alongside the permanent USB serial transport, while Docker remains part of the ordinary release bundle.
