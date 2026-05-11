@@ -15,14 +15,13 @@ Development workspace note:
 
 - experimental `Wi-Fi / TCP` integration is currently in progress;
 - the active development code already includes backend TCP transport plumbing and a manual `host:port` connect flow;
-- test `Wi-Fi / LAN` functionality has been added to the `dev` branch for evaluation and integration work;
 - this is not yet release-validated and should not be treated as part of the published `v0.6.1` release profile.
 
 `MeshCorium v0.6.1 -- Docker + USB + BLE` release status:
 
 - `USB serial` — permanent and validated connection path, not being removed from the project
 - `BLE` — additional companion-node connection path through Linux / BlueZ, available alongside USB serial
-- `Wi-Fi / LAN` — test `TCP host:port` transport is available in `dev`, but it is still experimental and not release-validated
+- `Wi-Fi` — UI placeholder only, real transport not implemented yet
 - `Docker Compose` — deployment variant kept alongside the ordinary launcher/systemd flow
 
 BLE is implemented through a dedicated transport adapter and is available in the connection UI. It is still a new connection path whose behavior depends on the Linux host, BlueZ, and the specific BLE adapter.

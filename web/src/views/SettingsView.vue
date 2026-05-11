@@ -6767,6 +6767,30 @@ onBeforeUnmount(() => {
             </p>
           </div>
         </section>
+
+        <section class="mc-settings-panel">
+          <div class="mc-settings-panel-copy">
+            <h3>{{ t('settings.about.acknowledgements.title') }}</h3>
+          </div>
+
+          <div class="mc-settings-about-list">
+            <p class="mc-settings-about-item">
+              <a
+                class="mc-settings-inline-link"
+                href="https://github.com/Trahomich"
+                target="_blank"
+                rel="noreferrer noopener"
+              >
+                Trahomich
+              </a>
+              <span> — {{ t('settings.about.acknowledgements.trahomich') }}</span>
+            </p>
+            <p class="mc-settings-about-item">
+              <strong>Дрэгон</strong>
+              <span> — {{ t('settings.about.acknowledgements.dragon') }}</span>
+            </p>
+          </div>
+        </section>
       </template>
       </div>
     </template>

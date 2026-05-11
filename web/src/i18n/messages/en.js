@@ -1929,6 +1929,11 @@ export default {
       versionLabel: 'Version',
       referencesTitle: 'Dependencies and upstream',
       referencesSubtitle: 'Links to the libraries, tooling, and upstream git repositories used by the project.',
+      acknowledgements: {
+        title: 'Project contribution acknowledgements',
+        trahomich: 'Acknowledgement for the contribution to Wi-Fi transport implementation.',
+        dragon: 'Acknowledgement for participation in the project',
+      },
       actions: {
         docs: 'Docs',
         git: 'Git',

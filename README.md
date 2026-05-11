@@ -14,7 +14,6 @@ Current development workspace note:
 
 - experimental Wi-Fi / TCP transport integration is in progress;
 - the active dev code now includes a manual `host:port` Wi-Fi connect path and backend TCP transport plumbing;
-- test `Wi-Fi / LAN` functionality has been added to the `dev` branch for evaluation and integration work;
 - this work is not yet release-validated and is not part of the published `v0.6.1` release notes.
 
 ## Preview

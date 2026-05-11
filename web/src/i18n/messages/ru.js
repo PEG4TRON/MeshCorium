@@ -1929,6 +1929,11 @@ export default {
       versionLabel: 'Версия',
       referencesTitle: 'Зависимости и upstream',
       referencesSubtitle: 'Ссылки на библиотеки, тулчейн и upstream git-репозитории проекта.',
+      acknowledgements: {
+        title: 'Благодарности за вклад в проект',
+        trahomich: 'Благодарность за вклад в реализацию WIFI транспорта.',
+        dragon: 'Благодарность за участие в проекте',
+      },
       actions: {
         docs: 'Docs',
         git: 'Git',
