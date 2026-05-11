@@ -146,19 +146,11 @@ function normalizeMutedConversationsMap(value) {
 }
 
 function getOwnerPort() {
-  return String(session.selectedPort || '')
+  return String(session.activeConnectionPort || '')
 }
 
 function buildOwnerEventStreamKey() {
-  const port = getOwnerPort()
-  if (!port) {
-    return ''
-  }
-  return [
-    port,
-    String(session.selectedBaudrate || session.DEFAULT_BAUDRATE),
-    String(session.DEFAULT_TIMEOUT),
-  ].join('|')
+  return String(session.activeConnectionKey || '')
 }
 
 const activeShellPanel = computed(() => {
@@ -510,11 +502,11 @@ async function refreshShellState({ includePorts = false, suppressStatus = false 
   refreshing.value = true
   try {
     await session.loadClientSettings()
-    let syncedPort = ''
+    let syncedConnectionKey = ''
     if (!isMessagesRoute.value) {
       const previousSnapshot = session.sessionSnapshot ? { ...session.sessionSnapshot } : { active: false }
       const wasConnected = Boolean(previousSnapshot?.active)
-      syncedPort = String(session.selectedPort || '')
+      syncedConnectionKey = String(session.activeConnectionKey || '')
       let snapshot = await session.syncSessionState({ light: true })
       if (wasConnected && !snapshot?.active) {
         session.applySessionSnapshot(previousSnapshot)
@@ -530,8 +522,8 @@ async function refreshShellState({ includePorts = false, suppressStatus = false 
     }
     await Promise.all(backgroundTasks)
     if (!isMessagesRoute.value) {
-      const currentPort = String(session.selectedPort || '')
-      if (currentPort && currentPort !== syncedPort) {
+      const currentConnectionKey = String(session.activeConnectionKey || '')
+      if (currentConnectionKey && currentConnectionKey !== syncedConnectionKey) {
         await session.syncSessionState({ light: true })
       }
     }
@@ -868,7 +860,7 @@ async function sendAdvert(flood = false) {
     await session.api('/api/advert', {
       method: 'POST',
       body: JSON.stringify({
-        ...session.configBody(),
+        ...session.activeConfigBody(),
         flood: Boolean(flood),
       }),
     })
@@ -1275,11 +1267,7 @@ function startConsoleListening() {
     return
   }
   stopConsoleListening()
-  const query = new URLSearchParams({
-    port: getOwnerPort(),
-    baudrate: String(session.selectedBaudrate || session.DEFAULT_BAUDRATE),
-    timeout: String(session.DEFAULT_TIMEOUT),
-  })
+  const query = session.activeEventStreamQuery() || new URLSearchParams()
   const source = new EventSource(`/api/events?${query.toString()}`)
   consoleEventSource.value = source
   consoleEventSourceKey = eventStreamKey
@@ -1313,11 +1301,7 @@ function startNotificationListening() {
     return
   }
   stopNotificationListening()
-  const query = new URLSearchParams({
-    port: getOwnerPort(),
-    baudrate: String(session.selectedBaudrate || session.DEFAULT_BAUDRATE),
-    timeout: String(session.DEFAULT_TIMEOUT),
-  })
+  const query = session.activeEventStreamQuery() || new URLSearchParams()
   const source = new EventSource(`/api/events?${query.toString()}`)
   notificationEventSource.value = source
   notificationEventSourceKey = eventStreamKey
@@ -1372,7 +1356,7 @@ async function setAllMessagesReadState(scope = 'regular') {
   const data = await session.api('/api/messages/read-state', {
     method: 'POST',
     body: JSON.stringify({
-      port: getOwnerPort(),
+      ...session.activeConfigBody(),
       is_read: true,
       scope: normalizedScope,
       mention_name: mentionName,
@@ -1499,8 +1483,8 @@ watch(() => [phonebarTick.value, session.connected, session.stopState?.reconnect
   }
 })
 
-watch(() => [session.selectedPort, session.self?.name], async ([nextPort]) => {
-  if (!nextPort) {
+watch(() => [session.activeConnectionKey, session.self?.name], async ([nextConnectionKey]) => {
+  if (!nextConnectionKey) {
     session.clearUnreadSummary()
     return
   }
@@ -1523,9 +1507,9 @@ watch(notificationsOpen, async (open) => {
 })
 
 watch(
-  () => [consoleOpen.value, session.connected, session.selectedPort, session.selectedBaudrate],
-  ([open, connected, selectedPort]) => {
-    if (open && connected && String(selectedPort || '').trim()) {
+  () => [consoleOpen.value, session.connected, session.activeConnectionKey],
+  ([open, connected, activeConnectionKey]) => {
+    if (open && connected && String(activeConnectionKey || '').trim()) {
       startConsoleListening()
       return
     }
@@ -1535,9 +1519,9 @@ watch(
 )
 
 watch(
-  () => [isMessagesRoute.value, session.connected, session.selectedPort, session.selectedBaudrate],
-  ([messagesRoute, connected, selectedPort]) => {
-    if (messagesRoute || !connected || !String(selectedPort || '').trim()) {
+  () => [isMessagesRoute.value, session.connected, session.activeConnectionKey],
+  ([messagesRoute, connected, activeConnectionKey]) => {
+    if (messagesRoute || !connected || !String(activeConnectionKey || '').trim()) {
       stopNotificationListening()
       return
     }

@@ -862,7 +862,7 @@ function escapeHtml(text) {
 }
 
 function getOwnerPort() {
-  return String(session.selectedPort || '')
+  return String(session.activeConnectionPort || '')
 }
 
 function applyConnectedStatusFromSnapshot(snapshot = session.sessionSnapshot) {
@@ -3116,7 +3116,7 @@ async function saveChannelEditor() {
     const data = await session.api('/api/channels/save', {
       method: 'POST',
       body: JSON.stringify({
-        ...session.configBody(),
+        ...session.activeConfigBody(),
         channel_idx: channelEditorForm.value.channelIdx,
         channel_name: resolvedName,
         channel_secret_hex: channelEditorForm.value.type === 'private' ? normalizedPsk : null,
@@ -3170,7 +3170,7 @@ function requestDeleteChannelEditor() {
         const data = await session.api('/api/channels/delete', {
           method: 'POST',
           body: JSON.stringify({
-            ...session.configBody(),
+            ...session.activeConfigBody(),
             channel_idx: channelIdx,
           }),
         })
@@ -3601,7 +3601,7 @@ async function toggleDirectRouteFromContextMenu() {
     const data = await session.api('/api/contacts/reset-path', {
       method: 'POST',
       body: JSON.stringify({
-        ...session.configBody(),
+        ...session.activeConfigBody(),
         public_key: contact.public_key,
       }),
     })
@@ -3631,7 +3631,7 @@ async function toggleDirectRouteFromContextMenu() {
   const data = await session.api('/api/contacts/set-path', {
     method: 'POST',
     body: JSON.stringify({
-      ...session.configBody(),
+      ...session.activeConfigBody(),
       public_key: contact.public_key,
       ...payload,
     }),
@@ -3745,7 +3745,7 @@ async function sendMessageText(text, options = {}) {
       const data = await session.api('/api/messages/channel/send', {
         method: 'POST',
         body: JSON.stringify({
-          ...session.configBody(),
+          ...session.activeConfigBody(),
           channel_idx: Number(selectedChannelIdx.value),
           text: normalizedText,
         }),
@@ -3773,7 +3773,7 @@ async function sendMessageText(text, options = {}) {
       const data = await session.api('/api/messages/contact/send', {
         method: 'POST',
         body: JSON.stringify({
-          ...session.configBody(),
+          ...session.activeConfigBody(),
           public_key: String(selectedContactKey.value),
           text: normalizedText,
         }),
@@ -3975,7 +3975,7 @@ async function confirmClearMessages() {
     action: async () => {
       await session.api('/api/messages/clear', {
         method: 'POST',
-        body: JSON.stringify({ port: getOwnerPort() }),
+        body: JSON.stringify(session.activeConfigBody()),
       })
       messages.value = []
       activeConversationTotalMessages.value = 0
@@ -4049,7 +4049,7 @@ async function setAllMessagesReadState(scope = 'regular') {
   const data = await session.api('/api/messages/read-state', {
     method: 'POST',
     body: JSON.stringify({
-      port: getOwnerPort(),
+      ...session.activeConfigBody(),
       is_read: true,
       scope: normalizedScope,
       mention_name: mentionName,
@@ -4392,19 +4392,13 @@ function startListening() {
     return
   }
   const nextEventSourceKey = [
-    getOwnerPort(),
-    String(session.selectedBaudrate || session.DEFAULT_BAUDRATE),
-    String(session.DEFAULT_TIMEOUT),
+    String(session.activeConnectionKey || ''),
   ].join('|')
   if (eventSource.value && eventSourceKey === nextEventSourceKey) {
     return
   }
   stopListening()
-  const query = new URLSearchParams({
-    port: getOwnerPort(),
-    baudrate: String(session.selectedBaudrate || session.DEFAULT_BAUDRATE),
-    timeout: String(session.DEFAULT_TIMEOUT),
-  })
+  const query = session.activeEventStreamQuery() || new URLSearchParams()
   const source = new EventSource(`/api/events?${query.toString()}`)
   eventSource.value = source
   eventSourceKey = nextEventSourceKey
@@ -4820,12 +4814,12 @@ watch(
   () => [
     route.name,
     session.connected,
-    session.selectedPort,
+    session.activeConnectionKey,
     accessAllMeshcoriumMessages.value,
     session.selfName,
   ],
-  async ([routeName, connected, selectedPort]) => {
-    if (routeName !== 'messages' || !connected || !String(selectedPort || '').trim()) {
+  async ([routeName, connected, activeConnectionKey]) => {
+    if (routeName !== 'messages' || !connected || !String(activeConnectionKey || '').trim()) {
       return
     }
     await loadConversationDirectory()

@@ -102,6 +102,21 @@ function normalizeConnectionDescriptor(source = {}, fallback = {}) {
   }
 }
 
+function buildConnectionKey(source = {}, fallback = {}) {
+  const connection = normalizeConnectionDescriptor(source, fallback)
+  if (!connection.transport_id) {
+    return ''
+  }
+  const parts = [
+    String(connection.transport_type || 'serial').trim().toLowerCase() || 'serial',
+    connection.transport_id,
+  ]
+  if (parts[0] === 'serial') {
+    parts.push(String(normalizeBaudrate(connection.baudrate, DEFAULT_BAUDRATE)))
+  }
+  return parts.join('::')
+}
+
 function normalizePublicKeyPrefix(value) {
   return String(value || '').trim().toLowerCase().slice(0, 12)
 }
@@ -1182,8 +1197,64 @@ export const useSessionStore = defineStore('session', () => {
     }
   }
 
+  function buildConnectionBody(connectionSource, extra = {}) {
+    const connection = normalizeConnectionDescriptor(connectionSource)
+    const port = normalizePort(connection.port || connection.transport_id)
+    const baudrate = connection.transport_type === 'serial'
+      ? normalizeBaudrate(connection.baudrate, DEFAULT_BAUDRATE)
+      : 0
+    return {
+      connection,
+      transport_type: connection.transport_type,
+      transport_id: connection.transport_id,
+      port,
+      baudrate,
+      timeout: Number(connection.timeout || DEFAULT_TIMEOUT) || DEFAULT_TIMEOUT,
+      ...extra,
+    }
+  }
+
+  function resolveRequestConnection() {
+    if (connected.value && activeSessionConnection.value?.transport_id) {
+      return activeSessionConnection.value
+    }
+    return selectedConnection.value
+  }
+
+  function activeConfigBody(extra = {}) {
+    return buildConnectionBody(resolveRequestConnection(), extra)
+  }
+
+  function buildEventStreamQueryFromConnection(connectionSource, extra = {}) {
+    const connection = normalizeConnectionDescriptor(connectionSource)
+    const port = normalizePort(connection.port || connection.transport_id)
+    if (!port) {
+      return null
+    }
+    const query = new URLSearchParams({
+      port,
+      baudrate: String(
+        connection.transport_type === 'serial'
+          ? normalizeBaudrate(connection.baudrate, DEFAULT_BAUDRATE)
+          : 0
+      ),
+      timeout: String(Number(connection.timeout || DEFAULT_TIMEOUT) || DEFAULT_TIMEOUT),
+    })
+    for (const [key, value] of Object.entries(extra || {})) {
+      if (value == null) {
+        continue
+      }
+      query.set(String(key), String(value))
+    }
+    return query
+  }
+
+  function activeEventStreamQuery(extra = {}) {
+    return buildEventStreamQueryFromConnection(resolveRequestConnection(), extra)
+  }
+
   async function syncSessionState({ light = true } = {}) {
-    const connection = selectedConnection.value
+    const connection = resolveRequestConnection()
     const port = normalizePort(connection.port || connection.transport_id)
     if (!port) {
       sessionSnapshot.value = { active: false }
@@ -1224,7 +1295,7 @@ export const useSessionStore = defineStore('session', () => {
     }
     const data = await api('/api/channels', {
       method: 'POST',
-      body: JSON.stringify(configBody()),
+      body: JSON.stringify(activeConfigBody()),
     })
     const nextChannels = sanitizeObjectArray(data?.channels)
     patchSessionSnapshotFields({
@@ -1248,7 +1319,7 @@ export const useSessionStore = defineStore('session', () => {
       try {
         const data = await api('/api/contacts', {
           method: 'POST',
-          body: JSON.stringify(configBody({ refresh })),
+          body: JSON.stringify(activeConfigBody({ refresh })),
         })
         const nextContacts = sanitizeObjectArray(data?.contacts)
         patchSessionSnapshotFields({
@@ -1273,7 +1344,7 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   async function loadUnreadSummary({ port = '', mentionName = '' } = {}) {
-    const connection = selectedConnection.value
+    const connection = resolveRequestConnection()
     const resolvedPort = normalizePort(port || connection.port || connection.transport_id)
     if (!resolvedPort || !connected.value) {
       clearUnreadSummary()
@@ -1282,6 +1353,8 @@ export const useSessionStore = defineStore('session', () => {
     const data = await api('/api/messages/unread', {
       method: 'POST',
       body: JSON.stringify({
+        transport_type: connection.transport_type,
+        transport_id: connection.transport_id,
         port: resolvedPort,
         mention_name: String(mentionName || self.value?.name || ''),
         include_entries: true,
@@ -1343,14 +1416,14 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   async function disconnectNode() {
-    const connection = selectedConnection.value
+    const connection = resolveRequestConnection()
     const port = normalizePort(connection.port || connection.transport_id)
     if (!port) {
       return
     }
     await api('/api/disconnect', {
       method: 'POST',
-      body: JSON.stringify(configBody()),
+      body: JSON.stringify(activeConfigBody()),
     })
     patchSessionSnapshotFields({ active: false, queue_state: null, stop_state: null })
     clearUnreadSummary()
@@ -1391,6 +1464,10 @@ export const useSessionStore = defineStore('session', () => {
   const notificationSoundEnabled = computed(() => Boolean(settingsPayload.value?.settings?.notifications_sound_enabled))
   const batteryProfilesByNodeId = computed(() => normalizeBatteryProfileMap(settingsPayload.value?.settings?.battery_profile_by_node_id))
   const currentNodeBatteryProfile = computed(() => batteryProfileForNode(settingsPayload.value?.settings, selfPublicKey.value))
+  const sessionSnapshotConnection = computed(() => {
+    const connection = normalizeConnectionDescriptor(sessionSnapshot.value?.connection || sessionSnapshot.value || {})
+    return connection.transport_id ? connection : null
+  })
   const selectedConnection = computed(() => {
     const rawTransportType = String(selectedTransportType.value || 'serial').trim().toLowerCase()
     const transportType = ['serial', 'ble', 'wifi'].includes(rawTransportType) ? rawTransportType : 'serial'
@@ -1442,6 +1519,42 @@ export const useSessionStore = defineStore('session', () => {
       && (selectedConnection.value.transport_type !== 'serial' || Number(item?.baudrate || 0) === Number(selectedBaudrate.value || DEFAULT_BAUDRATE))
     )) || null
   })
+  const activeSessionConnection = computed(() => {
+    const activeSessionEntries = Array.isArray(activeSessions.value) ? activeSessions.value : []
+    const snapshotConnection = sessionSnapshotConnection.value
+    const selected = selectedConnection.value
+    const findByKey = (connectionSource) => {
+      const key = buildConnectionKey(connectionSource)
+      if (!key) {
+        return null
+      }
+      return activeSessionEntries.find((entry) => buildConnectionKey(entry) === key) || null
+    }
+    if (connected.value) {
+      const snapshotMatch = snapshotConnection ? findByKey(snapshotConnection) : null
+      if (snapshotMatch) {
+        return normalizeConnectionDescriptor(snapshotMatch, snapshotConnection)
+      }
+      if (snapshotConnection?.transport_id) {
+        return snapshotConnection
+      }
+      const selectedMatch = findByKey(selected)
+      if (selectedMatch) {
+        return normalizeConnectionDescriptor(selectedMatch, selected)
+      }
+      if (activeSessionEntries.length) {
+        return normalizeConnectionDescriptor(activeSessionEntries[0])
+      }
+    }
+    return normalizeConnectionDescriptor(selected)
+  })
+  const activeConnectionKey = computed(() => buildConnectionKey(activeSessionConnection.value))
+  const activeConnectionPort = computed(() => normalizePort(activeSessionConnection.value?.port || activeSessionConnection.value?.transport_id))
+  const activeConnectionBaudrate = computed(() => (
+    String(activeSessionConnection.value?.transport_type || 'serial').trim().toLowerCase() === 'serial'
+      ? normalizeBaudrate(activeSessionConnection.value?.baudrate, DEFAULT_BAUDRATE)
+      : 0
+  ))
   const transientDisconnectSuppressed = computed(() => Number(transientDisconnectSuppressedUntil.value || 0) > Date.now())
 
   return {
@@ -1498,7 +1611,12 @@ export const useSessionStore = defineStore('session', () => {
     notificationSoundEnabled,
     batteryProfilesByNodeId,
     currentNodeBatteryProfile,
+    sessionSnapshotConnection,
     selectedSavedConnection,
+    activeSessionConnection,
+    activeConnectionKey,
+    activeConnectionPort,
+    activeConnectionBaudrate,
     setStatus,
     showConnectNotice,
     clearConnectNotice,
@@ -1526,6 +1644,8 @@ export const useSessionStore = defineStore('session', () => {
     refreshBleConnections,
     unpairBleDevice,
     configBody,
+    activeConfigBody,
+    activeEventStreamQuery,
     syncSessionState,
     loadChannels,
     loadContacts,

@@ -1561,7 +1561,7 @@ async function applySelfLocation(scope = 'local', coordsOverride = null) {
   const payload = await session.api('/api/node/self-location', {
     method: 'POST',
     body: JSON.stringify({
-      ...session.configBody(),
+      ...session.activeConfigBody(),
       scope: String(scope || 'local'),
       lat: Number(coords.lat.toFixed(6)),
       lon: Number(coords.lon.toFixed(6)),
@@ -1810,11 +1810,7 @@ function ensureTraceEventStream() {
   if (traceEventSource || !session.connected) {
     return
   }
-  const query = new URLSearchParams({
-    port: String(session.selectedPort || ''),
-    baudrate: String(session.selectedBaudrate || session.DEFAULT_BAUDRATE),
-    timeout: String(session.DEFAULT_TIMEOUT),
-  })
+  const query = session.activeEventStreamQuery() || new URLSearchParams()
   const source = new EventSource(`/api/events?${query.toString()}`)
   traceEventSource = source
   source.onmessage = (event) => {
@@ -1852,7 +1848,7 @@ async function startRouteTrace() {
     const payload = await session.api('/api/contacts/trace-route/start', {
       method: 'POST',
       body: JSON.stringify({
-        ...session.configBody(),
+        ...session.activeConfigBody(),
         selected_public_keys: traceSelectedKeys.value.slice(),
         route_path_hash_len: Number(traceHashLen.value || 2) || 2,
         sequential: Boolean(traceSequential.value),
@@ -1879,7 +1875,7 @@ async function cancelRouteTrace(reason = 'cancelled') {
     await session.api('/api/contacts/trace-route/cancel', {
       method: 'POST',
       body: JSON.stringify({
-        ...session.configBody(),
+        ...session.activeConfigBody(),
         job_id: traceJobId.value,
         reason,
       }),

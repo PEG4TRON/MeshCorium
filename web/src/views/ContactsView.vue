@@ -2271,7 +2271,7 @@ async function ensureGroupsLoaded() {
   groupsLoading.value = true
   try {
     const params = new URLSearchParams()
-    const config = session.configBody()
+    const config = session.activeConfigBody()
     if (config.port) {
       params.set('port', String(config.port))
       params.set('baudrate', String(config.baudrate))
@@ -2286,7 +2286,7 @@ async function ensureGroupsLoaded() {
 }
 
 function getCurrentContactGroupScopeRequest() {
-  const config = session.configBody()
+  const config = session.activeConfigBody()
   return {
     port: String(config.port || ''),
     baudrate: Number(config.baudrate || 115200),
@@ -2518,7 +2518,7 @@ async function importContactFromClipboard() {
     await session.api('/api/contacts/import', {
       method: 'POST',
       body: JSON.stringify({
-        ...session.configBody(),
+        ...session.activeConfigBody(),
         uri,
       }),
     })
@@ -2538,7 +2538,7 @@ async function exportSelfAdvert() {
   try {
     const payload = await session.api('/api/contacts/export-self', {
       method: 'POST',
-      body: JSON.stringify(session.configBody()),
+      body: JSON.stringify(session.activeConfigBody()),
     })
     const uri = String(payload?.uri || '').trim()
     if (!uri) {
@@ -2766,7 +2766,7 @@ async function runSelectedContactAction(path, body, successMessage) {
   const data = await session.api(path, {
     method: 'POST',
     body: JSON.stringify({
-      ...session.configBody(),
+      ...session.activeConfigBody(),
       public_key: selectedContact.value.public_key,
       ...(body || {}),
     }),
@@ -2785,7 +2785,7 @@ async function deleteNodeContacts(mode = 'non-favorites-no-direct') {
   const data = await session.api('/api/contacts/delete', {
     method: 'POST',
     body: JSON.stringify({
-      ...session.configBody(),
+      ...session.activeConfigBody(),
       mode,
       protect_favorites: true,
     }),
@@ -2892,7 +2892,7 @@ async function saveGroupEditorSelection() {
   groupEditorBusy.value = true
   try {
     if (selectedGroupIsFavorites.value) {
-      const config = session.configBody()
+      const config = session.activeConfigBody()
       if (!session.connected || !config.port) {
         throw new Error(t('contactsView.status.groupFavoritesRequiresConnection'))
       }
@@ -3006,7 +3006,7 @@ async function submitRepeaterLogin() {
     session.setStatus(t('contactsView.status.repeaterTargetMissing'), true)
     return
   }
-  const config = session.configBody()
+  const config = session.activeConfigBody()
   if (!config.port) {
     session.setStatus(t('contactsView.status.repeaterSerialRequired'), true)
     return
@@ -3150,7 +3150,7 @@ async function deleteSelectedRepeaterAuth() {
   const payload = await session.api('/api/repeater/auth/delete', {
     method: 'POST',
     body: JSON.stringify({
-      ...session.configBody(),
+      ...session.activeConfigBody(),
       public_key: contact.public_key,
     }),
   })
@@ -3181,7 +3181,7 @@ async function runRepeaterCliBatch(commands, successMessage, busyKey) {
   if (!contact || !contactCanManageRepeater(contact)) {
     throw new Error(t('contactsView.status.repeaterTargetMissing'))
   }
-  const config = session.configBody()
+  const config = session.activeConfigBody()
   if (!config.port) {
     throw new Error(t('contactsView.status.repeaterSerialRequired'))
   }
@@ -3359,7 +3359,7 @@ async function saveRouteEditor() {
     const data = await session.api('/api/contacts/reset-path', {
       method: 'POST',
       body: JSON.stringify({
-        ...session.configBody(),
+        ...session.activeConfigBody(),
         public_key: contact.public_key,
       }),
     })
@@ -3375,7 +3375,7 @@ async function saveRouteEditor() {
   const data = await session.api('/api/contacts/set-path', {
     method: 'POST',
     body: JSON.stringify({
-      ...session.configBody(),
+      ...session.activeConfigBody(),
       public_key: contact.public_key,
       route_path_len: routeEditorSelection.value.length,
       route_path_hash_len: routeHashLenBytes,
@@ -3394,7 +3394,7 @@ async function resetStoredRouteFromEditor() {
   const data = await session.api('/api/contacts/reset-path', {
     method: 'POST',
     body: JSON.stringify({
-      ...session.configBody(),
+      ...session.activeConfigBody(),
       public_key: contact.public_key,
     }),
   })
@@ -3419,19 +3419,11 @@ function stopContactsEventStream() {
 }
 
 function buildCurrentEventStreamKey() {
-  const port = String(session.selectedPort || '').trim()
-  if (!port) {
-    return ''
-  }
-  return [
-    port,
-    String(session.selectedBaudrate || session.DEFAULT_BAUDRATE),
-    String(session.DEFAULT_TIMEOUT),
-  ].join('|')
+  return String(session.activeConnectionKey || '')
 }
 
 function ensureContactsEventStream() {
-  if (!session.connected || !session.selectedPort) {
+  if (!session.connected || !session.activeConnectionPort) {
     stopContactsEventStream()
     return
   }
@@ -3440,11 +3432,7 @@ function ensureContactsEventStream() {
     return
   }
   stopContactsEventStream()
-  const query = new URLSearchParams({
-    port: String(session.selectedPort || ''),
-    baudrate: String(session.selectedBaudrate || session.DEFAULT_BAUDRATE),
-    timeout: String(session.DEFAULT_TIMEOUT),
-  })
+  const query = session.activeEventStreamQuery() || new URLSearchParams()
   const source = new EventSource(`/api/events?${query.toString()}`)
   contactsEventSource = source
   contactsEventSourceKey = eventStreamKey
@@ -3577,11 +3565,7 @@ function ensureRouteTraceEventStream() {
     return
   }
   stopRouteTraceEventStream()
-  const query = new URLSearchParams({
-    port: String(session.selectedPort || ''),
-    baudrate: String(session.selectedBaudrate || session.DEFAULT_BAUDRATE),
-    timeout: String(session.DEFAULT_TIMEOUT),
-  })
+  const query = session.activeEventStreamQuery() || new URLSearchParams()
   const source = new EventSource(`/api/events?${query.toString()}`)
   routeTraceEventSource = source
   routeTraceEventSourceKey = eventStreamKey
@@ -3642,7 +3626,7 @@ async function startRouteTraceFromEditor() {
     const payload = await session.api('/api/contacts/trace-route/start', {
       method: 'POST',
       body: JSON.stringify({
-        ...session.configBody(),
+        ...session.activeConfigBody(),
         public_key: contact.public_key,
         selected_public_keys: routeEditorSelection.value.slice(),
         route_path_hash_len: routeHashLenBytes,
@@ -3699,7 +3683,7 @@ async function cancelActiveRouteTrace(reason = 'cancelled', options = {}) {
     await session.api('/api/contacts/trace-route/cancel', {
       method: 'POST',
       body: JSON.stringify({
-        ...session.configBody(),
+        ...session.activeConfigBody(),
         job_id: jobId,
         reason,
       }),
@@ -3766,8 +3750,8 @@ watch(
 )
 
 watch(
-  () => [session.selectedPort, session.selectedBaudrate, session.contacts.length, contactsMode.value],
-  ([, , , mode]) => {
+  () => [session.activeConnectionKey, session.contacts.length, contactsMode.value],
+  ([, , mode]) => {
     if (session.connected && (mode === 'root' || mode === 'groups')) {
       ensureGroupsLoaded()
     }
@@ -3775,14 +3759,8 @@ watch(
 )
 
 watch(
-  () => [session.selectedPort, session.selectedBaudrate, session.connected],
-  ([nextPort, nextBaudrate, connected], [prevPort, prevBaudrate, prevConnected] = []) => {
-    const nextKey = connected && String(nextPort || '').trim()
-      ? [String(nextPort || '').trim(), String(nextBaudrate || session.DEFAULT_BAUDRATE), String(session.DEFAULT_TIMEOUT)].join('|')
-      : ''
-    const prevKey = prevConnected && String(prevPort || '').trim()
-      ? [String(prevPort || '').trim(), String(prevBaudrate || session.DEFAULT_BAUDRATE), String(session.DEFAULT_TIMEOUT)].join('|')
-      : ''
+  () => [session.activeConnectionKey, session.connected],
+  ([nextKey, connected], [prevKey, prevConnected] = []) => {
     if (!connected) {
       stopContactsEventStream()
       return

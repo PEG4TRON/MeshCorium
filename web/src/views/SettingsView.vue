@@ -639,10 +639,10 @@ const contactDebugNote = computed(() => {
   if (contactDebugLoading.value) {
     return t('settings.debug.contacts.loading')
   }
-  if (!session.connected || !session.selectedPort) {
+  if (!session.connected || !session.activeConnectionPort) {
     return t('settings.debug.contacts.disconnectedNote')
   }
-  return t('settings.debug.contacts.connectedNote', { port: session.selectedPort })
+  return t('settings.debug.contacts.connectedNote', { port: session.activeConnectionPort })
 })
 
 const contactDebugOutput = computed(() => {
@@ -677,7 +677,7 @@ const messageDebugSummaryCards = computed(() => {
   ]
 })
 
-const nodeCompanionAvailable = computed(() => Boolean(String(session.selectedPort || '').trim()))
+const nodeCompanionAvailable = computed(() => Boolean(String(session.activeConnectionPort || '').trim()))
 const meshcoreParamsAvailable = computed(() => Boolean(session.connected && session.selectedConnection?.transport_id))
 
 const nodeCompanionListenerActive = computed(() => Boolean(nodeCompanionListenerSource.value))
@@ -1151,56 +1151,64 @@ const nodeCompanionConnectionNoteTemplates = computed(() => {
 const nodeCompanionConnectionNote = computed(() => {
   try {
     const templates = nodeCompanionConnectionNoteTemplates.value
-  const selectedPort = String(session.selectedPort || session.resolvedStartupConnection?.port || '').trim()
-  const activeSession = (session.activeSessions || []).find((entry) => String(entry?.port || '') === selectedPort)
-    || session.activeSessions?.[0]
-    || null
-  if (activeSession) {
-    const transportType = String(activeSession.transport_type || 'serial').trim().toLowerCase()
-    const connectionSummary = transportType === 'serial'
-      ? `${activeSession.port || t('common.offline')} @ ${activeSession.baudrate || session.selectedBaudrate || 0}`
-      : (activeSession.transport_id || activeSession.port || t('common.offline'))
-    const queueDrainInProgress = Boolean(activeSession.queue_drain_in_progress)
-    const queueDrainRequested = Boolean(activeSession.queue_drain_requested)
-    const queueOverflowRisk = Boolean(activeSession.queue_last_overflow_risk)
-    const queueDrainMessages = Math.max(0, Number(activeSession.queue_last_drain_message_count || 0))
-    const queueDrainCycles = Math.max(0, Number(activeSession.queue_last_drain_cycles || 0))
-    let queueSuffix = ''
-    if (queueDrainInProgress) {
-      queueSuffix = queueDrainCycles > 0
-        ? interpolateMessageTemplate(
-          templates.queueInProgressWithCycles,
-          { cycles: queueDrainCycles },
-        )
-        : templates.queueInProgress
-    } else if (queueDrainRequested) {
-      queueSuffix = templates.queueRequested
-    } else if (queueOverflowRisk && queueDrainMessages > 0) {
-      queueSuffix = queueDrainCycles > 1
-        ? interpolateMessageTemplate(
-          templates.queueOverflowWithCycles,
-          { total: queueDrainMessages, cycles: queueDrainCycles },
-        )
-        : interpolateMessageTemplate(
-          templates.queueOverflow,
-          { total: queueDrainMessages },
-        )
+    const activeConnectionKey = String(session.activeConnectionKey || '').trim()
+    const activeSession = (session.activeSessions || []).find((entry) => {
+      const transportType = String(entry?.transport_type || 'serial').trim().toLowerCase() || 'serial'
+      const transportId = String(entry?.transport_id || entry?.port || '').trim()
+      const baudrate = transportType === 'serial'
+        ? String(Number(entry?.baudrate || session.DEFAULT_BAUDRATE) || session.DEFAULT_BAUDRATE)
+        : ''
+      const entryKey = transportId
+        ? [transportType, transportId, ...(transportType === 'serial' ? [baudrate] : [])].join('::')
+        : ''
+      return entryKey && entryKey === activeConnectionKey
+    }) || session.activeSessions?.[0] || null
+    if (activeSession) {
+      const transportType = String(activeSession.transport_type || 'serial').trim().toLowerCase()
+      const connectionSummary = transportType === 'serial'
+        ? `${activeSession.port || t('common.offline')} @ ${activeSession.baudrate || session.activeConnectionBaudrate || 0}`
+        : (activeSession.transport_id || activeSession.port || t('common.offline'))
+      const queueDrainInProgress = Boolean(activeSession.queue_drain_in_progress)
+      const queueDrainRequested = Boolean(activeSession.queue_drain_requested)
+      const queueOverflowRisk = Boolean(activeSession.queue_last_overflow_risk)
+      const queueDrainMessages = Math.max(0, Number(activeSession.queue_last_drain_message_count || 0))
+      const queueDrainCycles = Math.max(0, Number(activeSession.queue_last_drain_cycles || 0))
+      let queueSuffix = ''
+      if (queueDrainInProgress) {
+        queueSuffix = queueDrainCycles > 0
+          ? interpolateMessageTemplate(
+            templates.queueInProgressWithCycles,
+            { cycles: queueDrainCycles },
+          )
+          : templates.queueInProgress
+      } else if (queueDrainRequested) {
+        queueSuffix = templates.queueRequested
+      } else if (queueOverflowRisk && queueDrainMessages > 0) {
+        queueSuffix = queueDrainCycles > 1
+          ? interpolateMessageTemplate(
+            templates.queueOverflowWithCycles,
+            { total: queueDrainMessages, cycles: queueDrainCycles },
+          )
+          : interpolateMessageTemplate(
+            templates.queueOverflow,
+            { total: queueDrainMessages },
+          )
+      }
+      return interpolateMessageTemplate(templates.activeSession, {
+        name: activeSession.self_name || activeSession.port || t('common.offline'),
+        connection: connectionSummary,
+        port: activeSession.port || t('common.offline'),
+        baudrate: activeSession.baudrate || session.activeConnectionBaudrate || 0,
+        queueSuffix,
+      })
     }
-    return interpolateMessageTemplate(templates.activeSession, {
-      name: activeSession.self_name || activeSession.port || t('common.offline'),
-      connection: connectionSummary,
-      port: activeSession.port || t('common.offline'),
-      baudrate: activeSession.baudrate || session.selectedBaudrate || 0,
-      queueSuffix,
-    })
-  }
-  if (session.recoveringSessions.length) {
-    const recoveringSession = session.recoveringSessions[0] || {}
-    return interpolateMessageTemplate(templates.recoveringSession, {
-      port: recoveringSession.port || t('common.offline'),
-      attempts: Math.max(0, Number(recoveringSession.reconnect_attempts || 0)),
-    })
-  }
+    if (session.recoveringSessions.length) {
+      const recoveringSession = session.recoveringSessions[0] || {}
+      return interpolateMessageTemplate(templates.recoveringSession, {
+        port: recoveringSession.port || t('common.offline'),
+        attempts: Math.max(0, Number(recoveringSession.reconnect_attempts || 0)),
+      })
+    }
     return templates.default
   } catch {
     return 'Companion service session status is temporarily unavailable.'
@@ -1326,8 +1334,8 @@ const nodeConnectionRenderModel = computed(() => {
 })
 
 function buildNodeCompanionConfig(extra = {}) {
-  const config = session.configBody(extra)
-  const connection = session.selectedConnection
+  const config = session.activeConfigBody(extra)
+  const connection = session.activeSessionConnection || session.selectedConnection
   const transportType = String(connection?.transport_type || config?.transport_type || '').trim().toLowerCase()
   const transportId = String(connection?.transport_id || config?.transport_id || config?.port || '').trim()
   if (!transportId) {
@@ -1816,7 +1824,7 @@ function updateAccessAllMeshcoriumContacts(value) {
       })
       await session.loadContacts({ refresh: false }).catch(() => {})
       await session.loadUnreadSummary({
-        port: String(session.selectedPort || ''),
+        port: String(session.activeConnectionPort || ''),
         mentionName: String(session.selfName || ''),
       }).catch(() => {})
     } catch (error) {
@@ -1828,7 +1836,7 @@ function updateAccessAllMeshcoriumContacts(value) {
 function updateAccessAllMeshcoriumMessages(value) {
   void (async () => {
     const nextValue = Boolean(value)
-    if (!session.connected || !session.selectedPort) {
+    if (!session.connected || !session.activeConnectionPort) {
       session.setStatus(t('settings.nodeCompanion.status.connectionRequired'), true)
       return
     }
@@ -1846,7 +1854,7 @@ function updateAccessAllMeshcoriumMessages(value) {
         })
       }
       await session.loadUnreadSummary({
-        port: String(session.selectedPort || ''),
+        port: String(session.activeConnectionPort || ''),
         mentionName: String(session.selfName || ''),
       }).catch(() => {})
     } catch (error) {
@@ -1858,7 +1866,7 @@ function updateAccessAllMeshcoriumMessages(value) {
 }
 
 function openSyncMeshcoriumChannelsDialog() {
-  if (!session.connected || !session.selectedPort) {
+  if (!session.connected || !session.activeConnectionPort) {
     session.setStatus(t('settings.nodeCompanion.status.connectionRequired'), true)
     return
   }
@@ -1930,15 +1938,11 @@ function startChannelSyncProgress(operation = 'enable') {
     attempts: 0,
     message: '',
   }
-  const port = String(session.selectedPort || '').trim()
+  const port = String(session.activeConnectionPort || '').trim()
   if (!port) {
     return operationId
   }
-  const query = new URLSearchParams({
-    port,
-    baudrate: String(session.selectedBaudrate || 0),
-    timeout: String(session.selectedConnection?.timeout || 4),
-  })
+  const query = session.activeEventStreamQuery() || new URLSearchParams()
   const source = new EventSource(`/api/events?${query.toString()}`)
   channelSyncProgressSource.value = source
   source.onmessage = (event) => {
@@ -1988,7 +1992,7 @@ function finishChannelSyncProgress({ operationId, operation, failed = false } = 
 }
 
 async function syncMeshcoriumChannelsToNode({ mode = 'enable', markAccessAllMessages = false } = {}) {
-  if (!session.connected || !session.selectedPort) {
+  if (!session.connected || !session.activeConnectionPort) {
     session.setStatus(t('settings.nodeCompanion.status.connectionRequired'), true)
     throw new Error(t('settings.nodeCompanion.status.connectionRequired'))
   }
@@ -2001,7 +2005,7 @@ async function syncMeshcoriumChannelsToNode({ mode = 'enable', markAccessAllMess
     const data = await session.api('/api/channels/sync-from-db', {
       method: 'POST',
       body: JSON.stringify({
-        ...session.configBody(),
+        ...session.activeConfigBody(),
         mode: disableMode ? 'disable' : 'enable',
         mark_access_all_messages: Boolean(markAccessAllMessages),
         operation_id: operationId,
@@ -2013,7 +2017,7 @@ async function syncMeshcoriumChannelsToNode({ mode = 'enable', markAccessAllMess
       channels_count: nextChannels.length,
     })
     await session.loadUnreadSummary({
-      port: String(session.selectedPort || ''),
+      port: String(session.activeConnectionPort || ''),
       mentionName: String(session.selfName || ''),
     }).catch(() => {})
     const summary = data?.summary || {}
@@ -2857,8 +2861,8 @@ async function loadSignalMetricsPayload(options = {}) {
         signalMetricsRetentionDays.value * 86400,
       )),
     })
-    if (session.selectedPort) {
-      params.set('port', String(session.selectedPort))
+    if (session.activeConnectionPort) {
+      params.set('port', String(session.activeConnectionPort))
     }
     const data = await session.api(`/api/signal-metrics?${params.toString()}`)
     signalMetricsPayload.value = data || null
@@ -3211,8 +3215,8 @@ async function loadBatteryHistoryPayload(options = {}) {
   }
   try {
     const params = new URLSearchParams()
-    if (session.selectedPort) {
-      params.set('port', String(session.selectedPort))
+    if (session.activeConnectionPort) {
+      params.set('port', String(session.activeConnectionPort))
     }
     if (batteryHistoryUsingCustomRange.value) {
       ensureBatteryHistoryCustomRangeInitialized()
@@ -3294,14 +3298,14 @@ function updateSignalMetricsPollDraft(value) {
 }
 
 async function loadContactDebugPayload() {
-  if (!session.connected || !session.selectedPort) {
+  if (!session.connected || !session.activeConnectionPort) {
     contactDebugPayload.value = null
     return null
   }
   contactDebugLoading.value = true
   try {
     const params = new URLSearchParams({
-      port: String(session.selectedPort || ''),
+      port: String(session.activeConnectionPort || ''),
     })
     const data = await session.api(`/api/contact-debug?${params.toString()}`)
     contactDebugPayload.value = data || null
@@ -3316,7 +3320,7 @@ async function loadContactDebugPayload() {
 }
 
 async function loadMessageDebugSummary() {
-  if (!session.connected || !session.selectedPort) {
+  if (!session.connected || !session.activeConnectionPort) {
     messageDebugSummary.value = null
     return null
   }
@@ -3325,7 +3329,7 @@ async function loadMessageDebugSummary() {
     const data = await session.api('/api/messages/debug-summary', {
       method: 'POST',
       body: JSON.stringify({
-        port: String(session.selectedPort || ''),
+        ...session.activeConfigBody(),
         mention_name: String(session.selfName || ''),
       }),
     })
@@ -3341,7 +3345,7 @@ async function loadMessageDebugSummary() {
 }
 
 async function setAllMessagesReadState(isRead, scope = 'regular') {
-  if (!session.connected || !session.selectedPort) {
+  if (!session.connected || !session.activeConnectionPort) {
     session.setStatus(t('settings.debug.messages.connectionRequired'), true)
     return
   }
@@ -3350,7 +3354,7 @@ async function setAllMessagesReadState(isRead, scope = 'regular') {
   const data = await session.api('/api/messages/read-state', {
     method: 'POST',
     body: JSON.stringify({
-      port: String(session.selectedPort || ''),
+      ...session.activeConfigBody(),
       is_read: Boolean(isRead),
       scope: normalizedScope,
       mention_name: mentionName,
@@ -3358,7 +3362,7 @@ async function setAllMessagesReadState(isRead, scope = 'regular') {
     }),
   })
   await session.loadUnreadSummary({
-    port: String(session.selectedPort || ''),
+    port: String(session.activeConnectionPort || ''),
     mentionName,
   })
   await loadMessageDebugSummary().catch(() => {})
@@ -3435,7 +3439,7 @@ const confirmSheetModel = computed(() => {
 })
 
 function openClearMessageDbDialog() {
-  if (!session.selectedPort) {
+  if (!session.activeConnectionPort) {
     session.setStatus(t('settings.meshcorium.clearMessages.portRequired'), true)
     return
   }
@@ -3478,20 +3482,18 @@ function openClearMessageDbDialog() {
 }
 
 async function clearMessageDatabase() {
-  if (!session.selectedPort) {
+  if (!session.activeConnectionPort) {
     session.setStatus(t('settings.meshcorium.clearMessages.portRequired'), true)
     return
   }
   try {
     const data = await session.api('/api/messages/clear', {
       method: 'POST',
-      body: JSON.stringify({
-        port: String(session.selectedPort || ''),
-      }),
+      body: JSON.stringify(session.activeConfigBody()),
     })
     session.clearUnreadSummary()
     await session.loadUnreadSummary({
-      port: String(session.selectedPort || ''),
+      port: String(session.activeConnectionPort || ''),
       mentionName: String(session.selfName || ''),
     }).catch(() => {})
     session.setStatus(t('settings.meshcorium.clearMessages.cleared', {
@@ -4481,8 +4483,8 @@ watch(
   { immediate: true },
 )
 
-watch(() => [activeSettingsSectionId.value, session.selectedPort], ([sectionId, port], [prevSectionId, prevPort] = []) => {
-  if (sectionId !== 'node' || String(port || '').trim() !== String(prevPort || '').trim()) {
+watch(() => [activeSettingsSectionId.value, session.activeConnectionKey], ([sectionId, activeConnectionKey], [prevSectionId, prevConnectionKey] = []) => {
+  if (sectionId !== 'node' || String(activeConnectionKey || '').trim() !== String(prevConnectionKey || '').trim()) {
     stopNodeCompanionListener({ silent: true })
   }
   if (String(sectionId || '').trim() !== 'debug' && String(prevSectionId || '').trim() === 'debug') {
@@ -4602,7 +4604,7 @@ onMounted(async () => {
 })
 
 watch(
-  () => [activeSettingsSectionId.value, activeDebugSectionId.value, session.selectedPort, session.connected],
+  () => [activeSettingsSectionId.value, activeDebugSectionId.value, session.activeConnectionKey, session.connected],
   async ([sectionId, debugSectionId]) => {
     if (sectionId !== 'debug') {
       return
@@ -4617,7 +4619,7 @@ watch(
 )
 
 watch(
-  () => [activeSettingsSectionId.value, activeNodeCompanionSectionId.value, session.selectedPort, visibility.value, signalMetricsPollSeconds.value],
+  () => [activeSettingsSectionId.value, activeNodeCompanionSectionId.value, session.activeConnectionKey, visibility.value, signalMetricsPollSeconds.value],
   async ([sectionId, nodeSection]) => {
     if (sectionId === 'node' && nodeSection === 'signal-metrics') {
       await loadSignalMetricsPayload().catch(() => {})
@@ -4628,7 +4630,7 @@ watch(
 )
 
 watch(
-  () => [activeSettingsSectionId.value, activeNodeCompanionSectionId.value, session.selectedPort, batteryHistoryRangePreset.value, batteryHistoryCustomStart.value, batteryHistoryCustomEnd.value],
+  () => [activeSettingsSectionId.value, activeNodeCompanionSectionId.value, session.activeConnectionKey, batteryHistoryRangePreset.value, batteryHistoryCustomStart.value, batteryHistoryCustomEnd.value],
   async ([sectionId, nodeSection]) => {
     if (sectionId === 'node' && nodeSection === 'battery') {
       await loadBatteryHistoryPayload({ quiet: true }).catch(() => {})
@@ -4844,7 +4846,7 @@ onBeforeUnmount(() => {
 	                  <input
 	                    type="checkbox"
 	                    :checked="accessAllMeshcoriumChannels"
-	                    :disabled="syncingMeshcoriumChannels || !session.connected || !session.selectedPort"
+	                    :disabled="syncingMeshcoriumChannels || !session.connected || !session.activeConnectionPort"
 	                    @change="handleMeshcoriumChannelSyncToggle($event.target.checked)"
 	                  />
                 </div>
@@ -6627,10 +6629,10 @@ onBeforeUnmount(() => {
               <p>{{ t('settings.debug.messages.regularSubtitle') }}</p>
             </div>
             <div class="mc-settings-debug-button-grid">
-              <button class="mc-button mc-button--ghost" type="button" :disabled="!session.connected || !session.selectedPort" @click="requestSetAllMessagesReadState(true, 'regular')">
+              <button class="mc-button mc-button--ghost" type="button" :disabled="!session.connected || !session.activeConnectionPort" @click="requestSetAllMessagesReadState(true, 'regular')">
                 {{ t('notifications.actions.markRegularRead') }}
               </button>
-              <button class="mc-button mc-button--ghost" type="button" :disabled="!session.connected || !session.selectedPort" @click="requestSetAllMessagesReadState(false, 'regular')">
+              <button class="mc-button mc-button--ghost" type="button" :disabled="!session.connected || !session.activeConnectionPort" @click="requestSetAllMessagesReadState(false, 'regular')">
                 {{ t('notifications.actions.markRegularUnread') }}
               </button>
             </div>
@@ -6642,10 +6644,10 @@ onBeforeUnmount(() => {
               <p>{{ t('settings.debug.messages.mentionsSubtitle') }}</p>
             </div>
             <div class="mc-settings-debug-button-grid">
-              <button class="mc-button mc-button--ghost" type="button" :disabled="!session.connected || !session.selectedPort" @click="requestSetAllMessagesReadState(true, 'mention')">
+              <button class="mc-button mc-button--ghost" type="button" :disabled="!session.connected || !session.activeConnectionPort" @click="requestSetAllMessagesReadState(true, 'mention')">
                 {{ t('notifications.actions.markMentionsRead') }}
               </button>
-              <button class="mc-button mc-button--ghost" type="button" :disabled="!session.connected || !session.selectedPort" @click="requestSetAllMessagesReadState(false, 'mention')">
+              <button class="mc-button mc-button--ghost" type="button" :disabled="!session.connected || !session.activeConnectionPort" @click="requestSetAllMessagesReadState(false, 'mention')">
                 {{ t('notifications.actions.markMentionsUnread') }}
               </button>
             </div>
@@ -6657,10 +6659,10 @@ onBeforeUnmount(() => {
               <p>{{ t('settings.debug.messages.directSubtitle') }}</p>
             </div>
             <div class="mc-settings-debug-button-grid">
-              <button class="mc-button mc-button--ghost" type="button" :disabled="!session.connected || !session.selectedPort" @click="requestSetAllMessagesReadState(true, 'direct')">
+              <button class="mc-button mc-button--ghost" type="button" :disabled="!session.connected || !session.activeConnectionPort" @click="requestSetAllMessagesReadState(true, 'direct')">
                 {{ t('notifications.actions.markDirectRead') }}
               </button>
-              <button class="mc-button mc-button--ghost" type="button" :disabled="!session.connected || !session.selectedPort" @click="requestSetAllMessagesReadState(false, 'direct')">
+              <button class="mc-button mc-button--ghost" type="button" :disabled="!session.connected || !session.activeConnectionPort" @click="requestSetAllMessagesReadState(false, 'direct')">
                 {{ t('notifications.actions.markDirectUnread') }}
               </button>
             </div>
@@ -6697,7 +6699,7 @@ onBeforeUnmount(() => {
             <button
               class="mc-button mc-button--ghost"
               type="button"
-              :disabled="contactDebugLoading || !session.connected || !session.selectedPort"
+              :disabled="contactDebugLoading || !session.connected || !session.activeConnectionPort"
               @click="loadContactDebugPayload"
             >
               {{ contactDebugLoading ? t('settings.debug.contacts.refreshing') : t('settings.debug.contacts.refresh') }}
