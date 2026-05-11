@@ -10,9 +10,15 @@ MeshCorium is a self-hosted MeshCore client with a hybrid contact system and a l
 
 `MeshCorium v0.6.1 -- Docker + USB + BLE` ships the Docker Compose packaging variant, permanent USB serial transport, BLE node connection through Linux / BlueZ, and browser-side unread notifications.
 
+Current development workspace note:
+
+- experimental Wi-Fi / TCP transport integration is in progress;
+- the active dev code now includes a manual `host:port` Wi-Fi connect path and backend TCP transport plumbing;
+- this work is not yet release-validated and is not part of the published `v0.6.1` release notes.
+
 ## Preview
 
-[Демонстрация работы meshcorium](https://youtu.be/m--5rg7x7uU)
+[![Watch the MeshCorium video overview](https://img.youtube.com/vi/m--5rg7x7uU/hqdefault.jpg)](https://youtu.be/m--5rg7x7uU)
 
 ![MeshCorium screenshot](./SCREENSHOT.png)
 
@@ -50,5 +56,3 @@ Upgrade information is documented in:
 - [README_RU.md](./README_RU.md)
 - [README_EN.md](./README_EN.md)
 - [CHANGELOG.md](./CHANGELOG.md)
-
-![MeshCorium screenshot](./SCREENSHOT.png)

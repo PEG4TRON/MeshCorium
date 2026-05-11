@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import LocaleSwitch from '../ui/LocaleSwitch.vue'
 import PluginDropdown from '../ui/PluginDropdown.vue'
 import SyncIcon from '../ui/SyncIcon.vue'
+import { parseWifiEndpoint } from '../../lib/wifiTransport'
 import { resolveNodePreviewUrl } from '../../lib/nodePreview'
 import { useSessionStore } from '../../stores/session'
 
@@ -32,9 +33,6 @@ const refreshBusy = computed(() => (
 const refreshButtonLabel = computed(() => {
   if (session.selectedTransportType === 'ble') {
     return refreshBusy.value ? t('connect.ble.scanning') : t('connect.ble.scan')
-  }
-  if (session.selectedTransportType === 'wifi') {
-    return t('connect.wifi.unavailableTitle')
   }
   return t('common.refreshPorts')
 })
@@ -87,7 +85,7 @@ const visibleStatusText = computed(() => {
 
 const selectedConnectionLabel = computed(() => {
   if (session.selectedTransportType === 'wifi') {
-    return t('connect.status.wifiUnavailable')
+    return session.selectedConnection?.transport_id || t('connect.status.wifiEndpointNotConfigured')
   }
   if (session.selectedTransportType === 'ble') {
     const match = selectedBleDeviceInfo.value
@@ -261,7 +259,7 @@ const refreshDisabled = computed(() => {
 })
 
 const connectDisabled = computed(() => {
-  if (session.connecting || session.selectedTransportType === 'wifi') {
+  if (session.connecting) {
     return true
   }
   if (session.selectedTransportType === 'ble') {
@@ -378,7 +376,6 @@ async function refreshTransport() {
   }
   if (session.selectedTransportType === 'wifi') {
     try {
-      session.setStatus(t('connect.status.wifiUnavailable'), true)
       return
     } finally {
       refreshAnimating.value = false
@@ -400,7 +397,10 @@ function pickSavedConnection(profile) {
     return
   }
   if (transportType === 'wifi') {
-    session.setStatus(t('connect.status.wifiUnavailable'), true)
+    const endpoint = parseWifiEndpoint(resolveSavedConnectionPort(profile))
+    session.selectedWifiHost = endpoint.host
+    session.selectedWifiPort = endpoint.port
+    session.setStatus(t('connect.status.pickWifiEndpoint'), false)
     return
   }
   session.selectedPort = resolveSavedConnectionPort(profile)
@@ -491,6 +491,7 @@ watch(
               {{ session.connecting ? t('connect.actions.connecting') : t('connect.actions.connect') }}
             </button>
             <button
+              v-if="session.selectedTransportType !== 'wifi'"
               v-tooltip="session.selectedTransportType === 'ble' ? null : { content: refreshButtonLabel, theme: 'meshcorium-tooltip' }"
               class="mc-icon-button"
               :class="{ 'is-spinning': refreshBusy, 'mc-icon-button--with-label': session.selectedTransportType === 'ble' }"
@@ -525,7 +526,7 @@ watch(
               class="mc-connect-transport-option"
               :class="{ 'is-active': session.selectedTransportType === 'wifi' }"
               type="button"
-              @click="session.selectedTransportType = 'wifi'; session.setStatus(t('connect.status.wifiUnavailable'), true)"
+              @click="session.selectedTransportType = 'wifi'; session.setStatus(t('connect.status.pickWifiEndpoint'), false)"
             >
               {{ t('connect.transport.wifi') }}
             </button>
@@ -536,6 +537,32 @@ watch(
               <p class="mc-overline">{{ t('connect.wifi.overline') }}</p>
               <h3>{{ t('connect.wifi.title') }}</h3>
               <p>{{ t('connect.wifi.body') }}</p>
+              <label class="mc-field">
+                <span>{{ t('connect.wifi.hostLabel') }}</span>
+                <input
+                  v-model="session.selectedWifiHost"
+                  class="mc-input"
+                  type="text"
+                  autocomplete="off"
+                  autocapitalize="off"
+                  spellcheck="false"
+                  :placeholder="t('connect.wifi.hostPlaceholder')"
+                  @keydown.enter.prevent="connectNode"
+                />
+              </label>
+              <label class="mc-field">
+                <span>{{ t('connect.wifi.portLabel') }}</span>
+                <input
+                  v-model="session.selectedWifiPort"
+                  class="mc-input"
+                  type="text"
+                  inputmode="numeric"
+                  autocomplete="off"
+                  spellcheck="false"
+                  :placeholder="t('connect.wifi.portPlaceholder')"
+                  @keydown.enter.prevent="connectNode"
+                />
+              </label>
             </div>
           </template>
 

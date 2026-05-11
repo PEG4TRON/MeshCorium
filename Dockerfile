@@ -32,7 +32,7 @@ RUN python3 -m venv /opt/meshcorium/.venv \
 COPY CHANGELOG.md LICENSE README.md README_EN.md README_RU.md /opt/meshcorium/
 COPY contact_admin.py contact_backend.py contact_groups.py contact_service.py contact_store.py mobile_push.py /opt/meshcorium/
 COPY known_nodes.py meshcorium_data_transfer.py /opt/meshcorium/
-COPY meshcorium_ble_transport.py meshcorium_client.py meshcorium_serial_legacy.py meshcorium_serial_transport.py meshcorium_transport.py meshcorium_web.py /opt/meshcorium/
+COPY meshcorium_ble_transport.py meshcorium_client.py meshcorium_serial_legacy.py meshcorium_serial_transport.py meshcorium_transport.py meshcorium_web.py meshcorium_wifi_transport.py /opt/meshcorium/
 COPY icons /opt/meshcorium/icons
 COPY sounds /opt/meshcorium/sounds
 COPY vendor /opt/meshcorium/vendor

@@ -1126,9 +1126,12 @@ export default {
     },
     wifi: {
       overline: 'Wi-Fi подключение',
-      title: 'Wi-Fi режим пока не реализован',
-      body: 'Это зарезервированный режим подключения к ноде. Сейчас он показан как заглушка, чтобы структура выбора транспорта уже была готова к будущему Wi-Fi адаптеру.',
-      unavailableTitle: 'Wi-Fi пока недоступен',
+      title: 'Подключение по Wi-Fi / TCP',
+      body: 'Укажи host и port MeshCore companion endpoint, затем нажми Connect.',
+      hostLabel: 'Host',
+      hostPlaceholder: 'например, 192.168.1.50',
+      portLabel: 'Port',
+      portPlaceholder: '5000',
     },
     actions: {
       connect: 'Connect',
@@ -1146,8 +1149,8 @@ export default {
       bleSubtitle: 'Только ранее подключённые BLE companion-профили.',
       bleEmpty: 'BLE-история появится после первого успешного BLE-подключения.',
       wifiTitle: 'Wi-Fi-ноды',
-      wifiSubtitle: 'Зарезервировано под будущие Wi-Fi companion-профили.',
-      wifiEmpty: 'Wi-Fi-история появится после реализации Wi-Fi подключения.',
+      wifiSubtitle: 'Только ранее подключённые Wi-Fi companion-профили.',
+      wifiEmpty: 'Wi-Fi-история появится после первого успешного Wi-Fi-подключения.',
       forget: 'Забыть',
     },
     ghost: {
@@ -1163,7 +1166,10 @@ export default {
       portRequired: 'Выбери serial-порт.',
       bleNotSelected: 'BLE-нода не выбрана',
       bleRequired: 'Выбери BLE-ноду.',
-      wifiUnavailable: 'Wi-Fi подключение пока не реализовано.',
+      wifiEndpointNotConfigured: 'Укажи Wi-Fi host и port.',
+      wifiHostRequired: 'Укажи Wi-Fi host.',
+      wifiPortInvalid: 'Wi-Fi port должен быть числом от 1 до 65535.',
+      pickWifiEndpoint: 'Укажи Wi-Fi host и port, затем нажми Connect.',
       noVisiblePorts: 'Нет видимых serial-портов. Проверь подключение ноды.',
       loadFailed: 'Не удалось загрузить экран подключения.',
       connectFailed: 'Connect failed',
@@ -1694,7 +1700,7 @@ export default {
       connection: {
         fields: {
           port: 'Порт',
-          portSubtitle: 'Выбранный serial port для текущего connection state.',
+          portSubtitle: 'Выбранный transport endpoint для текущего connection state.',
           baudrate: 'Baudrate',
         },
         autoConnect: {
@@ -1731,7 +1737,7 @@ export default {
         },
         history: {
           title: 'Известные ноды',
-          subtitle: 'Карточки хранят последнее имя, модель и транспорт для каждой ранее подключённой ноды. Нажатие сразу выбирает startup target и подставляет port/baudrate.',
+          subtitle: 'Карточки хранят последнее имя, модель и transport для каждой ранее подключённой ноды. Нажатие сразу выбирает startup target и подставляет endpoint подключения.',
           empty: 'После первого успешного подключения здесь появятся карточки нод.',
           selected: 'Профиль {label} выбран как startup target.',
         },
@@ -1753,7 +1759,7 @@ export default {
         },
         note: {
           title: 'Состояние сервисной сессии',
-          activeSession: 'Сервис сейчас держит активную сессию {name} ({port} @ {baudrate}). После внезапного дисконнекта сервис попробует переподключиться к последнему успешному профилю автоматически.{queueSuffix}',
+          activeSession: 'Сервис сейчас держит активную сессию {name} ({connection}). После внезапного дисконнекта сервис попробует переподключиться к последнему успешному профилю автоматически.{queueSuffix}',
           recoveringSession: 'Для {port} уже идёт восстановление фоновой сессии. Текущая попытка переподключения: {attempts}.',
           default: 'После внезапного дисконнекта сервис попробует переподключиться к последнему успешному профилю автоматически.',
           queueInProgress: ' Сессия сейчас выкачивает offline queue companion.',

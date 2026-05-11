@@ -2,7 +2,11 @@
 
 ## Dev / Unreleased
 
-No unreleased changes yet.
+- Experimental Wi-Fi / TCP companion transport work is in progress in the development workspace.
+- Backend work now includes a dedicated `meshcorium_wifi_transport.py` module, `WIFI_TRANSPORT_TYPE` router integration, and manual `host:port` endpoint parsing aligned with the MeshCore TCP references.
+- Frontend work now includes a manual Wi-Fi connect form with persisted host/port fields instead of the old placeholder-only transport tab.
+- Settings/history work is being made transport-aware so Wi-Fi endpoints do not inherit USB-only `baudrate` presentation.
+- Docker runtime alignment in development now includes the Wi-Fi transport module in the image build path.
 
 ## v0.6.1
 

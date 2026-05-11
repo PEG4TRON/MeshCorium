@@ -5,6 +5,13 @@ import { useStorage } from '@vueuse/core'
 import { i18n } from '../i18n'
 import { batteryProfileForNode, normalizeBatteryProfileMap } from '../lib/batteryProfile'
 import { normalizeStopState } from '../lib/sessionLiveState'
+import {
+  buildWifiTransportId,
+  DEFAULT_WIFI_PORT,
+  normalizeWifiHost,
+  normalizeWifiPort,
+  parseWifiEndpoint,
+} from '../lib/wifiTransport'
 
 const DEFAULT_TIMEOUT = 4.0
 const DEFAULT_BAUDRATE = 115200
@@ -37,6 +44,17 @@ function normalizePort(value) {
   return next && next !== '-' ? next : ''
 }
 
+function normalizeBaudrate(value, fallback = DEFAULT_BAUDRATE) {
+  if (value === 0 || value === '0') {
+    return 0
+  }
+  const numeric = Number(value)
+  if (Number.isFinite(numeric) && numeric > 0) {
+    return numeric
+  }
+  return Number(fallback || DEFAULT_BAUDRATE) || DEFAULT_BAUDRATE
+}
+
 function normalizeConnectionDescriptor(source = {}, fallback = {}) {
   const sourceConnection = isPlainObject(source?.connection) ? source.connection : {}
   const fallbackConnection = isPlainObject(fallback?.connection) ? fallback.connection : {}
@@ -57,13 +75,13 @@ function normalizeConnectionDescriptor(source = {}, fallback = {}) {
     || fallback?.transport_id
     || fallback?.port
   )
-  const rawBaudrate = Number(
+  const rawBaudrate = normalizeBaudrate(
     sourceConnection.baudrate
-    || source?.baudrate
-    || fallbackConnection.baudrate
-    || fallback?.baudrate
-    || DEFAULT_BAUDRATE
-  ) || DEFAULT_BAUDRATE
+    ?? source?.baudrate
+    ?? fallbackConnection.baudrate
+    ?? fallback?.baudrate
+    ?? DEFAULT_BAUDRATE,
+  )
   const baudrate = transportType === 'serial' ? rawBaudrate : 0
   const timeout = Number(
     sourceConnection.timeout
@@ -210,6 +228,8 @@ export const useSessionStore = defineStore('session', () => {
   const selectedBaudrate = useStorage('selected_baudrate', DEFAULT_BAUDRATE)
   const selectedTransportType = useStorage('selected_transport_type', 'serial')
   const selectedBleDevice = useStorage('selected_ble_device', '')
+  const selectedWifiHost = useStorage('selected_wifi_host', '')
+  const selectedWifiPort = useStorage('selected_wifi_port', String(DEFAULT_WIFI_PORT))
   const selectedBlePin = ref('')
 
   const statusText = ref('')
@@ -686,6 +706,8 @@ export const useSessionStore = defineStore('session', () => {
   function pickInitialSelection() {
     const storagePort = normalizePort(selectedPort.value)
     const storageBleDevice = normalizePort(selectedBleDevice.value)
+    const storageWifiHost = normalizeWifiHost(selectedWifiHost.value)
+    const storageWifiPort = normalizeWifiPort(selectedWifiPort.value)
     const storageBaudrate = Number(selectedBaudrate.value || DEFAULT_BAUDRATE)
     const startup = resolvedStartupConnection.value || {}
     const lastSuccessful = lastSuccessfulConfig.value || {}
@@ -725,6 +747,20 @@ export const useSessionStore = defineStore('session', () => {
         selectedBleDevice.value = normalizePort(nextBleDevice.transport_id)
       }
     }
+    if (!storageWifiHost) {
+      const nextWifiConnection = [startupConnection, lastSuccessfulConnection, firstSavedConnection]
+        .find((connection) => connection.transport_type === 'wifi' && normalizePort(connection.transport_id))
+      if (nextWifiConnection) {
+        const parsed = parseWifiEndpoint(nextWifiConnection.transport_id)
+        selectedWifiHost.value = parsed.host
+        selectedWifiPort.value = normalizeWifiPort(parsed.port)
+      } else {
+        selectedWifiPort.value = String(DEFAULT_WIFI_PORT)
+      }
+    } else {
+      selectedWifiHost.value = storageWifiHost
+      selectedWifiPort.value = storageWifiPort
+    }
   }
 
   function applyConnectionSelection(source = {}, fallback = {}) {
@@ -734,7 +770,6 @@ export const useSessionStore = defineStore('session', () => {
     if (transportType === 'ble') {
       const transportId = normalizePort(connection.transport_id || connection.port)
       selectedBleDevice.value = transportId
-      selectedPort.value = transportId
       selectedBaudrate.value = Number(connection.baudrate || 0) || 0
       return
     }
@@ -742,6 +777,13 @@ export const useSessionStore = defineStore('session', () => {
       const port = normalizePort(connection.port || connection.transport_id)
       selectedPort.value = port
       selectedBaudrate.value = Number(connection.baudrate || DEFAULT_BAUDRATE) || DEFAULT_BAUDRATE
+      return
+    }
+    if (transportType === 'wifi') {
+      const parsed = parseWifiEndpoint(connection.transport_id || connection.port)
+      selectedWifiHost.value = parsed.host
+      selectedWifiPort.value = normalizeWifiPort(parsed.port)
+      selectedBaudrate.value = 0
       return
     }
     selectedPort.value = normalizePort(connection.port || connection.transport_id)
@@ -842,7 +884,12 @@ export const useSessionStore = defineStore('session', () => {
         snapshot.port = normalizePort(patch?.port)
       }
       if (hasOwnField(patch, 'baudrate')) {
-        snapshot.baudrate = Number(patch?.baudrate || DEFAULT_BAUDRATE) || DEFAULT_BAUDRATE
+        const nextTransportType = String(
+          hasOwnField(patch, 'transport_type') ? patch?.transport_type : snapshot.transport_type,
+        ).trim().toLowerCase() || 'serial'
+        snapshot.baudrate = nextTransportType === 'serial'
+          ? normalizeBaudrate(patch?.baudrate, DEFAULT_BAUDRATE)
+          : 0
       }
       if (hasOwnField(patch, 'transport_type')) {
         snapshot.transport_type = String(patch?.transport_type || 'serial').trim().toLowerCase() || 'serial'
@@ -969,7 +1016,13 @@ export const useSessionStore = defineStore('session', () => {
         ? preserveShallowObjectRef(previous?.connection, normalizeConnectionDescriptor(data, previous))
         : (previous?.connection || null),
       port: hasOwnField(data, 'port') ? normalizePort(data?.port) : normalizePort(previous?.port),
-      baudrate: hasOwnField(data, 'baudrate') ? (Number(data?.baudrate || DEFAULT_BAUDRATE) || DEFAULT_BAUDRATE) : (Number(previous?.baudrate || DEFAULT_BAUDRATE) || DEFAULT_BAUDRATE),
+      baudrate: hasOwnField(data, 'baudrate')
+        ? (((String(data?.transport_type || previous?.transport_type || 'serial').trim().toLowerCase() || 'serial') === 'serial')
+            ? normalizeBaudrate(data?.baudrate, DEFAULT_BAUDRATE)
+            : 0)
+        : ((((String(previous?.transport_type || 'serial').trim().toLowerCase() || 'serial') === 'serial'))
+            ? normalizeBaudrate(previous?.baudrate, DEFAULT_BAUDRATE)
+            : 0),
       transport_type: hasOwnField(data, 'transport_type') ? (String(data?.transport_type || 'serial').trim().toLowerCase() || 'serial') : (previous?.transport_type || 'serial'),
       transport_id: hasOwnField(data, 'transport_id') ? normalizePort(data?.transport_id) : normalizePort(previous?.transport_id || previous?.port),
       collections_ready: nextCollectionsReady,
@@ -1115,7 +1168,9 @@ export const useSessionStore = defineStore('session', () => {
   function configBody(extra = {}) {
     const connection = selectedConnection.value
     const port = normalizePort(connection.port || connection.transport_id)
-    const baudrate = Number(connection.baudrate || DEFAULT_BAUDRATE)
+    const baudrate = connection.transport_type === 'serial'
+      ? normalizeBaudrate(connection.baudrate, DEFAULT_BAUDRATE)
+      : 0
     return {
       connection,
       transport_type: connection.transport_type,
@@ -1238,11 +1293,25 @@ export const useSessionStore = defineStore('session', () => {
 
   async function connectNode({ light = false } = {}) {
     const connection = selectedConnection.value
-    if (connection.transport_type === 'wifi') {
-      throw new Error(t('connect.status.wifiUnavailable'))
-    }
     const port = normalizePort(connection.port || connection.transport_id)
+    if (connection.transport_type === 'wifi') {
+      const host = normalizeWifiHost(selectedWifiHost.value)
+      const wifiPort = String(selectedWifiPort.value || '').trim()
+      if (!host) {
+        throw new Error(t('connect.status.wifiHostRequired'))
+      }
+      if (!/^\d+$/.test(wifiPort)) {
+        throw new Error(t('connect.status.wifiPortInvalid'))
+      }
+      const numericPort = Number(wifiPort)
+      if (!Number.isInteger(numericPort) || numericPort < 1 || numericPort > 65535) {
+        throw new Error(t('connect.status.wifiPortInvalid'))
+      }
+    }
     if (!port) {
+      if (connection.transport_type === 'wifi') {
+        throw new Error(t('connect.status.wifiHostRequired'))
+      }
       throw new Error(connection.transport_type === 'ble' ? t('connect.status.bleRequired') : t('connect.status.portRequired'))
     }
     connecting.value = true
@@ -1326,13 +1395,17 @@ export const useSessionStore = defineStore('session', () => {
     const rawTransportType = String(selectedTransportType.value || 'serial').trim().toLowerCase()
     const transportType = ['serial', 'ble', 'wifi'].includes(rawTransportType) ? rawTransportType : 'serial'
     if (transportType === 'wifi') {
+      const host = normalizeWifiHost(selectedWifiHost.value)
+      const port = normalizeWifiPort(selectedWifiPort.value)
+      const transportId = buildWifiTransportId(host, port)
       return normalizeConnectionDescriptor({
         connection: {
           transport_type: 'wifi',
-          transport_id: '',
-          display_label: 'Wi-Fi',
+          transport_id: transportId,
+          display_label: transportId || host || 'Wi-Fi',
           timeout: DEFAULT_TIMEOUT,
         },
+        port: transportId,
       })
     }
     if (transportType === 'ble') {
@@ -1390,6 +1463,8 @@ export const useSessionStore = defineStore('session', () => {
     selectedBaudrate,
     selectedTransportType,
     selectedBleDevice,
+    selectedWifiHost,
+    selectedWifiPort,
     selectedBlePin,
     statusText,
     statusError,

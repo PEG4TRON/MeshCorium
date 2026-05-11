@@ -143,10 +143,7 @@ const phoneBarNodeName = computed(() => {
   if (selfName) {
     return selfName
   }
-  const saved = (session.savedConnections || []).find((item) => (
-    String(item?.port || '') === String(session.selectedPort || '')
-    && Number(item?.baudrate || 0) === Number(session.selectedBaudrate || 0)
-  ))
+  const saved = session.selectedSavedConnection || null
   return String(saved?.node_name || t('common.offline'))
 })
 

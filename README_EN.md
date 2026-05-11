@@ -11,6 +11,12 @@ Current transports:
 - `USB serial`
 - `BLE`
 
+Development workspace note:
+
+- experimental `Wi-Fi / TCP` integration is currently in progress;
+- the active development code already includes backend TCP transport plumbing and a manual `host:port` connect flow;
+- this is not yet release-validated and should not be treated as part of the published `v0.6.1` release profile.
+
 `MeshCorium v0.6.1 -- Docker + USB + BLE` release status:
 
 - `USB serial` — permanent and validated connection path, not being removed from the project

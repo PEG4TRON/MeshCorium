@@ -79,6 +79,7 @@ from meshcorium_transport import (
     SERIAL_TRANSPORT_TYPE,
 )
 from meshcorium_ble_transport import BLE_TRANSPORT_TYPE, BleTransportUnavailable, reset_meshcore_ble_pairs, unpair_ble_device
+from meshcorium_wifi_transport import WIFI_TRANSPORT_TYPE
 from meshcorium_serial_transport import SerialException
 
 def _path_from_env(name: str, default: Path) -> Path:
@@ -1031,9 +1032,14 @@ def _format_saved_connection_label(entry: dict) -> str:
     node_name = str(entry.get("node_name") or "").strip()
     port = _normalize_port_value(entry.get("port"))
     baudrate = int(entry.get("baudrate", DEFAULT_BAUDRATE))
+    transport_type = str(entry.get("transport_type") or "serial").strip().lower() or "serial"
+    if transport_type == SERIAL_TRANSPORT_TYPE:
+        if node_name:
+            return f"{node_name} · {port} @ {baudrate}"
+        return f"{port} @ {baudrate}"
     if node_name:
-        return f"{node_name} · {port} @ {baudrate}"
-    return f"{port} @ {baudrate}"
+        return f"{node_name} · {port}"
+    return port
 
 
 def _is_successful_saved_connection(entry: object) -> bool:
@@ -1248,22 +1254,27 @@ def _resolve_startup_connection_config(settings: dict, *, include_secrets: bool 
     if not normalized["auto_connect_on_service_start"]:
         return None
     try:
-        available_connection_ids = {
+        available_serial_connection_ids = {
             str((item or {}).get("transport_id") or (item or {}).get("device") or "").strip()
-            for item in list(DEFAULT_CONNECTION_ROUTER.discover() or [])
+            for item in list(DEFAULT_CONNECTION_ROUTER.discover(SERIAL_TRANSPORT_TYPE) or [])
             if str((item or {}).get("transport_id") or (item or {}).get("device") or "").strip()
         }
     except Exception:
-        available_connection_ids = set()
+        available_serial_connection_ids = set()
 
     def _validate_available(config: dict | None) -> dict | None:
         normalized_config = _with_known_ble_pin(config) if include_secrets else _normalize_connection_config(config)
         if normalized_config is None:
             return None
+        transport_type = str(normalized_config.get("transport_type") or SERIAL_TRANSPORT_TYPE).strip().lower() or SERIAL_TRANSPORT_TYPE
         target_id = str(normalized_config.get("transport_id") or normalized_config.get("port") or "").strip()
-        if available_connection_ids and target_id not in available_connection_ids:
+        if (
+            transport_type == SERIAL_TRANSPORT_TYPE
+            and available_serial_connection_ids
+            and target_id not in available_serial_connection_ids
+        ):
             logging.info(
-                "startup auto-connect skipped unavailable connection=%s baudrate=%s",
+                "startup auto-connect skipped unavailable serial connection=%s baudrate=%s",
                 target_id,
                 normalized_config.get("baudrate"),
             )
@@ -11617,7 +11628,7 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                 ble_timeout = max(1.0, min(15.0, float(params.get("timeout", ["5"])[0] or 5.0)))
             except (TypeError, ValueError):
                 ble_timeout = 5.0
-            valid_types = {"all", "serial", BLE_TRANSPORT_TYPE}
+            valid_types = {"all", "serial", BLE_TRANSPORT_TYPE, WIFI_TRANSPORT_TYPE}
             if requested_type not in valid_types:
                 self._send_json(
                     {"error": f"unsupported transport type: {requested_type}"},
@@ -11631,6 +11642,16 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                         "transport_type": "serial",
                         "available": True,
                         "connections": DEFAULT_CONNECTION_ROUTER.discover("serial"),
+                    }
+                )
+            if requested_type in {"all", WIFI_TRANSPORT_TYPE}:
+                transports.append(
+                    {
+                        "transport_type": WIFI_TRANSPORT_TYPE,
+                        "available": True,
+                        "connections": DEFAULT_CONNECTION_ROUTER.discover(
+                            WIFI_TRANSPORT_TYPE
+                        ),
                     }
                 )
             if requested_type in {"all", BLE_TRANSPORT_TYPE}:

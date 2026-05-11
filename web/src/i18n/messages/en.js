@@ -1126,9 +1126,12 @@ export default {
     },
     wifi: {
       overline: 'Wi-Fi connection',
-      title: 'Wi-Fi mode is not implemented yet',
-      body: 'This is a reserved node connection mode. It is shown as a placeholder so the transport selector is already ready for the future Wi-Fi adapter.',
-      unavailableTitle: 'Wi-Fi is not available yet',
+      title: 'Connect over Wi-Fi / TCP',
+      body: 'Enter the MeshCore companion host and port, then click Connect.',
+      hostLabel: 'Host',
+      hostPlaceholder: 'for example, 192.168.1.50',
+      portLabel: 'Port',
+      portPlaceholder: '5000',
     },
     actions: {
       connect: 'Connect',
@@ -1146,8 +1149,8 @@ export default {
       bleSubtitle: 'Only previously connected BLE companion profiles.',
       bleEmpty: 'BLE history will appear after the first successful BLE connection.',
       wifiTitle: 'Wi-Fi nodes',
-      wifiSubtitle: 'Reserved for future Wi-Fi companion profiles.',
-      wifiEmpty: 'Wi-Fi history will appear after Wi-Fi connection support is implemented.',
+      wifiSubtitle: 'Only previously connected Wi-Fi companion profiles.',
+      wifiEmpty: 'Wi-Fi history will appear after the first successful Wi-Fi connection.',
       forget: 'Forget',
     },
     ghost: {
@@ -1163,7 +1166,10 @@ export default {
       portRequired: 'Choose a serial port.',
       bleNotSelected: 'No BLE node selected',
       bleRequired: 'Choose a BLE node.',
-      wifiUnavailable: 'Wi-Fi connection is not implemented yet.',
+      wifiEndpointNotConfigured: 'Enter a Wi-Fi host and port.',
+      wifiHostRequired: 'Enter a Wi-Fi host.',
+      wifiPortInvalid: 'Wi-Fi port must be a number from 1 to 65535.',
+      pickWifiEndpoint: 'Enter a Wi-Fi host and port, then click Connect.',
       noVisiblePorts: 'No visible serial ports. Check the node connection.',
       loadFailed: 'Failed to load the connect screen.',
       connectFailed: 'Connect failed',
@@ -1694,7 +1700,7 @@ export default {
       connection: {
         fields: {
           port: 'Port',
-          portSubtitle: 'The selected serial port for the current connection state.',
+          portSubtitle: 'The selected transport endpoint for the current connection state.',
           baudrate: 'Baudrate',
         },
         autoConnect: {
@@ -1731,7 +1737,7 @@ export default {
         },
         history: {
           title: 'Known nodes',
-          subtitle: 'Cards keep the latest name, model, and transport for every previously connected node. Clicking a card immediately selects it as the startup target and reapplies its port/baudrate.',
+          subtitle: 'Cards keep the latest name, model, and transport for every previously connected node. Clicking a card immediately selects it as the startup target and reapplies its endpoint settings.',
           empty: 'Known node cards will appear here after the first successful connection.',
           selected: 'Profile {label} was selected as the startup target.',
         },
@@ -1753,7 +1759,7 @@ export default {
         },
         note: {
           title: 'Service session state',
-          activeSession: 'The service is currently holding an active session for {name} ({port} @ {baudrate}). After an unexpected disconnect, it will try to reconnect using the last successful profile automatically.{queueSuffix}',
+          activeSession: 'The service is currently holding an active session for {name} ({connection}). After an unexpected disconnect, it will try to reconnect using the last successful profile automatically.{queueSuffix}',
           recoveringSession: 'Background session recovery is already in progress for {port}. Current reconnect attempt: {attempts}.',
           default: 'After an unexpected disconnect, the service will try to reconnect using the last successful profile automatically.',
           queueInProgress: ' The session is currently draining the companion offline queue.',

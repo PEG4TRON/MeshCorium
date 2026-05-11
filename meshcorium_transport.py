@@ -9,8 +9,19 @@ from meshcorium_client import (
     MeshCoreError,
     MeshCoreClient,
 )
-from meshcorium_ble_transport import BLE_TRANSPORT_TYPE, BleFrameTransport, discover_ble_devices
+from meshcorium_ble_transport import (
+    BLE_TRANSPORT_TYPE,
+    BleFrameTransport,
+    discover_ble_devices,
+)
 from meshcorium_serial_transport import discover_serial_ports, open_serial_runtime
+from meshcorium_wifi_transport import (
+    WIFI_TRANSPORT_TYPE,
+    discover_wifi_devices,
+    normalize_wifi_address,
+    open_wifi_runtime,
+    WifiTransportError,
+)
 
 
 SERIAL_TRANSPORT_TYPE = "serial"
@@ -60,11 +71,24 @@ class ConnectionDescriptor:
 
     @classmethod
     def from_request(cls, body: dict[str, Any]) -> ConnectionDescriptor:
-        source = body.get("connection") if isinstance(body.get("connection"), dict) else body
-        transport_type = _normalize_transport_type(source.get("transport_type") or body.get("transport_type"))
-        transport_id = source.get("transport_id") or source.get("device") or source.get("port") or body.get("transport_id") or body.get("device") or body.get("port")
+        source = (
+            body.get("connection") if isinstance(body.get("connection"), dict) else body
+        )
+        transport_type = _normalize_transport_type(
+            source.get("transport_type") or body.get("transport_type")
+        )
+        transport_id = (
+            source.get("transport_id")
+            or source.get("device")
+            or source.get("port")
+            or body.get("transport_id")
+            or body.get("device")
+            or body.get("port")
+        )
         if transport_type == BLE_TRANSPORT_TYPE:
-            normalized_transport_id = str(transport_id or source.get("address") or body.get("address") or "").strip()
+            normalized_transport_id = str(
+                transport_id or source.get("address") or body.get("address") or ""
+            ).strip()
             if not normalized_transport_id:
                 raise ValueError("transport_id is required")
             return cls(
@@ -86,6 +110,55 @@ class ConnectionDescriptor:
                 allow_ble_bond_repair=bool(
                     source.get("allow_ble_bond_repair", body.get("allow_ble_bond_repair", False))
                 ),
+            )
+        if transport_type == WIFI_TRANSPORT_TYPE:
+            wifi_transport_id = str(
+                source.get("transport_id")
+                or source.get("address")
+                or source.get("host")
+                or source.get("hostname")
+                or body.get("transport_id")
+                or body.get("address")
+                or body.get("host")
+                or body.get("hostname")
+                or ""
+            ).strip()
+            explicit_port = (
+                source.get("wifi_port")
+                or source.get("tcp_port")
+                or body.get("wifi_port")
+                or body.get("tcp_port")
+            )
+            if (
+                not wifi_transport_id
+                and isinstance(transport_id, str)
+                and transport_id.strip()
+                and (":" in transport_id or "." in transport_id or transport_id.startswith("["))
+            ):
+                wifi_transport_id = transport_id.strip()
+            if wifi_transport_id and ":" not in wifi_transport_id and explicit_port not in (None, ""):
+                wifi_transport_id = f"{wifi_transport_id}:{int(explicit_port)}"
+            if not wifi_transport_id:
+                raise ValueError("transport_id is required for Wi-Fi transport")
+            try:
+                normalized_transport_id = normalize_wifi_address(wifi_transport_id)
+            except WifiTransportError as exc:
+                raise ValueError(str(exc)) from exc
+            return cls(
+                transport_type=WIFI_TRANSPORT_TYPE,
+                transport_id=normalized_transport_id,
+                baudrate=0,
+                timeout=float(
+                    source.get("timeout", body.get("timeout", DEFAULT_TIMEOUT))
+                    or DEFAULT_TIMEOUT
+                ),
+                display_label=str(
+                    source.get("display_label")
+                    or source.get("label")
+                    or body.get("display_label")
+                    or body.get("label")
+                    or normalized_transport_id
+                ).strip(),
             )
         if transport_type != SERIAL_TRANSPORT_TYPE:
             raise ValueError(f"unsupported transport_type: {transport_type}")
@@ -164,7 +237,9 @@ class SerialTransportAdapter:
 class BleTransportAdapter:
     transport_type = BLE_TRANSPORT_TYPE
 
-    def discover(self, *, timeout: float = 5.0, adapter_id: str = "") -> list[dict[str, object]]:
+    def discover(
+        self, *, timeout: float = 5.0, adapter_id: str = ""
+    ) -> list[dict[str, object]]:
         return discover_ble_devices(timeout=timeout, adapter_id=adapter_id)
 
     def open_client(self, descriptor: ConnectionDescriptor) -> MeshCoreClient:
@@ -188,15 +263,44 @@ class BleTransportAdapter:
         )
 
 
+class WifiTransportAdapter:
+    transport_type = WIFI_TRANSPORT_TYPE
+
+    def discover(self) -> list[dict[str, object]]:
+        return discover_wifi_devices()
+
+    def open_client(self, descriptor: ConnectionDescriptor) -> MeshCoreClient:
+        if descriptor.transport_type != self.transport_type:
+            raise ValueError(f"Wi-Fi adapter cannot open {descriptor.transport_type}")
+        try:
+            transport, frame_transport = open_wifi_runtime(
+                address=descriptor.transport_id,
+                timeout=descriptor.timeout,
+                frame_error=MeshCoreError,
+            )
+        except WifiTransportError as exc:
+            raise MeshCoreError(str(exc)) from exc
+        return MeshCoreClient(
+            port=descriptor.transport_id,
+            baudrate=0,
+            timeout=descriptor.timeout,
+            open_settle=0,
+            transport=transport,
+            frame_transport=frame_transport,
+        )
+
+
 class ConnectionRouter:
     def __init__(
         self,
         *,
         serial_adapter: SerialTransportAdapter | None = None,
         ble_adapter: BleTransportAdapter | None = None,
+        wifi_adapter: WifiTransportAdapter | None = None,
     ):
         self._serial_adapter = serial_adapter or SerialTransportAdapter()
         self._ble_adapter = ble_adapter or BleTransportAdapter()
+        self._wifi_adapter = wifi_adapter or WifiTransportAdapter()
 
     def from_request(self, body: dict[str, Any]) -> ConnectionDescriptor:
         return ConnectionDescriptor.from_request(body)
@@ -208,7 +312,9 @@ class ConnectionRouter:
             timeout=kwargs.get("timeout", DEFAULT_TIMEOUT),
         )
 
-    def discover(self, transport_type: str = SERIAL_TRANSPORT_TYPE, **kwargs: Any) -> list[dict[str, object]]:
+    def discover(
+        self, transport_type: str = SERIAL_TRANSPORT_TYPE, **kwargs: Any
+    ) -> list[dict[str, object]]:
         normalized_type = _normalize_transport_type(transport_type)
         if normalized_type == SERIAL_TRANSPORT_TYPE:
             return self._serial_adapter.discover()
@@ -217,6 +323,8 @@ class ConnectionRouter:
                 timeout=float(kwargs.get("timeout", 5.0) or 5.0),
                 adapter_id=str(kwargs.get("adapter_id") or ""),
             )
+        if normalized_type == WIFI_TRANSPORT_TYPE:
+            return self._wifi_adapter.discover()
         if normalized_type in {"all", "*"}:
             return [
                 *self._serial_adapter.discover(),
@@ -224,6 +332,7 @@ class ConnectionRouter:
                     timeout=float(kwargs.get("timeout", 5.0) or 5.0),
                     adapter_id=str(kwargs.get("adapter_id") or ""),
                 ),
+                *self._wifi_adapter.discover(),
             ]
         if normalized_type != SERIAL_TRANSPORT_TYPE:
             raise ValueError(f"unsupported transport_type: {transport_type}")
@@ -234,6 +343,8 @@ class ConnectionRouter:
             return self._serial_adapter.open_client(descriptor)
         if descriptor.transport_type == BLE_TRANSPORT_TYPE:
             return self._ble_adapter.open_client(descriptor)
+        if descriptor.transport_type == WIFI_TRANSPORT_TYPE:
+            return self._wifi_adapter.open_client(descriptor)
         raise ValueError(f"unsupported transport_type: {descriptor.transport_type}")
 
     def open_legacy_serial_client(self, **kwargs: Any) -> MeshCoreClient:

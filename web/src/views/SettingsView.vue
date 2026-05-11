@@ -21,6 +21,7 @@ import { useLocale } from '../composables/useLocale'
 import { logFrontendDiagnostic } from '../lib/frontendDiagnostics'
 import { resolveNodePreviewUrl } from '../lib/nodePreview'
 import { filterStatusTextForTransport } from '../lib/statusText'
+import { parseWifiEndpoint } from '../lib/wifiTransport'
 import { useSessionStore } from '../stores/session'
 
 const session = useSessionStore()
@@ -778,7 +779,7 @@ const playSoundIconUrl = '/icons/PlaySound.svg'
 const startupProfileOptions = computed(() => {
   return session.savedConnections.map((profile) => ({
     value: String(profile?.key || ''),
-    label: String(profile?.label || `${profile?.port || ''} @ ${profile?.baudrate || ''}`),
+    label: String(profile?.label || resolveSavedConnectionSummary(profile)),
   })).filter((entry) => entry.value)
 })
 
@@ -1125,7 +1126,7 @@ const nodeCompanionConnectionNoteTemplates = computed(() => {
   const raw = tm('settings.nodeCompanion.connection.note')
   if (!raw || typeof raw !== 'object') {
     return {
-      activeSession: 'Service session: {name} ({port} @ {baudrate}).{queueSuffix}',
+      activeSession: 'Service session: {name} ({connection}).{queueSuffix}',
       recoveringSession: 'Background session recovery is already in progress for {port}. Current reconnect attempt: {attempts}.',
       default: 'After an unexpected disconnect, the service will try to reconnect using the last successful profile automatically.',
       queueInProgress: ' The session is currently draining the companion offline queue.',
@@ -1136,7 +1137,7 @@ const nodeCompanionConnectionNoteTemplates = computed(() => {
     }
   }
   return {
-    activeSession: readMessageTemplate(raw.activeSession, 'Service session: {name} ({port} @ {baudrate}).{queueSuffix}'),
+    activeSession: readMessageTemplate(raw.activeSession, 'Service session: {name} ({connection}).{queueSuffix}'),
     recoveringSession: readMessageTemplate(raw.recoveringSession, 'Background session recovery is already in progress for {port}. Current reconnect attempt: {attempts}.'),
     default: readMessageTemplate(raw.default, 'After an unexpected disconnect, the service will try to reconnect using the last successful profile automatically.'),
     queueInProgress: readMessageTemplate(raw.queueInProgress, ' The session is currently draining the companion offline queue.'),
@@ -1155,6 +1156,10 @@ const nodeCompanionConnectionNote = computed(() => {
     || session.activeSessions?.[0]
     || null
   if (activeSession) {
+    const transportType = String(activeSession.transport_type || 'serial').trim().toLowerCase()
+    const connectionSummary = transportType === 'serial'
+      ? `${activeSession.port || t('common.offline')} @ ${activeSession.baudrate || session.selectedBaudrate || 0}`
+      : (activeSession.transport_id || activeSession.port || t('common.offline'))
     const queueDrainInProgress = Boolean(activeSession.queue_drain_in_progress)
     const queueDrainRequested = Boolean(activeSession.queue_drain_requested)
     const queueOverflowRisk = Boolean(activeSession.queue_last_overflow_risk)
@@ -1183,6 +1188,7 @@ const nodeCompanionConnectionNote = computed(() => {
     }
     return interpolateMessageTemplate(templates.activeSession, {
       name: activeSession.self_name || activeSession.port || t('common.offline'),
+      connection: connectionSummary,
       port: activeSession.port || t('common.offline'),
       baudrate: activeSession.baudrate || session.selectedBaudrate || 0,
       queueSuffix,
@@ -1291,12 +1297,14 @@ const nodeConnectionRenderModel = computed(() => {
   const historyProfiles = captureNodeConnectionRenderField('historyProfiles', [], () => {
     return session.savedConnections.map((profile) => {
       const previewLabel = resolveSavedConnectionPreviewLabel(profile)
+      const transportType = resolveSavedConnectionTransportType(profile)
       return {
         raw: profile,
         key: profile.key || `${resolveSavedConnectionPort(profile)}-${resolveSavedConnectionBaudrate(profile)}-${profile.public_key || profile.node_name}`,
         previewUrl: resolveNodePreviewUrl(previewLabel),
         displayName: resolveSavedConnectionDisplayName(profile),
         modelName: resolveSavedConnectionModelName(profile),
+        transportType,
         port: resolveSavedConnectionPort(profile),
         baudrate: resolveSavedConnectionBaudrate(profile),
       }
@@ -1322,7 +1330,7 @@ function buildNodeCompanionConfig(extra = {}) {
   const connection = session.selectedConnection
   const transportType = String(connection?.transport_type || config?.transport_type || '').trim().toLowerCase()
   const transportId = String(connection?.transport_id || config?.transport_id || config?.port || '').trim()
-  if (!transportId || transportType === 'wifi') {
+  if (!transportId) {
     session.setStatus(t('settings.nodeCompanion.status.connectionRequired'), true)
     return null
   }
@@ -1746,8 +1754,22 @@ function resolveSavedConnectionPort(profile) {
   return String(profile?.connection?.transport_id || profile?.transport_id || profile?.port || '').trim()
 }
 
+function resolveSavedConnectionTransportType(profile) {
+  const transportType = String(profile?.connection?.transport_type || profile?.transport_type || profile?.connection_type || 'serial').trim().toLowerCase()
+  return ['ble', 'wifi'].includes(transportType) ? transportType : 'serial'
+}
+
 function resolveSavedConnectionBaudrate(profile) {
   return Number(profile?.connection?.baudrate || profile?.baudrate || session.DEFAULT_BAUDRATE) || session.DEFAULT_BAUDRATE
+}
+
+function resolveSavedConnectionSummary(profile) {
+  const transportType = resolveSavedConnectionTransportType(profile)
+  const endpoint = resolveSavedConnectionPort(profile)
+  if (transportType === 'serial') {
+    return `${endpoint} @ ${resolveSavedConnectionBaudrate(profile)}`
+  }
+  return endpoint
 }
 
 async function updateNodeCompanionClientSettings(patch = {}, successMessage = '') {
@@ -2221,8 +2243,21 @@ async function logoutNodeCompanionAuthBrowser() {
 }
 
 function selectSavedConnectionStartupProfile(profile) {
-  session.selectedPort = resolveSavedConnectionPort(profile)
-  session.selectedBaudrate = resolveSavedConnectionBaudrate(profile)
+  const transportType = resolveSavedConnectionTransportType(profile)
+  const endpoint = resolveSavedConnectionPort(profile)
+  session.selectedTransportType = transportType
+  if (transportType === 'wifi') {
+    const parsed = parseWifiEndpoint(endpoint)
+    session.selectedWifiHost = parsed.host
+    session.selectedWifiPort = parsed.port
+    session.selectedBaudrate = 0
+  } else if (transportType === 'ble') {
+    session.selectedBleDevice = endpoint
+    session.selectedBaudrate = 0
+  } else {
+    session.selectedPort = endpoint
+    session.selectedBaudrate = resolveSavedConnectionBaudrate(profile)
+  }
   void updateNodeCompanionClientSettings({
     startup_use_last_successful: false,
     startup_connection_key: String(profile?.key || ''),
@@ -5723,7 +5758,7 @@ onBeforeUnmount(() => {
                   <div class="mc-connect-history-bottom">
                     <span>{{ profile.modelName }}</span>
                     <span>{{ profile.port }}</span>
-                    <span>{{ profile.baudrate }}</span>
+                    <span v-if="profile.transportType === 'serial'">{{ profile.baudrate }}</span>
                   </div>
                 </div>
               </button>
