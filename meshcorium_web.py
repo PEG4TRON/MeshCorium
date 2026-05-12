@@ -4111,6 +4111,49 @@ def _set_background_session_contacts(port: str, live_contacts: list[dict] | None
     _freeze_self_contact_if_cached(self_info)
 
 
+def _update_background_contact_message_preview(
+    session: BackgroundCompanionSession,
+    *,
+    pubkey_prefix: str,
+    text: str,
+    sender_timestamp: int,
+    from_self: bool = False,
+) -> None:
+    normalized_prefix = str(pubkey_prefix or "").strip().lower()[:12]
+    if not normalized_prefix:
+        return
+    with session.snapshot_lock:
+        for contact in list(session.contacts or []):
+            contact_prefix = str((contact or {}).get("pubkey_prefix") or (contact or {}).get("public_key") or "").strip().lower()[:12]
+            if contact_prefix != normalized_prefix:
+                continue
+            contact["last_message_text"] = str(text or "")
+            contact["last_message_at"] = int(sender_timestamp or 0)
+            contact["last_message_from_self"] = bool(from_self)
+            break
+
+
+def _update_background_channel_message_preview(
+    session: BackgroundCompanionSession,
+    *,
+    channel_idx: int,
+    text: str,
+    sender_timestamp: int,
+    from_self: bool = False,
+) -> None:
+    resolved_idx = int(channel_idx if channel_idx is not None else -1)
+    if resolved_idx < 0:
+        return
+    with session.snapshot_lock:
+        for channel in list(session.channels or []):
+            if int((channel or {}).get("idx") or -1) != resolved_idx:
+                continue
+            channel["last_message_preview"] = str(text or "")
+            channel["last_message_ts"] = int(sender_timestamp or 0)
+            channel["last_message_from_self"] = bool(from_self)
+            break
+
+
 def _process_background_message_event(
     client: MeshCoreSerialClient,
     session: BackgroundCompanionSession,
@@ -4154,6 +4197,13 @@ def _process_background_message_event(
                 "payload_hex": message.payload.hex(),
             }
             payload["id"] = save_contact_message(payload, owner_id=owner_id)
+            _update_background_contact_message_preview(
+                session,
+                pubkey_prefix=details.pubkey_prefix,
+                text=details.text,
+                sender_timestamp=details.sender_timestamp,
+                from_self=False,
+            )
             _notify_mobile_push_about_contact_message(
                 session,
                 port=port,
@@ -4217,6 +4267,13 @@ def _process_background_message_event(
                 "payload_hex": message.payload.hex(),
             }
             payload["id"] = save_channel_message(payload, owner_id=owner_id)
+            _update_background_channel_message_preview(
+                session,
+                channel_idx=details.channel_idx,
+                text=details.text,
+                sender_timestamp=details.sender_timestamp,
+                from_self=False,
+            )
             _notify_mobile_push_about_channel_message(
                 session,
                 port=port,
