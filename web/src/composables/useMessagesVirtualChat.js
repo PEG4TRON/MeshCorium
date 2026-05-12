@@ -222,17 +222,21 @@ export function useMessagesVirtualChat(options) {
     })
   }
 
+  function runVisibleReadTracking() {
+    messageReadTimerId = 0
+    const remainingSuppressionMs = Number(suppressReadTrackingUntil.value || 0) - Date.now()
+    if (remainingSuppressionMs > 0) {
+      scheduleVisibleReadTracking(Math.max(40, remainingSuppressionMs + 20))
+      return
+    }
+    onVisibleReadTracking?.()
+  }
+
   function scheduleVisibleReadTracking(delayMs = 90) {
     if (messageReadTimerId) {
       window.clearTimeout(messageReadTimerId)
     }
-    messageReadTimerId = window.setTimeout(() => {
-      messageReadTimerId = 0
-      if (Date.now() < suppressReadTrackingUntil.value) {
-        return
-      }
-      onVisibleReadTracking?.()
-    }, Math.max(0, Number(delayMs) || 0))
+    messageReadTimerId = window.setTimeout(runVisibleReadTracking, Math.max(0, Number(delayMs) || 0))
   }
 
   function estimateMessageOffsetById(messageId) {
