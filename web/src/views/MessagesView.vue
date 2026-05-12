@@ -2847,6 +2847,91 @@ function applyContactsSnapshot(nextContacts) {
   })
 }
 
+function syncConversationDirectoryPreviewIntoSession(directory = {}) {
+  const directoryChannels = Array.isArray(directory?.channels) ? directory.channels : []
+  const directoryContacts = Array.isArray(directory?.contacts) ? directory.contacts : []
+
+  const liveChannels = Array.isArray(session.channels) ? session.channels : []
+  if (liveChannels.length && directoryChannels.length) {
+    const previewByKey = new Map(
+      directoryChannels
+        .map((channel) => [channelListMergeKey(channel), channel])
+        .filter(([key]) => Boolean(key)),
+    )
+    let channelsChanged = false
+    const nextChannels = liveChannels.map((channel) => {
+      const preview = previewByKey.get(channelListMergeKey(channel))
+      if (!preview) {
+        return channel
+      }
+      const nextChannel = {
+        ...channel,
+        description: String(preview?.description || channel?.description || ''),
+        last_message_preview: String(preview?.last_message_preview || channel?.last_message_preview || ''),
+        last_message_from_self: Boolean(
+          preview?.last_message_from_self ?? channel?.last_message_from_self ?? false,
+        ),
+        last_message_ts: Number(preview?.last_message_ts || channel?.last_message_ts || 0),
+        unread_count: Number(preview?.unread_count || channel?.unread_count || 0),
+        mention_count: Number(preview?.mention_count || channel?.mention_count || 0),
+      }
+      if (
+        nextChannel.description !== channel?.description
+        || nextChannel.last_message_preview !== channel?.last_message_preview
+        || nextChannel.last_message_from_self !== Boolean(channel?.last_message_from_self)
+        || nextChannel.last_message_ts !== Number(channel?.last_message_ts || 0)
+        || nextChannel.unread_count !== Number(channel?.unread_count || 0)
+        || nextChannel.mention_count !== Number(channel?.mention_count || 0)
+      ) {
+        channelsChanged = true
+      }
+      return nextChannel
+    })
+    if (channelsChanged) {
+      applyChannelsSnapshot(nextChannels)
+    }
+  }
+
+  const liveContacts = Array.isArray(session.contacts) ? session.contacts : []
+  if (liveContacts.length && directoryContacts.length) {
+    const previewByPrefix = new Map(
+      directoryContacts
+        .map((contact) => [getContactPrefix(contact?.pubkey_prefix || contact?.public_key || ''), contact])
+        .filter(([prefix]) => Boolean(prefix)),
+    )
+    let contactsChanged = false
+    const nextContacts = liveContacts.map((contact) => {
+      const preview = previewByPrefix.get(getContactPrefix(contact?.pubkey_prefix || contact?.public_key || ''))
+      if (!preview) {
+        return contact
+      }
+      const nextContact = {
+        ...contact,
+        last_message_text: String(preview?.last_message_text || contact?.last_message_text || ''),
+        last_message_at: Number(preview?.last_message_at || contact?.last_message_at || 0),
+        last_message_from_self: Boolean(
+          preview?.last_message_from_self ?? contact?.last_message_from_self ?? false,
+        ),
+        unread_count: Number(preview?.unread_count || contact?.unread_count || 0),
+        mention_count: Number(preview?.mention_count || contact?.mention_count || 0),
+      }
+      if (
+        nextContact.last_message_text !== contact?.last_message_text
+        || nextContact.last_message_at !== Number(contact?.last_message_at || 0)
+        || nextContact.last_message_from_self !== Boolean(contact?.last_message_from_self)
+        || nextContact.unread_count !== Number(contact?.unread_count || 0)
+        || nextContact.mention_count !== Number(contact?.mention_count || 0)
+      ) {
+        contactsChanged = true
+      }
+      return nextContact
+    })
+    if (contactsChanged) {
+      applyContactsSnapshot(nextContacts)
+    }
+  }
+}
+
 function hasHydratedConversationEntries() {
   if (!session.collectionsReady) {
     return false
@@ -3260,6 +3345,7 @@ async function loadConversationDirectory() {
       channels: Array.isArray(data?.channels) ? data.channels : [],
       contacts: Array.isArray(data?.contacts) ? data.contacts : [],
     }
+    syncConversationDirectoryPreviewIntoSession(messageConversationDirectory.value)
     return messageConversationDirectory.value
   } catch (error) {
     session.setStatus(error instanceof Error ? error.message : String(error || t('messages.status.openFailed')), true)
