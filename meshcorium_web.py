@@ -4238,6 +4238,41 @@ def _request_background_queue_drain(session: BackgroundCompanionSession) -> None
     session.queue_drain_requested = True
 
 
+def _request_background_queue_drain_after_bootstrap(
+    client: MeshCoreSerialClient,
+    session: BackgroundCompanionSession,
+    port: str,
+    baudrate: int,
+) -> None:
+    _request_background_queue_drain(session)
+    _broadcast_queue_state(port, session, "bootstrap-requested")
+    _log_delivery_debug(
+        "bg_bootstrap_queue_drain_requested",
+        port=port,
+        buffered_pushes=client.pending_push_count(),
+    )
+    if session.queue_drain_in_progress:
+        return
+    if _background_should_defer_queue_drain(session, time.monotonic()):
+        _broadcast_queue_state(port, session, "bootstrap-deferred")
+        _log_delivery_debug(
+            "bg_bootstrap_queue_drain_deferred",
+            port=port,
+            pending_commands=session.command_queue.qsize(),
+            buffered_pushes=client.pending_push_count(),
+        )
+        return
+    if _background_serial_has_pending_input(client):
+        _broadcast_queue_state(port, session, "bootstrap-pending-input")
+        _log_delivery_debug(
+            "bg_bootstrap_queue_drain_pending_input",
+            port=port,
+            buffered_pushes=client.pending_push_count(),
+        )
+        return
+    _drain_background_message_queue(client, session, port, baudrate)
+
+
 def _broadcast_queue_state(port: str, session: BackgroundCompanionSession, reason: str) -> None:
     with session.snapshot_lock:
         session.queue_last_reason = str(reason or "update")
@@ -6856,6 +6891,7 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                         "battery_info": battery_info,
                     },
                 )
+                _request_background_queue_drain_after_bootstrap(client, session, port, baudrate)
                 next_radio_stats_poll_at = time.monotonic() + _normalize_signal_metrics_poll_seconds(_get_client_settings().get("signal_metrics_poll_seconds"))
                 next_contact_eviction_sweep_at = time.monotonic() + _get_contact_eviction_sweep_interval_secs()
                 while not session.stop_event.is_set():
