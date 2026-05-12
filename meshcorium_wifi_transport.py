@@ -24,15 +24,16 @@ class WifiTransportError(RuntimeError):
 class TcpSocketTransport:
     """Small blocking TCP transport for MeshCore companion framing."""
 
-    def __init__(self, *, host: str, port: int, timeout: float):
+    def __init__(self, *, host: str, port: int, timeout: float, transport_error=WifiTransportError):
         self.host = str(host or "").strip()
         self.port = int(port or 0)
         if not self.host:
-            raise WifiTransportError("host is required for Wi-Fi transport")
+            raise transport_error("host is required for Wi-Fi transport")
         if not (1 <= self.port <= 65535):
-            raise WifiTransportError(f"invalid Wi-Fi port: {self.port}")
+            raise transport_error(f"invalid Wi-Fi port: {self.port}")
         self._connect_timeout = max(0.1, float(timeout or 4.0))
         self._read_timeout = max(0.1, float(timeout or 4.0))
+        self._transport_error = transport_error
         self._socket: socket.socket | None = None
         self._lock = threading.Lock()
         self._connect()
@@ -44,7 +45,7 @@ class TcpSocketTransport:
                 timeout=self._connect_timeout,
             )
         except OSError as exc:
-            raise WifiTransportError(
+            raise self._transport_error(
                 f"Wi-Fi TCP connect failed to {self.host}:{self.port}: {exc}"
             ) from exc
         try:
@@ -82,31 +83,31 @@ class TcpSocketTransport:
 
     def read(self, size: int) -> bytes:
         if self._socket is None:
-            raise WifiTransportError("Wi-Fi transport is closed")
+            raise self._transport_error("Wi-Fi transport is closed")
         buf = bytearray()
         try:
             while len(buf) < size:
                 chunk = self._socket.recv(size - len(buf))
                 if not chunk:
-                    raise WifiTransportError(
+                    raise self._transport_error(
                         "Wi-Fi connection closed while reading frame"
                     )
                 buf.extend(chunk)
         except socket.timeout as exc:
             if not buf:
-                raise WifiTransportError(TRANSPORT_FRAME_TIMEOUT_ERROR) from exc
+                raise self._transport_error(TRANSPORT_FRAME_TIMEOUT_ERROR) from exc
         except OSError as exc:
-            raise WifiTransportError(f"Wi-Fi read error: {exc}") from exc
+            raise self._transport_error(f"Wi-Fi read error: {exc}") from exc
         return bytes(buf)
 
     def write(self, data: bytes) -> int:
         if self._socket is None:
-            raise WifiTransportError("Wi-Fi transport is closed")
+            raise self._transport_error("Wi-Fi transport is closed")
         with self._lock:
             try:
                 self._socket.sendall(data)
             except OSError as exc:
-                raise WifiTransportError(f"Wi-Fi write error: {exc}") from exc
+                raise self._transport_error(f"Wi-Fi write error: {exc}") from exc
         return len(data)
 
     def flush(self) -> None:
@@ -218,6 +219,7 @@ def open_wifi_runtime(
         host=host,
         port=port,
         timeout=timeout,
+        transport_error=frame_error,
     )
     frame_transport = WifiFrameTransport(
         byte_transport,

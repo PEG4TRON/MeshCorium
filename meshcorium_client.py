@@ -605,7 +605,7 @@ class _ReaderOwnedFrameHub:
 
     @staticmethod
     def _is_transient_read_timeout(exc: Exception | None) -> bool:
-        return isinstance(exc, MeshCoreError) and str(exc) == TRANSPORT_READ_TIMEOUT_ERROR
+        return exc is not None and str(exc) == TRANSPORT_READ_TIMEOUT_ERROR
 
     def close(self) -> None:
         thread: threading.Thread | None = None
