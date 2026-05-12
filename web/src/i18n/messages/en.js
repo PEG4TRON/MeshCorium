@@ -1091,7 +1091,7 @@ export default {
       title: 'Connection type',
       usb: 'USB',
       ble: 'BLE',
-      wifi: 'Wi-Fi',
+      wifi: 'WI-FI(LAN)',
     },
     ble: {
       device: 'BLE device',

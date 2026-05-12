@@ -63,6 +63,7 @@ const connectionIconStyle = computed(() => {
   }
   return null
 })
+const showLanConnectionLabel = computed(() => connectionTransportType.value === 'wifi')
 
 const batteryPercent = computed(() => {
   return resolveDisplayedBatteryPercent({
@@ -183,6 +184,7 @@ useIntervalFn(() => {
             {{ notificationSoundEnabled ? '🔊' : '🔇' }}
           </button>
           <img v-if="session.connected && connectionIconUrl" :src="connectionIconUrl" class="mc-usb-icon" :class="connectionIconClass" :style="connectionIconStyle" :alt="connectionIconAlt" />
+          <strong v-else-if="session.connected && showLanConnectionLabel" class="mc-transport-label">LAN</strong>
           <img v-if="batteryIndicatorIconUrl" :src="batteryIndicatorIconUrl" class="mc-battery-icon" :alt="batteryIndicatorIconAlt" />
           <strong v-if="showBatteryPercent && batteryPercent != null" class="mc-battery-percent">{{ batteryPercent }}%</strong>
         </div>

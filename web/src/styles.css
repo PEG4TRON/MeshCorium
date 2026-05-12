@@ -977,6 +977,19 @@ button {
   letter-spacing: -.02em;
 }
 
+.mc-transport-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 30px;
+  font-size: 15px;
+  line-height: 1;
+  font-weight: 800;
+  letter-spacing: .04em;
+  flex: 0 0 auto;
+}
+
 .mc-battery {
   gap: 6px;
 }
