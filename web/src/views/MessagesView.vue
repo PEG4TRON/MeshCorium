@@ -766,9 +766,21 @@ function hasOwnSummaryValue(summaryMap, key) {
   return Boolean(summaryMap) && Object.prototype.hasOwnProperty.call(summaryMap, key)
 }
 
-function resolveChannelSummaryCount(summaryMap, channel, fallbackValue = null) {
+function resolveChannelSummaryValue(summaryMap, channel, fallbackValue = null) {
   for (const key of getChannelMuteKeys(channel)) {
     const parsed = parseScopedConversationKey(key)
+    const legacyChannelIdentity = parsed.baseKey.startsWith('channelid:')
+      ? parsed.baseKey.slice('channelid:'.length)
+      : ''
+    const legacyChannelIdx = parsed.baseKey.startsWith('channel:')
+      ? parsed.baseKey.slice('channel:'.length)
+      : ''
+    if (legacyChannelIdentity && hasOwnSummaryValue(summaryMap, legacyChannelIdentity)) {
+      return Number(summaryMap[legacyChannelIdentity] || 0)
+    }
+    if (legacyChannelIdx && hasOwnSummaryValue(summaryMap, legacyChannelIdx)) {
+      return Number(summaryMap[legacyChannelIdx] || 0)
+    }
     if (hasOwnSummaryValue(summaryMap, parsed.baseKey)) {
       return Number(summaryMap[parsed.baseKey] || 0)
     }
@@ -777,6 +789,10 @@ function resolveChannelSummaryCount(summaryMap, channel, fallbackValue = null) {
     }
   }
   return fallbackValue == null ? null : Number(fallbackValue || 0)
+}
+
+function resolveChannelSummaryCount(summaryMap, channel, fallbackValue = null) {
+  return resolveChannelSummaryValue(summaryMap, channel, fallbackValue)
 }
 
 function resolveContactSummaryCount(summaryMap, contact, fallbackValue = null) {
@@ -1594,7 +1610,11 @@ const mentionNotificationEntries = computed(() => {
       mentionCount: row.mentionCount,
       highlightTone: 'mention',
       value: row.value,
-      focusMessageId: Number(unreadSummary.value.channel_first_mention_ids[row.channelKey] || unreadSummary.value.channel_first_unread_ids[row.channelKey] || 0),
+      focusMessageId: resolveChannelSummaryValue(
+        unreadSummary.value.channel_first_mention_ids,
+        row.channel,
+        resolveChannelSummaryValue(unreadSummary.value.channel_first_unread_ids, row.channel, 0),
+      ),
     })
   }
   for (const row of directConversationRows.value) {
@@ -1633,7 +1653,11 @@ const regularNotificationEntries = computed(() => {
       mentionCount: row.mentionCount,
       highlightTone: 'unread',
       value: row.value,
-      focusMessageId: Number(unreadSummary.value.channel_first_unread_ids[row.channelKey] || unreadSummary.value.channel_first_mention_ids[row.channelKey] || 0),
+      focusMessageId: resolveChannelSummaryValue(
+        unreadSummary.value.channel_first_unread_ids,
+        row.channel,
+        resolveChannelSummaryValue(unreadSummary.value.channel_first_mention_ids, row.channel, 0),
+      ),
     })
   }
   for (const row of directConversationRows.value) {
