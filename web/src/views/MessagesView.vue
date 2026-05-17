@@ -267,21 +267,62 @@ function buildOfficialPublicChannelFallback() {
 
 const conversationChannelsSource = computed(() => {
   const liveChannels = Array.isArray(session.channels) ? session.channels : []
+  const directoryChannels = Array.isArray(messageConversationDirectory.value?.channels) ? messageConversationDirectory.value.channels : []
+  const directoryByKey = new Map(
+    directoryChannels
+      .map((channel) => [channelListMergeKey(channel), channel])
+      .filter(([key]) => Boolean(key)),
+  )
   const merged = new Map()
   const upsertChannel = (channel, isOnNode = false) => {
     const key = channelListMergeKey(channel)
     if (!key) {
       return
     }
+    const preview = directoryByKey.get(key)
     const current = merged.get(key) || {}
     merged.set(key, {
       ...current,
       ...channel,
+      ...(preview
+        ? {
+            description: String(preview?.description || channel?.description || current?.description || ''),
+            last_message_preview: String(
+              preview?.last_message_preview
+              || channel?.last_message_preview
+              || current?.last_message_preview
+              || '',
+            ),
+            last_message_from_self: Boolean(
+              preview?.last_message_from_self
+              ?? channel?.last_message_from_self
+              ?? current?.last_message_from_self
+              ?? false,
+            ),
+            last_message_ts: Number(
+              preview?.last_message_ts
+              || channel?.last_message_ts
+              || current?.last_message_ts
+              || 0,
+            ),
+            unread_count: Number(
+              preview?.unread_count
+              || channel?.unread_count
+              || current?.unread_count
+              || 0,
+            ),
+            mention_count: Number(
+              preview?.mention_count
+              || channel?.mention_count
+              || current?.mention_count
+              || 0,
+            ),
+          }
+        : {}),
       is_on_node: Boolean(current?.is_on_node) || Boolean(isOnNode) || Boolean(channel?.is_on_node),
     })
   }
   if (accessAllMeshcoriumMessages.value && accessAllMeshcoriumChannels.value) {
-    const directoryChannels = Array.isArray(messageConversationDirectory.value?.channels) ? messageConversationDirectory.value.channels : []
     for (const channel of directoryChannels) {
       upsertChannel(channel, false)
     }
@@ -300,7 +341,32 @@ const conversationChannelsSource = computed(() => {
 })
 const conversationContactsSource = computed(() => {
   if (!accessAllMeshcoriumMessages.value) {
-    return Array.isArray(session.contacts) ? session.contacts : []
+    const liveContacts = Array.isArray(session.contacts) ? session.contacts : []
+    const directoryContacts = Array.isArray(messageConversationDirectory.value?.contacts) ? messageConversationDirectory.value.contacts : []
+    if (!liveContacts.length || !directoryContacts.length) {
+      return liveContacts
+    }
+    const directoryByPrefix = new Map(
+      directoryContacts
+        .map((contact) => [getContactPrefix(contact?.pubkey_prefix || contact?.public_key || ''), contact])
+        .filter(([prefix]) => Boolean(prefix)),
+    )
+    return liveContacts.map((contact) => {
+      const preview = directoryByPrefix.get(getContactPrefix(contact?.pubkey_prefix || contact?.public_key || ''))
+      if (!preview) {
+        return contact
+      }
+      return {
+        ...contact,
+        last_message_text: String(preview?.last_message_text || contact?.last_message_text || ''),
+        last_message_at: Number(preview?.last_message_at || contact?.last_message_at || 0),
+        last_message_from_self: Boolean(
+          preview?.last_message_from_self ?? contact?.last_message_from_self ?? false,
+        ),
+        unread_count: Number(preview?.unread_count || contact?.unread_count || 0),
+        mention_count: Number(preview?.mention_count || contact?.mention_count || 0),
+      }
+    })
   }
   const contacts = Array.isArray(messageConversationDirectory.value?.contacts) ? messageConversationDirectory.value.contacts : []
   return contacts.length ? contacts : (Array.isArray(session.contacts) ? session.contacts : [])
