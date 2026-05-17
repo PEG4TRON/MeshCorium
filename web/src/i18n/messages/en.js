@@ -958,6 +958,7 @@ export default {
     },
     popup: {
       openChat: 'Open chat',
+      ruler: 'Ruler',
     },
     ruler: {
       pointLabel: 'Ruler point',

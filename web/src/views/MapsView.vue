@@ -716,7 +716,7 @@ const rulerSegmentModels = computed(() => {
 const mapViewport = computed(() => {
   const allPoints = mapPoints.value
   const points = scrollerMode.value === 'trace'
-    ? allPoints.filter((point) => point.kind === 'repeater')
+    ? allPoints.filter((point) => point.kind === 'repeater' || point.kind === 'self')
     : allPoints
   const selfPoint = allPoints.find((point) => point.kind === 'self') || null
   const preferSelf = viewportMode.value === 'self' && selfPoint
@@ -896,22 +896,36 @@ function buildPopup(point) {
     popupHost.appendChild(keyLine)
   }
 
-  if (point.kind !== 'self' && point.publicKey) {
+  if (point.kind !== 'self') {
     const actions = document.createElement('div')
     actions.className = 'mc-map-popup-actions'
 
-    const chatButton = document.createElement('button')
-    chatButton.type = 'button'
-    chatButton.className = 'mc-map-popup-action-button'
-    chatButton.textContent = t('maps.popup.openChat')
-    chatButton.addEventListener('click', (event) => {
+    if (point.kind === 'contact' && point.publicKey) {
+      const chatButton = document.createElement('button')
+      chatButton.type = 'button'
+      chatButton.className = 'mc-map-popup-action-button'
+      chatButton.textContent = t('maps.popup.openChat')
+      chatButton.addEventListener('click', (event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        openContactChatFromMap(point.publicKey).catch((error) => {
+          session.setStatus(error instanceof Error ? error.message : String(error || t('maps.status.chatOpenFailed')), true)
+        })
+      })
+      actions.appendChild(chatButton)
+    }
+
+    const rulerButton = document.createElement('button')
+    rulerButton.type = 'button'
+    rulerButton.className = 'mc-map-popup-action-button'
+    rulerButton.textContent = t('maps.popup.ruler')
+    rulerButton.addEventListener('click', (event) => {
       event.preventDefault()
       event.stopPropagation()
-      openContactChatFromMap(point.publicKey).catch((error) => {
-        session.setStatus(error instanceof Error ? error.message : String(error || t('maps.status.chatOpenFailed')), true)
-      })
+      addMapPointToRuler(point)
     })
-    actions.appendChild(chatButton)
+    actions.appendChild(rulerButton)
+
     popupHost.appendChild(actions)
   }
 
@@ -932,6 +946,39 @@ async function openContactChatFromMap(publicKey) {
     path: '/messages',
     query: { contact: normalized },
   })
+}
+
+function nextRulerPointId() {
+  rulerPointIdSeq += 1
+  return rulerPointIdSeq
+}
+
+function appendRulerPoint(lat, lon) {
+  return {
+    id: nextRulerPointId(),
+    lat,
+    lon,
+  }
+}
+
+function addMapPointToRuler(point) {
+  const lat = Number(point?.lat)
+  const lon = Number(point?.lon)
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    return
+  }
+  const nextPoints = Array.isArray(rulerPoints.value) ? [...rulerPoints.value] : []
+  if (!nextPoints.length) {
+    const selfCoords = extractValidGeoPoint(session.self)
+    if (!selfCoords) {
+      session.setStatus(t('maps.status.selfLocationMissing'), true)
+      return
+    }
+    nextPoints.push(appendRulerPoint(selfCoords.lat, selfCoords.lon))
+  }
+  nextPoints.push(appendRulerPoint(lat, lon))
+  rulerPoints.value = nextPoints
+  activeMapPopup?.remove()
 }
 
 function buildMarkerSyncSignature() {
@@ -1620,14 +1667,9 @@ function addRulerPointFromContextMenu() {
     closeMapContextMenu()
     return
   }
-  rulerPointIdSeq += 1
   rulerPoints.value = [
     ...rulerPoints.value,
-    {
-      id: rulerPointIdSeq,
-      lat,
-      lon,
-    },
+    appendRulerPoint(lat, lon),
   ]
   closeMapContextMenu()
 }

@@ -958,6 +958,7 @@ export default {
     },
     popup: {
       openChat: 'Открыть чат',
+      ruler: 'Рулетка',
     },
     ruler: {
       pointLabel: 'Точка рулетки',
