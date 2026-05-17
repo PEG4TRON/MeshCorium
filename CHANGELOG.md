@@ -2,11 +2,30 @@
 
 ## Dev / Unreleased
 
-- Experimental Wi-Fi / TCP companion transport work is in progress in the development workspace.
-- Backend work now includes a dedicated `meshcorium_wifi_transport.py` module, `WIFI_TRANSPORT_TYPE` router integration, and manual `host:port` endpoint parsing aligned with the MeshCore TCP references.
-- Frontend work now includes a manual Wi-Fi connect form with persisted host/port fields instead of the old placeholder-only transport tab.
-- Settings/history work is being made transport-aware so Wi-Fi endpoints do not inherit USB-only `baudrate` presentation.
-- Docker runtime alignment in development now includes the Wi-Fi transport module in the image build path.
+- No unreleased notes yet after `v0.7.0`.
+
+## v0.7.0
+
+Release `MeshCorium v0.7.0 -- Docker + USB + BLE + WIFI/LAN` promotes the previously experimental Wi-Fi/LAN TCP transport into the published release profile and aligns the runtime so post-connect behavior is transport-aware across USB, BLE, and Wi-Fi/LAN.
+
+### Wi-Fi / LAN transport
+
+- Wi-Fi/LAN TCP companion transport is now part of the release bundle through `meshcorium_wifi_transport.py` and `WIFI_TRANSPORT_TYPE` router integration.
+- The connection UI now exposes a real manual `host:port` Wi-Fi/LAN connect flow instead of a placeholder-only transport tab.
+- Saved/startup connection handling, phonebar transport state, and settings-side connection selection now understand Wi-Fi/LAN endpoints as first-class transport profiles.
+
+### Runtime parity and message flow
+
+- Active session routing for SSE, API requests, and post-connect screens was extended so Contacts, Messages, Maps, Settings, and shell runtime logic follow the actual active transport instead of assuming USB-only `selectedPort` semantics.
+- Bootstrap now performs an initial queued-message drain after `ready` so message history does not wait for a later `MSG_WAITING` event before appearing.
+- Wi-Fi frame read timeouts are now treated as transient idle gaps rather than fatal reader failures, reducing disconnects during long idle periods or heavy channel history reads.
+- Conversation previews now stay aligned between the open chat and the dialog card list by applying fresh `/api/messages/conversations` preview data to live on-node dialog rows.
+
+### Docker and packaging
+
+- Docker release metadata now uses `v0.7.0` labels.
+- The release Docker bundle continues to build the frontend inside Docker build and includes the current backend/frontend code used by the ordinary launcher runtime, including Wi-Fi/LAN transport support.
+- Launcher-side frontend builds now reserve a larger default Node heap, reducing Vite out-of-memory failures on weaker hosts during release startup/build paths.
 
 ## v0.6.1
 

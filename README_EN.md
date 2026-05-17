@@ -10,18 +10,13 @@ Current transports:
 
 - `USB serial`
 - `BLE`
+- `Wi-Fi / LAN`
 
-Development workspace note:
-
-- experimental `Wi-Fi / TCP` integration is currently in progress;
-- the active development code already includes backend TCP transport plumbing and a manual `host:port` connect flow;
-- this is not yet release-validated and should not be treated as part of the published `v0.6.1` release profile.
-
-`MeshCorium v0.6.1 -- Docker + USB + BLE` release status:
+`MeshCorium v0.7.0 -- Docker + USB + BLE + WIFI/LAN` release status:
 
 - `USB serial` — permanent and validated connection path, not being removed from the project
 - `BLE` — additional companion-node connection path through Linux / BlueZ, available alongside USB serial
-- `Wi-Fi` — UI placeholder only, real transport not implemented yet
+- `Wi-Fi / LAN` — manual TCP `host:port` connection path, available alongside USB serial and BLE
 - `Docker Compose` — deployment variant kept alongside the ordinary launcher/systemd flow
 
 BLE is implemented through a dedicated transport adapter and is available in the connection UI. It is still a new connection path whose behavior depends on the Linux host, BlueZ, and the specific BLE adapter.
@@ -30,7 +25,7 @@ BLE is implemented through a dedicated transport adapter and is available in the
 
 - Python backend with a local web UI
 - Vue frontend for the main application surfaces
-- node connection through `USB serial` or `BLE`
+- node connection through `USB serial`, `BLE`, or `Wi-Fi / LAN`
 - separate saved-node history for USB and BLE nodes
 - known-node and BLE PIN persistence in a local DB
 - channels, messages, and direct conversations
@@ -43,15 +38,15 @@ BLE is implemented through a dedicated transport adapter and is available in the
 - remote repeater/room-server management through the companion session
 - systemd-friendly launcher for local installation as a service
 
-## Main Difference Between `v0.6.1` And `v0.6.0`
+## Main Difference Between `v0.7.0` And `v0.6.1`
 
-`v0.6.1` additionally adds:
+`v0.7.0` additionally adds:
 
-- browser notifications for unread growth across all unread types after mute and owner-scope filtering;
-- a combined unread badge in the browser tab title;
-- updated Docker release labels and image metadata for `v0.6.1`.
+- official release support for `Wi-Fi / LAN` TCP transport through a manual `host:port` flow;
+- transport-aware post-connect routing so screens and SSE listeners follow the active session across USB, BLE, and Wi-Fi/LAN;
+- updated Docker release labels and image metadata for `v0.7.0`.
 
-## Main `v0.6.x` Difference Versus `v0.5.3`
+## Main `v0.6.x` / `v0.7.x` Difference Versus `v0.5.3`
 
 `v0.5.3` was a `Docker + USB` release: Docker deployment was added to the stable USB serial workflow, while BLE was still mostly groundwork.
 
@@ -141,12 +136,14 @@ This release also ships a Docker-based runtime variant:
 
 This does not replace the ordinary launcher or systemd flow. It is an additional way to run the same build.
 
-In `v0.6.1`, the Docker variant is aligned with the current application code:
+In `v0.7.0`, the Docker variant is aligned with the current application code:
 
 - the image builds the current Vue frontend during Docker build
 - the backend includes the new known-node, DB import/export, and BLE transport modules
+- the backend now also includes the Wi-Fi/LAN TCP transport module used by the ordinary launcher runtime
 - USB serial remains available through host `/dev` passthrough
 - BLE uses host BlueZ through the host system D-Bus socket
+- Wi-Fi/LAN TCP transport works through ordinary container networking without special device passthrough
 
 Default bind mounts in `docker-compose.yml`:
 
@@ -193,7 +190,7 @@ Recommended update flow:
    - `data/meshcorium_contacts.sqlite3`
    - `data/client_settings.json`
 
-3. Extract `MeshCorium v0.6.1 -- Docker + USB + BLE` into a new directory next to the old installation.
+3. Extract `MeshCorium v0.7.0 -- Docker + USB + BLE + WIFI/LAN` into a new directory next to the old installation.
 
 4. Copy the preserved data files from the old `v0.5.0` installation into the new `data/` directory.
 
@@ -217,7 +214,7 @@ Update notes:
   - `expected CONTACTS_START, got code 18`
   this release includes backend hardening for that startup failure mode.
 - If `v0.5.1` still showed generic connect/bootstrap timeouts, this release adds deeper backend startup telemetry and transport/runtime hardening for diagnosis and stabilization.
-- Keep the old installation directory as a rollback copy until `v0.6.1` is confirmed to work correctly.
+- Keep the old installation directory as a rollback copy until `v0.7.0` is confirmed to work correctly.
 
 ## Remove The systemd Service
 
@@ -228,7 +225,7 @@ Update notes:
 ## Useful Notes
 
 - If `web/dist` is already present, the launcher can use the existing frontend build as a fallback.
-- The current release profile supports `USB serial`, `BLE`, and Docker Compose operation.
+- The current release profile supports `USB serial`, `BLE`, `Wi-Fi / LAN`, and Docker Compose operation.
 - Local runtime data typically lives in:
   - `data/`
   - `logs/`
