@@ -3044,15 +3044,16 @@ async function submitRepeaterLogin() {
     } else {
       patchRepeaterContact(publicKey, {})
     }
+    const authSaved = Boolean(payload?.auth_saved)
     patchRepeaterContact(publicKey, {
       is_favorite: true,
       group_tags: Array.from(new Set([...(Array.isArray(contact?.group_tags) ? contact.group_tags : []), 'favorites'])),
-      repeater_auth_saved: Boolean(useSavedAuth || requestBody.remember_auth),
+      repeater_auth_saved: authSaved,
       backend: {
         ...(contact?.backend || {}),
         is_favorite: true,
-        repeater_auth_saved: Boolean(useSavedAuth || requestBody.remember_auth),
-        repeater_auth_saved_at: Boolean(useSavedAuth || requestBody.remember_auth)
+        repeater_auth_saved: authSaved,
+        repeater_auth_saved_at: authSaved
           ? Math.floor(Date.now() / 1000)
           : Number(contact?.backend?.repeater_auth_saved_at || 0),
       },

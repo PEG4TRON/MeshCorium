@@ -4665,6 +4665,7 @@ def _get_effective_node_contact_limit(live_contacts: list[dict] | None = None) -
 
 
 def _compact_contact_for_client(contact: dict) -> dict:
+    backend = dict(contact.get("backend") or {})
     return {
         "owner_id": _normalize_owner_id(contact.get("owner_id")),
         "public_key": str(contact.get("public_key") or "").lower(),
@@ -4690,8 +4691,15 @@ def _compact_contact_for_client(contact: dict) -> dict:
         "last_message_from_self": bool(contact.get("last_message_from_self")),
         "is_favorite": bool(contact.get("is_favorite")),
         "group_tags": list(contact.get("group_tags") or []),
+        "repeater_auth_saved": bool(contact.get("repeater_auth_saved") or backend.get("repeater_auth_saved")),
+        "repeater_auth_saved_at": int(contact.get("repeater_auth_saved_at") or backend.get("repeater_auth_saved_at") or 0),
         "is_on_node": bool(contact.get("is_on_node")),
-        "is_local_self": bool(contact.get("is_local_self") or (contact.get("backend") or {}).get("is_local_self")),
+        "is_local_self": bool(contact.get("is_local_self") or backend.get("is_local_self")),
+        "backend": {
+            "repeater_auth_saved": bool(contact.get("repeater_auth_saved") or backend.get("repeater_auth_saved")),
+            "repeater_auth_saved_at": int(contact.get("repeater_auth_saved_at") or backend.get("repeater_auth_saved_at") or 0),
+            "is_local_self": bool(contact.get("is_local_self") or backend.get("is_local_self")),
+        },
     }
 
 

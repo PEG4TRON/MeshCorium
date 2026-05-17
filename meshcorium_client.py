@@ -1977,10 +1977,20 @@ class MeshCoreClient:
         wait_timeout = max(5.0, min((sent.suggested_timeout_ms / 1000.0) * 1.2, 30.0))
         if wait_timeout_secs is not None:
             wait_timeout = max(wait_timeout, max(0.0, float(wait_timeout_secs)))
-        success, is_admin, login_tag, acl_permissions, firmware_level = self.wait_for_repeater_login(
-            destination_public_key[:6],
-            wait_timeout,
-        )
+        try:
+            success, is_admin, login_tag, acl_permissions, firmware_level = self.wait_for_repeater_login(
+                destination_public_key[:6],
+                wait_timeout,
+            )
+        except MeshCoreError as exc:
+            message = str(exc or "")
+            if "empty frame while waiting for repeater login result" not in message.lower():
+                raise
+            grace_timeout = max(5.0, min(wait_timeout * 0.5, 15.0))
+            success, is_admin, login_tag, acl_permissions, firmware_level = self.wait_for_repeater_login(
+                destination_public_key[:6],
+                grace_timeout,
+            )
         return RepeaterLoginResult(
             success=bool(success),
             public_key_prefix=destination_public_key[:6].hex(),
