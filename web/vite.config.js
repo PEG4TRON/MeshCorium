@@ -6,6 +6,7 @@ export default defineConfig({
   plugins: [vue(), VueDevTools()],
   base: '/connect-app/',
   build: {
+    chunkSizeWarningLimit: 700,
     outDir: 'dist',
     emptyOutDir: true,
   },

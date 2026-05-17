@@ -18,6 +18,7 @@ WEB_DIST_INDEX="${WEB_DIR}/dist/index.html"
 WEB_DIST_DIR="${WEB_DIR}/dist"
 NPM_INSTALL_TIMEOUT_SECONDS="${MESHCORIUM_NPM_INSTALL_TIMEOUT_SECONDS:-30}"
 NPM_BUILD_TIMEOUT_SECONDS="${MESHCORIUM_NPM_BUILD_TIMEOUT_SECONDS:-30}"
+FRONTEND_NODE_MAX_OLD_SPACE_MB="${MESHCORIUM_FRONTEND_NODE_MAX_OLD_SPACE_MB:-1024}"
 
 cd "${SCRIPT_DIR}"
 
@@ -607,6 +608,15 @@ run_with_optional_timeout() {
     "$@"
 }
 
+frontend_node_options() {
+    local heap_mb
+    heap_mb="$(printf '%s' "${FRONTEND_NODE_MAX_OLD_SPACE_MB}" | tr -cd '0-9')"
+    if [[ -z "${heap_mb}" ]]; then
+        heap_mb="1024"
+    fi
+    printf '%s\n' "--max-old-space-size=${heap_mb}"
+}
+
 write_hash_marker() {
     local marker_path="$1"
     local marker_value="$2"
@@ -772,7 +782,7 @@ if [[ -f "${WEB_DIR}/package.json" ]]; then
         # though the actual build succeeds interactively. For the startup path it is
         # safer to keep old hashed assets around than to downgrade the whole launch
         # to a stale-dist warning.
-        if (cd "${WEB_DIR}" && run_with_optional_timeout "${NPM_BUILD_TIMEOUT_SECONDS}" npm run build -- --configLoader runner --emptyOutDir false); then
+        if (cd "${WEB_DIR}" && run_with_optional_timeout "${NPM_BUILD_TIMEOUT_SECONDS}" env NODE_OPTIONS="${NODE_OPTIONS:-} $(frontend_node_options)" npm run build -- --configLoader runner --emptyOutDir false); then
             write_hash_marker "${WEB_BUILD_HASH_FILE}" "${CURRENT_WEB_BUILD_HASH}"
         else
             warn_using_stale_frontend_dist "frontend build failed (npm run build)" || exit 1
