@@ -254,3 +254,10 @@ Notes:
 
 - this release is focused on USB companion connectivity
 - BLE transport is not included in this release
+
+## v0.7.3 — BugFix: auto-reload + state race
+
+### Fixed
+- Page now navigates to self (`location.href = location.href`) after successful update — full reload
+- Polling continues on network errors (server restart during update)
+- `update_state` file written BEFORE Python starts — no 5-minute cache of stale "updating" state
