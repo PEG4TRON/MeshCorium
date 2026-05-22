@@ -254,3 +254,9 @@ Notes:
 
 - this release is focused on USB companion connectivity
 - BLE transport is not included in this release
+
+## v0.7.4 — BugFix: missing web/index.html in release
+
+### Fixed
+- Release was missing `web/index.html` (Vite entry point), causing launcher crash loop
+- `find: 'index.html': No such file or directory` → `hash_tree` → `set -e` kill

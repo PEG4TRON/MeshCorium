@@ -213,7 +213,7 @@ const meshcoreRadioPresetCatalog = [
   { id: 'off-grid-918', label: 'Off-Grid 918', freqMhz: 918, bwKhz: 250, sf: 11, cr: 5, txPowerDbm: 20 },
 ]
 const meshcoriumBrandLogoUrl = '/icons/Meshcorium3.png'
-const meshcoriumDisplayVersion = ref('v0.7.3')
+const meshcoriumDisplayVersion = ref('v0.7.4')
 const updateCheck = ref({
   current_version: '',
   latest_version: '',
