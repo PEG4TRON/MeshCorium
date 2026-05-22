@@ -1,0 +1,18 @@
+[Unit]
+Description=Meshcorium launcher
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=peg4tron
+Group=peg4tron
+WorkingDirectory=/opt/MeshCorium
+ExecStartPre=+/usr/bin/chgrp dialout /dev/ttyACM0
+ExecStartPre=+/usr/bin/chmod g+rw /dev/ttyACM0
+ExecStart=/opt/MeshCorium/meshcorium-launcher.sh --supervise
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
