@@ -2,7 +2,71 @@
 
 ## Dev / Unreleased
 
-- No unreleased notes yet after `v0.7.0`.
+### Mobile Responsive UI (1024px breakpoint)
+- **Maps page**: Full-screen map with floating controls (☰ sidebar, 📍 center, ☀/🌙 theme), sidebar as bottom-sheet overlay (stats, legend, actions, route tracing), nodebar with ch/cont counters. Desktop unchanged.
+- **Contacts page**: Full mobile shell with compact phonebar, topbar, collapsible search/filter tools, scrollable contacts body, mobile nodebar, bottom dock. Desktop unchanged.
+- **Messages page**: Mobile shell with compact phonebar, topbar, messages list, composer, nodebar, bottom dock.
+- **Settings navigation**: `/settings` shows only category list, section URLs show standalone page with mobile back action. Desktop unchanged.
+- **Notifications overlay**: Notifications open as in-place shell overlay via `query.panel=notifications` instead of navigating to `/messages`. Preserves route query state.
+- **Repeater management**: Adapted for mobile — full-screen category list + category content (9 categories), 2-level navigation like Settings. Added mobile repeater login form.
+- **Mobile docks**: Contacts/Messages docks updated for shared shell-panel toggle. Added fallback global mobile dock for connected routes.
+- **Mobile components**: `MobileContactsShell.vue`, `MobileDockButton.vue`, `MobileMessagesShell.vue`.
+
+### Maps
+- Added a persisted map provider selector on the desktop and mobile Maps sidebars, with the default OSM Raster provider and `OFM Liberty` saved through the MeshCorium client settings config file.
+- Restored reliable map tile loading on the LAN stand by preventing double-proxy tile URLs, accepting valid empty vector `.pbf` tile responses in the backend proxy, and switching the main maps view to a fast OSM raster basemap through the local tile proxy when OpenFreeMap sprite/raster downloads stall.
+- Fixed the OSM raster fallback tile template so MapLibre substitutes numeric `{z}/{x}/{y}` coordinates before the local proxy wraps the request.
+
+### Fixes
+- **Read marker on mobile back**: `goBackFromChat()` now calls `markVisibleMessagesRead()` before clearing conversation selection.
+- **Channel unread summary key**: Fixed key mismatch in `setReadMarker` response handler — use `selectedChannelIdentity` when available.
+- **Read tracking in loadNewerMessages**: Newly loaded messages at bottom of chat are immediately marked as read after merge.
+- **Mobile Contacts notification badge**: Uses audible unread total instead of raw channel/contact unread maps.
+- **Mobile Contacts nodebar**: Added `ch:` channel counter next to `cont:` contact counter.
+- **SSE cascading disconnections**: Prevented cascading SSE disconnections when resuming background session from `_paused_background_session`. Added `_suppress_initial_connected_broadcast` flag.
+
+### Service & Deployment
+- Added systemd service unit (`meshcorium.service`) with automatic ttyACM0 permission fix.
+- Service now handles all ttyACM* and ttyUSB* devices (nRF52, ESP32-S3, ESP32+CP2102/CH340).
+
+### Architecture
+- Refactored update check into `useUpdateCheck.js` composable.
+- Unified mobile navigation patterns.
+- Added `useIsMobile` composable (1024px breakpoint).
+- Added `shellPanels.js` library for shared shell-panel state management.
+- Added `contactRoutes.js` and `statusText.js` libraries.
+
+### Frontend Changes
+- `web/src/views/MapsView.vue`
+- `web/src/views/MessagesView.vue`
+- `web/src/views/ContactsView.vue`
+- `web/src/views/SettingsView.vue`
+- `web/src/components/layout/ConnectedShellLayout.vue`
+- `web/src/components/layout/ShellPageFrame.vue`
+- `web/src/components/layout/MobileContactsShell.vue` (new)
+- `web/src/components/layout/MobileDockButton.vue` (new)
+- `web/src/components/layout/MobileMessagesShell.vue` (new)
+- `web/src/components/messages/MessagesMessageBubble.vue`
+- `web/src/components/messages/MessagesMessageContextMenu.vue`
+- `web/src/components/messages/MessagesNotificationsSheet.vue`
+- `web/src/components/messages/MessagesRouteMapSheet.vue`
+- `web/src/components/contacts/ContactsRepeaterGeoSheet.vue`
+- `web/src/components/contacts/ContactsRouteEditorSheet.vue`
+- `web/src/composables/useMessagesReadTracking.js`
+- `web/src/composables/useUpdateCheck.js` (new)
+- `web/src/composables/useIsMobile.js` (new)
+- `web/src/lib/shellPanels.js` (new)
+- `web/src/lib/contactRoutes.js` (new)
+- `web/src/lib/statusText.js` (new)
+- `web/src/i18n/messages/en.js`
+- `web/src/i18n/messages/ru.js`
+- `web/src/styles.css`
+- `meshcorium_web.py`
+
+### Test Server
+- Deployed and running on test stand (192.168.2.22:8080)
+
+---
 
 ## v0.7.0
 
@@ -54,7 +118,6 @@ Release `MeshCorium v0.6.0 -- Docker + USB + BLE` promotes the post-`v0.5.3` dev
 - Backend transport handling was moved further toward the adapter model: USB serial and BLE are handled by transport-specific adapters while higher-level backend code uses universal connection/session calls.
 - Known-node persistence was added for successful connections, transport type, BLE address, public key, node name, and saved BLE PIN state.
 - BLE PIN handling was changed from repeated dynamic rotation to one-time managed initialization after the first successful user-provided PIN connection, with the saved PIN kept in the known-node DB.
-- Wi-Fi remains a UI placeholder and is not yet a real transport.
 
 ### MeshCore node settings
 
@@ -127,136 +190,3 @@ Release `v0.5.3 -- Docker + USB` is based on post-`v0.5.2` development work and 
 - `meshcorium_web.py` now supports environment-driven runtime paths so the same backend can run in both local and containerized layouts without losing the ordinary `data/` + `logs/` defaults.
 
 ### Release notes
-
-- USB/serial remains the validated primary transport.
-- Docker is now an official packaging/deployment variant in the release bundle.
-- BLE remains experimental groundwork and is not yet considered fully debugged or validated.
-
-## Next release
-
-### Docker and runtime layout
-
-- Added a Docker deployment variant to the release bundle:
-  - `Dockerfile`
-  - `docker-compose.yml`
-- Docker layout is prepared around:
-  - `/etc/meshcorium` for config
-  - `/var/lib/meshcorium` for runtime data
-  - `/var/log/meshcorium` for logs
-- `meshcorium_web.py` now supports environment-driven runtime paths via:
-  - `MESHCORIUM_CONFIG_DIR`
-  - `MESHCORIUM_DATA_DIR`
-  - `MESHCORIUM_LOG_DIR`
-  - optional `MESHCORIUM_CLIENT_SETTINGS_PATH`
-- Ordinary launcher and systemd usage remain supported; Docker is an additional release variant, not a replacement.
-
-## v0.5.2
-
-Release `v0.5.2 -- USB` is based on post-`v0.5.1` development work and includes the following additional user-visible changes on top of `v0.5.1`.
-
-### Stability and diagnostics
-
-- Background-session startup now emits staged bootstrap telemetry into backend logs, so connect timeouts record the last completed bootstrap phase instead of failing with only a generic ready timeout.
-- The companion client response-matching race was fixed so very fast replies are no longer orphaned and misreported as:
-  - `empty response to APP_START`
-  - `empty response to SEND_CHANNEL_MSG`
-- Transport-boundary cleanup was completed: direct serial runtime construction is now confined to the adapter/discovery layer while active runtime paths stay on `ConnectionRouter -> MeshCoreClient(...)`.
-- Frontend diagnostics logging now tolerates file permission/ownership issues without breaking request handling.
-
-### Frontend and settings
-
-- `/settings/about` now shows a branded sticky header with the MeshCorium logo and the current app version.
-- MeshCore settings work in the Vue settings workspace was extended further on both backend and frontend sides.
-
-### Release notes
-
-- USB/serial remains the validated primary transport.
-- BLE remains experimental groundwork and is not yet considered fully debugged or validated.
-
-## v0.5.1
-
-Release `v0.5.1 -- USB` is based on post-`v0.5.0` development work and includes the following user-visible changes relative to `v0.5.0`.
-
-### Runtime and transport
-
-- USB/serial remains the primary and permanent supported transport.
-- Companion-session internals were refactored around a transport abstraction:
-  - `ConnectionRouter`
-  - `ConnectionDescriptor`
-  - `SerialTransportAdapter`
-  - transport-aware `MeshCoreClient`
-- Descriptor-aware backend connection payloads were added while preserving legacy `port` / `baudrate` USB compatibility.
-- Startup hardening was added for companion radios that can emit stray `CHANNEL_INFO` frames while the client is waiting for `CONTACTS_START`. This addresses a startup failure seen in `v0.5.0` as:
-  - `expected CONTACTS_START, got code 18`
-- BLE transport groundwork is included in this release tree as experimental code:
-  - Linux / BlueZ / `bleak` backend path
-  - Nordic UART Service discovery
-  - BLE diagnostics and pairing PIN UI path
-  - BLE is not yet considered fully debugged or validated
-- A Wi-Fi connection mode placeholder was added to the connection float as a future expansion point. It is not implemented as a real transport in this release.
-
-### Frontend and UX
-
-- The old non-Vue legacy frontend was removed from runtime use.
-- Vue routes are now the active frontend contract.
-- `/legacy/*` routes redirect to Vue equivalents instead of loading the old UI.
-- Unknown non-API routes return `404`.
-- Missing Vue build now returns an explicit `503` instead of falling back to the old legacy frontend.
-- Connection screen updates:
-  - USB / BLE / Wi-Fi transport selector
-  - separate saved-node history per transport mode
-  - forget action for saved connection history entries
-  - BLE pairing PIN is treated as transient input and is no longer persisted in browser storage
-
-### Messaging, notifications, and contacts
-
-- Message, unread, direct, and highlight flows were refined in the Vue frontend.
-- Contact and workspace UX received multiple improvements across list presentation and detail views.
-- Contact timeline fields and “last heard / advert / traffic” presentation were improved in the contact workspace.
-- Direct-history message recall in the composer was extended and improved.
-- Clicking sender / mention names in chat can open matching contacts.
-
-### Repeater tooling
-
-- Repeater management flow received multiple UI and persistence improvements.
-- Saved repeater authorization support was added on the backend side.
-- Repeater login float behavior was improved for retry handling and timeout cases.
-
-### Launcher, docs, and packaging readiness
-
-- Launcher bootstrap behavior was improved for raw Debian-like and RHEL-like systems.
-- Launcher can install missing system dependencies with user approval.
-- README set, screenshot, and release packaging layout were expanded compared to `v0.5.0`.
-- Packaging groundwork and FHS-oriented planning were documented for future `deb` / `rpm` work.
-
-### Important release notes
-
-- USB/serial support is not being removed. BLE is an additional connection option, not a replacement.
-- BLE code is included for forward progress, but USB remains the validated path for this release.
-- If you are updating specifically to avoid the `expected CONTACTS_START, got code 18` startup failure from `v0.5.0`, this release contains the corresponding backend hardening.
-
-## v0.5.0
-
-Initial public USB release of MeshCorium.
-
-Highlights:
-
-- self-hosted MeshCore client with a hybrid contact system
-- Python backend with local web interface
-- Vue frontend for Messages, Contacts, Maps, and Settings
-- local contact database with node-exported contact persistence
-- unread, mention, and direct notification flows
-- repeater and room-server management through companion session
-- launcher with `--run`, `--install`, and `--service-remove`
-- Debian-like and RHEL-like dependency bootstrap in the launcher
-
-Notes:
-
-- this release is focused on USB companion connectivity
-- BLE transport is not included in this release
-
-## v0.7.4 — BugFix: missing web/index.html in release
-
-### Fixed
-- Release was missing `web/index.html` (Vite entry point), causing launcher crash loop
-- `find: 'index.html': No such file or directory` → `hash_tree` → `set -e` kill

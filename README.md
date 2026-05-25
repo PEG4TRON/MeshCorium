@@ -8,7 +8,7 @@ Basic project overview:
 
 MeshCorium is a self-hosted MeshCore client with a hybrid contact system and a local web interface for working with a MeshCore node through companion firmware.
 
-`MeshCorium v0.7.0 -- Docker + USB + BLE + WIFI/LAN` ships the Docker Compose packaging variant, permanent USB serial transport, BLE node connection through Linux / BlueZ, manual Wi-Fi/LAN TCP node connection, and browser-side unread notifications.
+Current dev version adds full mobile responsive UI (1024px breakpoint) for all major views: Maps, Contacts, Messages, Settings, and Repeater Management. Desktop layout and all existing transports (USB, BLE, Wi-Fi/LAN, Docker) remain unchanged.
 
 ## Preview
 
@@ -19,6 +19,17 @@ MeshCorium is a self-hosted MeshCore client with a hybrid contact system and a l
 ## Release Status
 
 The latest published release is `MeshCorium v0.7.0 -- Docker + USB + BLE + WIFI/LAN`.
+
+### Dev (current)
+
+- **Mobile Responsive UI**: Maps, Contacts, Messages, Settings, Repeater Management — all adapted for 1024px breakpoint with dedicated mobile shells, overlays, and bottom docks.
+- **Maps**: Map provider selector (OSM Raster / OFM Liberty), reliable tile loading through local proxy, fixed OSM raster fallback template.
+- **SSE**: Cascading disconnection prevention when resuming background sessions.
+- **Read tracking**: Fixed read marker on mobile back navigation, channel unread key mismatch, loadNewerMessages auto-mark.
+- **Service**: Systemd unit with automatic ttyACM0/ttyUSB* permission fix.
+- **Architecture**: `useIsMobile`, `useUpdateCheck`, `shellPanels.js`, `contactRoutes.js`, `statusText.js`.
+
+### v0.7.0 — Docker + USB + BLE + WIFI/LAN
 
 Key `v0.7.0` differences relative to `v0.6.1`:
 
