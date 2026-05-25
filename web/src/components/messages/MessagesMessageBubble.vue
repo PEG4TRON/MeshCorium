@@ -25,6 +25,8 @@ function setCardElement(element) {
 }
 
 function handleContextMenu(event) {
+  event.preventDefault()
+  event.stopPropagation()
   emit('open-context-menu', {
     event,
     renderedMessage: props.renderedMessage,

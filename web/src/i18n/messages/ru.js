@@ -15,6 +15,7 @@ export default {
     cancel: 'Отмена',
     clear: 'Очистить',
     close: 'Закрыть',
+    back: 'Назад',
     confirm: 'Подтвердить',
     confirmation: 'Подтверждение',
     contacts: 'Контакты',
@@ -860,6 +861,11 @@ export default {
       themeDark: 'Тёмная',
       switchToLight: 'Переключить карту на светлую версию',
       switchToDark: 'Переключить карту на тёмную версию',
+    },
+    provider: {
+      title: 'Провайдер карт',
+      subtitle: 'Выбор сохраняется в файле конфигурации MeshCorium.',
+      saveFailed: 'Не удалось сохранить провайдер карт.',
     },
     legend: {
       title: 'Легенда',

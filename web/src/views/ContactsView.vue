@@ -1,16 +1,20 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useStorage, useWindowSize } from '@vueuse/core'
+import { useStorage } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
 import ContactsRepeaterGeoSheet from '../components/contacts/ContactsRepeaterGeoSheet.vue'
 import ContactsRouteEditorSheet from '../components/contacts/ContactsRouteEditorSheet.vue'
 import MessagesConfirmSheet from '../components/messages/MessagesConfirmSheet.vue'
+import MobileContactsShell from '../components/layout/MobileContactsShell.vue'
+import MobileDockButton from '../components/layout/MobileDockButton.vue'
 import ShellPageFrame from '../components/layout/ShellPageFrame.vue'
 import ShellPhonebar from '../components/layout/ShellPhonebar.vue'
 import PluginDropdown from '../components/ui/PluginDropdown.vue'
+import { useIsMobile } from '../composables/useIsMobile'
 import { filterStatusTextForTransport } from '../lib/statusText'
+import { buildToggleShellPanelLocation } from '../lib/shellPanels'
 import {
   buildContactRouteInputFromContact,
   buildKnownRoutePublicKeys,
@@ -44,7 +48,7 @@ const session = useSessionStore()
 const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
-const { width } = useWindowSize()
+const { isMobile } = useIsMobile()
 
 const contactsLoading = ref(false)
 const groupsLoading = ref(false)
@@ -232,8 +236,7 @@ const isContactsRootMode = computed(() => contactsMode.value === 'root')
 const isGroupsMode = computed(() => contactsMode.value === 'groups')
 const isRepeaterLoginMode = computed(() => contactsMode.value === 'repeater-login')
 const isRepeaterManagementMode = computed(() => contactsMode.value === 'repeater-management')
-const isMobile = computed(() => width.value <= 980)
-const isShellMobile = computed(() => width.value <= 760)
+const isShellMobile = computed(() => isMobile.value)
 const effectiveToolsCollapsed = computed(() => {
   return isShellMobile.value
     ? contactsToolsCollapsed.value
@@ -530,6 +533,14 @@ const totalContactSummary = computed(() => {
   }
 })
 
+const channelCountSummary = computed(() => {
+  const visibleCount = Math.max(0, Number(session.sessionSnapshot?.channels_count || 0))
+  return {
+    visibleCount,
+    totalSlots: Math.max(0, Number(session.device?.max_channels || 0)),
+  }
+})
+
 const orderOptions = computed(() => ([
   { value: 'latest-messages', label: t('contactsView.orderOptions.latestMessages') },
   { value: 'heard-recently', label: t('contactsView.orderOptions.heardRecently') },
@@ -670,6 +681,12 @@ const listSummaryText = computed(() => {
     totalDbTotal: totalContactSummary.value.dbTotal,
   })
 })
+
+const totalUnreadCount = computed(() => Math.max(0, Number(session.browserUnreadTotals?.unread || 0)))
+
+function toggleNotificationsPanel() {
+  void router.replace(buildToggleShellPanelLocation(route, 'notifications'))
+}
 
 const selectedGroup = computed(() => {
   if (!selectedGroupName.value) {
@@ -1827,6 +1844,9 @@ const workspaceHeaderTitle = computed(() => {
     return t('contactsView.workspace.repeaterLoginTitle')
   }
   if (isRepeaterManagementMode.value) {
+    if (isShellMobile.value && activeRepeaterCategory.value) {
+      return activeRepeaterCategory.value.label
+    }
     return t('contactsView.workspace.repeaterManagementTitle')
   }
   if (selectedContact.value) {
@@ -2448,6 +2468,19 @@ function toggleContactsToolsCollapsed() {
   }
 }
 
+function openContactsSearchTools() {
+  contactsToolsCollapsed.value = false
+}
+
+function closeContactsSearchTools() {
+  contactsToolsCollapsed.value = true
+  closeTransientContactsControls()
+}
+
+async function handleMobileGroupFilterChange(event) {
+  await setSelectedContactGroupFilter(event?.target?.value || 'all')
+}
+
 function setContactsOrder(value) {
   contactsOrder.value = normalizeContactsOrder(value)
   closeTransientContactsControls()
@@ -2998,6 +3031,26 @@ async function closeRepeaterLogin() {
     path: '/contacts',
     query: buildRootQuery(selectedRouteContactKey.value),
   })
+}
+
+async function handleMobileBack() {
+  if (isRepeaterManagementMode.value && isShellMobile.value && repeaterCategoryId.value) {
+    await openRepeaterManagementRoot()
+    return
+  }
+  if (isRepeaterManagementMode.value && isShellMobile.value) {
+    await openRootContacts()
+    return
+  }
+  if (isRepeaterLoginMode.value && isShellMobile.value) {
+    await closeRepeaterLogin()
+    return
+  }
+  if (isContactsRootMode.value) {
+    await selectContact('')
+    return
+  }
+  await openRootContacts()
 }
 
 async function submitRepeaterLogin() {
@@ -3965,7 +4018,560 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
+  <MobileContactsShell v-if="isMobile">
+    <template #phonebar>
+      <ShellPhonebar />
+    </template>
+
+    <template #contacts>
+      <div class="mc-mobile-contacts-page">
+        <header class="mc-mobile-contacts-topbar">
+          <button
+            v-if="selectedContact || !isContactsRootMode"
+            class="mc-mobile-back-btn"
+            type="button"
+            @click="handleMobileBack"
+          >
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+          </button>
+          <div class="mc-mobile-contacts-topbar-copy">
+            <h1>{{ workspaceHeaderTitle }}</h1>
+            <p>{{ workspaceHeaderSubtitle }}</p>
+          </div>
+          <button
+            v-if="isContactsRootMode && !selectedContact"
+            class="mc-mobile-contacts-search-btn"
+            type="button"
+            :class="{ active: !contactsToolsCollapsed }"
+            @click="contactsToolsCollapsed ? openContactsSearchTools() : closeContactsSearchTools()"
+          >
+            <span aria-hidden="true">{{ contactsToolsCollapsed ? '🔎' : '×' }}</span>
+            <span>{{ contactsToolsCollapsed ? t('contactsView.toolset.searchLabel') : t('common.close') }}</span>
+          </button>
+        </header>
+
+        <section v-if="isContactsRootMode && !selectedContact && !contactsToolsCollapsed" class="mc-mobile-contacts-tools">
+          <label class="mc-mobile-contacts-search-field">
+            <span>{{ t('contactsView.toolset.searchLabel') }}</span>
+            <input
+              v-model="contactsSearchTerm"
+              type="text"
+              :placeholder="t('contactsView.toolset.searchPlaceholder')"
+            >
+          </label>
+
+          <div class="mc-mobile-contacts-filter-block">
+            <p>{{ t('contactsView.toolset.orderLabel') }}</p>
+            <div class="mc-mobile-contacts-chip-row">
+              <button
+                v-for="option in orderOptions"
+                :key="`mobile-order-${option.value}`"
+                class="mc-mobile-contacts-chip"
+                :class="{ active: String(option.value) === String(contactsOrder) }"
+                type="button"
+                @click="setContactsOrder(option.value)"
+              >
+                {{ option.label }}
+              </button>
+            </div>
+          </div>
+
+          <div class="mc-mobile-contacts-filter-block">
+            <p>{{ t('contactsView.toolset.filterLabel') }}</p>
+            <div class="mc-mobile-contacts-chip-row">
+              <button
+                v-for="option in filterOptions"
+                :key="`mobile-filter-${option.value}`"
+                class="mc-mobile-contacts-chip"
+                :class="{ active: String(option.value) === String(contactsFilter) }"
+                type="button"
+                @click="setContactsFilter(option.value)"
+              >
+                {{ option.label }}
+              </button>
+            </div>
+          </div>
+
+          <label class="mc-mobile-contacts-select-field">
+            <span>{{ t('contactsView.toolset.groupLabel') }}</span>
+            <select :value="selectedContactGroupFilter" @change="handleMobileGroupFilterChange">
+              <option
+                v-for="option in groupFilterOptions"
+                :key="`mobile-group-${option.value}`"
+                :value="option.value"
+              >
+                {{ option.label }}
+              </option>
+            </select>
+          </label>
+
+          <div class="mc-mobile-contacts-tool-actions">
+            <button class="mc-button mc-button--ghost" type="button" @click="resetContactsFilters">
+              {{ t('contactsView.actions.clearFilters') }}
+            </button>
+            <button class="mc-button mc-button--ghost" type="button" @click="closeContactsSearchTools">
+              {{ t('common.close') }}
+            </button>
+          </div>
+          <p class="mc-mobile-contacts-summary">{{ listSummaryText }}</p>
+        </section>
+
+        <main class="mc-mobile-contacts-body">
+          <template v-if="isContactsRootMode && !selectedContact">
+            <div class="mc-mobile-contacts-list">
+              <div
+                v-for="entry in contactsRows"
+                :key="`mobile-${entry.key}`"
+                class="mc-list-item mc-contacts-list-item mc-mobile-contacts-list-item"
+                :class="{ active: entry.active }"
+                role="button"
+                tabindex="0"
+                @click="selectContact(entry.key)"
+                @keydown="onListItemKeydown($event, entry.key)"
+              >
+                <div class="mc-list-avatar" :class="{ 'is-emoji': !!entry.emoji }">
+                  <span>{{ entry.emoji || entry.avatar }}</span>
+                  <span v-if="entry.unreadCount" class="mc-list-badge">
+                    {{ entry.unreadCount > 99 ? '99+' : entry.unreadCount }}
+                  </span>
+                  <span v-if="entry.mentionCount" class="mc-list-badge mc-list-badge--mention">
+                    {{ entry.mentionCount > 99 ? '99+' : entry.mentionCount }}
+                  </span>
+                </div>
+                <div class="mc-list-main">
+                  <div class="mc-list-title-row">
+                    <p class="mc-list-title">
+                      {{ entry.title }}
+                      <span v-if="entry.favorite" class="mc-contacts-title-favorite" aria-hidden="true">★</span>
+                    </p>
+                  </div>
+                  <p class="mc-contacts-list-key">{{ entry.shortKey }}</p>
+                  <p class="mc-list-preview mc-contacts-list-meta">
+                    {{ entry.kindLabel }} · {{ entry.routeLabel }} · {{ entry.residency }}
+                  </p>
+                  <p v-if="entry.preview" class="mc-list-preview">{{ entry.preview }}</p>
+                </div>
+                <div class="mc-list-corner mc-contacts-list-corner">
+                  <span class="mc-contact-badge">{{ entry.kindBadge }}</span>
+                  <span class="mc-list-meta mc-contacts-list-corner-time">{{ entry.lastSeenAgo }}</span>
+                </div>
+              </div>
+              <div v-if="!contactsRows.length" class="mc-list-empty">
+                {{ contactsLoading ? t('contactsView.loading') : t('contactsView.emptyList') }}
+              </div>
+            </div>
+          </template>
+
+          <template v-else-if="isContactsRootMode && selectedContact && selectedContactRow">
+            <div class="mc-mobile-contacts-detail mc-contacts-detail-stack">
+              <div class="mc-contacts-card mc-contacts-summary-card">
+                <div class="mc-contacts-card-head">
+                  <div class="mc-list-avatar mc-contacts-card-avatar" :class="{ 'is-emoji': !!selectedContactRow.emoji }">
+                    <span>{{ selectedContactRow.emoji || selectedContactRow.avatar }}</span>
+                    <span v-if="selectedContactRow.unreadCount" class="mc-list-badge">
+                      {{ selectedContactRow.unreadCount > 99 ? '99+' : selectedContactRow.unreadCount }}
+                    </span>
+                  </div>
+                  <div class="mc-contacts-card-copy">
+                    <h3>
+                      {{ selectedContactRow.title }}
+                      <span v-if="selectedContactRow.favorite" class="mc-contacts-title-favorite" aria-hidden="true">★</span>
+                    </h3>
+                    <p>{{ selectedContactRow.kindLabel }} · {{ selectedContactRow.residency }} · {{ selectedContactRow.shortKey }}</p>
+                    <p class="mc-contacts-list-meta">{{ selectedContactRow.routeLabel }} · {{ selectedContactRow.lastSeenAgo }}</p>
+                    <div v-if="selectedContactRow.hasCoordinates" class="mc-contacts-geo-row">
+                      <button
+                        class="mc-contacts-geo-button"
+                        type="button"
+                        :aria-label="t('contactsView.actions.openMap')"
+                        @click="openContactOnMap(selectedContact)"
+                      >📍</button>
+                      <span class="mc-contacts-geo-coords">{{ selectedContactRow.coordinatesText }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="mc-contacts-tag-row">
+                <div class="mc-contacts-tag-row-left">
+                  <span
+                    v-for="tag in selectedContactGroupTags"
+                    :key="`mobile-tag-${tag}`"
+                    class="mc-contacts-tag-chip"
+                    :class="{ 'is-muted': tag === t('contactsView.groups.none') }"
+                  >
+                    {{ tag }}
+                  </span>
+                </div>
+              </div>
+
+              <div class="mc-contacts-action-grid">
+                <button class="mc-button mc-button--ghost" type="button" @click="toggleSelectedFavorite">
+                  {{ selectedContactFavoriteActionLabel }}
+                </button>
+                <button class="mc-button mc-button--ghost" type="button" @click="shareSelectedContact">
+                  {{ t('contactsView.actions.share') }}
+                </button>
+                <button class="mc-button mc-button--ghost" type="button" @click="exportSelectedContact">
+                  {{ t('contactsView.actions.export') }}
+                </button>
+                <button
+                  v-if="selectedContactRow.canDirect && selectedContactHasDirect"
+                  class="mc-button mc-button--primary"
+                  type="button"
+                  @click="openSelectedDirectConversation"
+                >
+                  {{ t('contactsView.actions.openDirect') }}
+                </button>
+                <button
+                  v-else-if="selectedContactRow.canDirect"
+                  class="mc-button mc-button--primary"
+                  type="button"
+                  @click="startSelectedDirectConversation"
+                >
+                  {{ t('contactsView.actions.startDirect') }}
+                </button>
+                <button
+                  v-if="selectedContactRow.canManageRepeater"
+                  class="mc-button mc-button--primary"
+                  type="button"
+                  @click="openSelectedRepeaterManagement"
+                >
+                  {{ t('contactsView.actions.openRepeaterManagement') }}
+                </button>
+                <button
+                  v-if="selectedContactRow.canDirect"
+                  class="mc-button mc-button--ghost"
+                  type="button"
+                  @click="openRouteEditorPlaceholder"
+                >
+                  {{ t('contactsView.actions.route') }}
+                </button>
+                <button class="mc-button mc-button--ghost" type="button" @click="openSelectedContactGroups">
+                  {{ t('contactsView.actions.groups') }}
+                </button>
+              </div>
+            </div>
+          </template>
+
+          <template v-else-if="isGroupsMode">
+            <div class="mc-mobile-contacts-list">
+              <button
+                v-for="group in groupEntries"
+                :key="`mobile-group-list-${group.name}`"
+                class="mc-list-item mc-contacts-list-item"
+                :class="{ active: group.active }"
+                type="button"
+                @click="selectGroup(group.name)"
+              >
+                <div class="mc-list-avatar mc-list-avatar--group">#</div>
+                <div class="mc-list-main">
+                  <div class="mc-list-title-row">
+                    <p class="mc-list-title">{{ group.name }}</p>
+                    <span class="mc-list-meta">{{ group.count }}</span>
+                  </div>
+                  <p class="mc-list-preview">{{ t('contactsView.groups.memberCount', { count: group.count }) }}</p>
+                </div>
+              </button>
+              <div v-if="!groupEntries.length" class="mc-list-empty">
+                {{ groupsLoading ? t('contactsView.groups.loading') : t('contactsView.groups.empty') }}
+              </div>
+            </div>
+          </template>
+
+          <template v-else-if="isRepeaterLoginMode">
+            <div class="mc-contacts-placeholder-card mc-contacts-repeater-login-mobile">
+              <h3>{{ t('contactsView.repeater.loginTitle') }}</h3>
+              <p>
+                {{ t('contactsView.repeater.loginMeta', {
+                  target: selectedRepeaterContact ? contactDisplayName(selectedRepeaterContact, t('messages.fallback.unnamedContact')) : shortContactPublicKey(selectedRouteContactKey),
+                  publicKey: selectedRepeaterContact ? shortContactPublicKey(selectedRepeaterContact) : shortContactPublicKey(selectedRouteContactKey),
+                }) }}
+              </p>
+              <p class="mc-contacts-card-note">
+                {{ repeaterLoginUsesSavedAuth ? t('contactsView.repeater.savedAuthAutoLoginNote') : t('contactsView.repeater.loginMemoryNote') }}
+              </p>
+              <div v-if="repeaterLoginUsesSavedAuth" class="mc-contacts-repeater-login-autostate">
+                {{ t('contactsView.repeater.savedAuthConnecting') }}
+              </div>
+              <div v-if="repeaterLoginNotice.message" class="mc-contacts-repeater-login-notice">
+                {{ repeaterLoginNotice.message }}
+              </div>
+              <div v-if="selectedContactHasSavedRepeaterAuth" class="mc-contacts-secondary-actions">
+                <button class="mc-button mc-button--ghost" type="button" :disabled="repeaterLoginBusy" @click="deleteSelectedRepeaterAuth">
+                  {{ t('contactsView.actions.deleteRepeaterAuth') }}
+                </button>
+              </div>
+              <template v-else>
+                <label class="mc-settings-row mc-settings-row--contacts">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('contactsView.repeater.passwordLabel') }}</strong>
+                    <span>{{ t('contactsView.repeater.passwordHint') }}</span>
+                  </div>
+                  <div class="mc-settings-row-control">
+                    <input
+                      v-model="repeaterLoginPassword"
+                      class="mc-settings-inline-input"
+                      type="password"
+                      name="repeater-login-secret"
+                      autocomplete="new-password"
+                      autocapitalize="off"
+                      autocorrect="off"
+                      spellcheck="false"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-form-type="other"
+                      :placeholder="t('contactsView.repeater.passwordPlaceholder')"
+                      :disabled="repeaterLoginBusy"
+                      @keydown.enter.prevent="submitRepeaterLogin"
+                    >
+                  </div>
+                </label>
+                <div class="mc-settings-row mc-settings-row--contacts">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('contactsView.repeater.rememberAuthLabel') }}</strong>
+                    <span>{{ t('contactsView.repeater.rememberAuthHint') }}</span>
+                  </div>
+                  <div class="mc-settings-row-control">
+                    <div class="mc-settings-checkbox">
+                      <input
+                        v-model="repeaterLoginRememberAuth"
+                        type="checkbox"
+                        :disabled="repeaterLoginBusy"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </template>
+              <div class="mc-contacts-action-grid" :class="{ 'mc-contacts-action-grid--single': repeaterLoginUsesSavedAuth }">
+                <button class="mc-button mc-button--ghost" type="button" @click="closeRepeaterLogin">
+                  {{ t('contactsView.actions.backToContacts') }}
+                </button>
+                <button
+                  v-if="repeaterLoginSavedAuthRetryAllowed"
+                  class="mc-button mc-button--primary"
+                  type="button"
+                  :disabled="repeaterLoginBusy || !selectedRepeaterContact"
+                  @click="submitRepeaterLogin"
+                >
+                  {{ t('contactsView.repeater.retryLogin') }}
+                </button>
+                <button
+                  v-if="!repeaterLoginUsesSavedAuth"
+                  class="mc-button mc-button--primary"
+                  type="button"
+                  :disabled="repeaterLoginBusy || !selectedRepeaterContact"
+                  @click="submitRepeaterLogin"
+                >
+                  {{ repeaterLoginBusy ? t('contactsView.repeater.loginBusy') : t('contactsView.repeater.loginSubmit') }}
+                </button>
+              </div>
+            </div>
+          </template>
+
+          <template v-else-if="isRepeaterManagementMode">
+            <!-- Category list (no category selected) -->
+            <div v-if="!repeaterCategoryId" class="mc-mobile-contacts-repeater-management">
+              <div class="mc-contacts-placeholder-card">
+                <h3>{{ t('contactsView.repeater.managementIntroTitle') }}</h3>
+                <p>{{ t('contactsView.repeater.managementIntroNote') }}</p>
+              </div>
+              <div class="mc-list-scroll mc-contacts-list-scroll">
+                <button
+                  v-for="category in repeaterCategories"
+                  :key="`mobile-repeater-cat-${category.id}`"
+                  class="mc-list-item mc-contacts-list-item mc-contacts-list-item--compact"
+                  type="button"
+                  @click="openRepeaterCategory(category.id)"
+                >
+                  <div class="mc-list-main">
+                    <div class="mc-list-title-row">
+                      <p class="mc-list-title">{{ category.label }}</p>
+                    </div>
+                  </div>
+                  <div class="mc-list-corner">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+                  </div>
+                </button>
+                <div v-if="!repeaterCategories.length" class="mc-list-empty">
+                  {{ t('contactsView.repeater.managementEmptyCategories') }}
+                </div>
+              </div>
+            </div>
+
+            <!-- Category content (category selected) -->
+            <div
+              v-else-if="selectedRepeaterContact && selectedRepeaterContactRow"
+              class="mc-contacts-repeater-workspace mc-contacts-repeater-workspace--detail-only"
+            >
+              <section class="mc-contacts-repeater-detail-pane">
+                <div class="mc-contacts-detail-stack">
+                  <div class="mc-contacts-card mc-contacts-repeater-login-summary">
+                    <div class="mc-contacts-card-head">
+                      <div class="mc-list-avatar mc-contacts-card-avatar" :class="{ 'is-emoji': !!selectedRepeaterContactRow.emoji }">
+                        <span>{{ selectedRepeaterContactRow.emoji || selectedRepeaterContactRow.avatar }}</span>
+                      </div>
+                      <div class="mc-contacts-card-copy">
+                        <h3>{{ selectedRepeaterContactRow.title }}</h3>
+                        <p>{{ selectedRepeaterContactRow.kindLabel }} · {{ selectedRepeaterContactRow.residency }} · {{ selectedRepeaterContactRow.shortKey }}</p>
+                        <p class="mc-contacts-list-meta">{{ selectedRepeaterContactRow.routeLabel }} · {{ selectedRepeaterContactRow.lastSeenAgo }}</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="mc-contacts-placeholder-card">
+                    <h3>{{ activeRepeaterCategory.label }}</h3>
+                    <p>
+                      {{ t('contactsView.repeater.managementNote', {
+                        target: contactDisplayName(selectedRepeaterContact, t('messages.fallback.unnamedContact')),
+                        category: activeRepeaterCategory.label,
+                      }) }}
+                    </p>
+                  </div>
+                  <template v-if="activeRepeaterCards.length && selectedRepeaterManagementDraft">
+                    <section class="mc-contacts-repeater-card-stack">
+                      <article
+                        v-for="card in activeRepeaterCards"
+                        :key="card.id"
+                        class="mc-settings-card mc-contacts-repeater-card"
+                      >
+                        <div class="mc-settings-card-copy">
+                          <h3>{{ card.title }}</h3>
+                          <p>{{ card.description }}</p>
+                        </div>
+                        <div class="mc-contacts-repeater-card-fields">
+                          <template v-for="field in card.fields" :key="field.key">
+                            <label class="mc-settings-row mc-settings-row--contacts">
+                              <div class="mc-settings-row-label">
+                                <strong>{{ field.label }}</strong>
+                              </div>
+                              <div class="mc-settings-row-control mc-settings-row-control--stack">
+                                <textarea
+                                  v-if="field.type === 'textarea'"
+                                  v-model="selectedRepeaterManagementDraft[field.key]"
+                                  class="mc-settings-inline-input mc-contacts-repeater-textarea"
+                                  :rows="field.rows || 4"
+                                  :maxlength="field.maxLength || 400"
+                                  :placeholder="field.placeholder || ''"
+                                  :disabled="repeaterManagementBusyAction === card.id"
+                                ></textarea>
+                                <select
+                                  v-else-if="field.type === 'select'"
+                                  v-model="selectedRepeaterManagementDraft[field.key]"
+                                  class="mc-settings-native-select mc-contacts-repeater-select"
+                                  :disabled="repeaterManagementBusyAction === card.id"
+                                >
+                                  <option
+                                    v-for="option in field.options || []"
+                                    :key="`${field.key}-${option.value}`"
+                                    :value="option.value"
+                                  >
+                                    {{ option.label }}
+                                  </option>
+                                </select>
+                                <input
+                                  v-else
+                                  v-model="selectedRepeaterManagementDraft[field.key]"
+                                  class="mc-settings-inline-input mc-contacts-repeater-input"
+                                  :type="field.type || 'text'"
+                                  :maxlength="field.maxLength || undefined"
+                                  :min="field.min ?? undefined"
+                                  :max="field.max ?? undefined"
+                                  :step="field.step ?? undefined"
+                                  :placeholder="field.placeholder || ''"
+                                  :disabled="repeaterManagementBusyAction === card.id"
+                                >
+                              </div>
+                            </label>
+                          </template>
+                        </div>
+                        <div class="mc-settings-card-actions">
+                          <button
+                            v-if="card.applyLabel"
+                            class="mc-button mc-button--primary"
+                            type="button"
+                            :disabled="repeaterManagementBusyAction === card.id"
+                            @click="applyRepeaterCard(card.id)"
+                          >
+                            {{ repeaterManagementBusyAction === card.id ? t('contactsView.repeater.applying') : card.applyLabel }}
+                          </button>
+                          <template v-if="card.actions?.length">
+                            <button
+                              v-for="action in card.actions"
+                              :key="action.id"
+                              :class="repeaterActionButtonClass(action)"
+                              type="button"
+                              :disabled="repeaterManagementBusyAction === action.id"
+                              @click="runRepeaterCardAction(card.id, action.id)"
+                            >
+                              {{ repeaterManagementBusyAction === action.id ? t('contactsView.repeater.applying') : action.label }}
+                            </button>
+                          </template>
+                        </div>
+                        <template v-if="card.actions?.length">
+                          <p
+                            v-for="action in card.actions.filter((entry) => entry.notice)"
+                            :key="`${card.id}-${action.id}-notice`"
+                            class="mc-contacts-card-note"
+                          >
+                            {{ action.notice }}
+                          </p>
+                        </template>
+                      </article>
+                    </section>
+                  </template>
+                  <div v-else class="mc-contacts-placeholder-card">
+                    <h3>{{ t('contactsView.repeater.categoryShellTitle') }}</h3>
+                    <p>{{ t('contactsView.repeater.categoryShellNote') }}</p>
+                  </div>
+                </div>
+              </section>
+            </div>
+            <div v-else class="mc-contacts-placeholder-card">
+              <h3>{{ t('contactsView.repeater.managementInvalidTitle') }}</h3>
+              <p>{{ t('contactsView.repeater.managementInvalidNote') }}</p>
+              <button class="mc-button mc-button--ghost mc-contacts-shell-action" type="button" @click="openRootContacts">
+                {{ t('contactsView.actions.backToContacts') }}
+              </button>
+            </div>
+          </template>
+
+          <template v-else>
+            <div class="mc-contacts-placeholder-card mc-mobile-contacts-placeholder">
+              <h3>{{ workspaceHeaderTitle }}</h3>
+              <p>{{ workspaceHeaderSubtitle }}</p>
+              <button class="mc-button mc-button--ghost" type="button" @click="openRootContacts">
+                {{ t('contactsView.actions.backToContacts') }}
+              </button>
+            </div>
+          </template>
+        </main>
+      </div>
+    </template>
+
+    <template #nodebar>
+      <div class="mc-phonebar-row">
+        <div class="mc-phonebar-left">
+          <div class="mc-metric">ch: <strong>{{ channelCountSummary.visibleCount }}/{{ channelCountSummary.totalSlots }}</strong></div>
+          <div class="mc-metric">cont: <strong>{{ totalContactSummary.nodeResident }}/{{ totalContactSummary.nodeLimit || '—' }}/{{ totalContactSummary.dbTotal }}</strong></div>
+        </div>
+        <div class="mc-phonebar-right">
+          <span class="mc-node-led" :class="session.connected ? 'status-connected' : 'status-disconnected'"></span>
+          <div class="mc-node-name"><strong>{{ session.self?.name || session.selectedSavedConnection?.node_name || t('common.offline') }}</strong></div>
+        </div>
+      </div>
+    </template>
+
+    <template #dock>
+      <MobileDockButton icon="🔔" label="Notif" :badge="totalUnreadCount || ''" @click="toggleNotificationsPanel" />
+      <MobileDockButton icon="💬" label="Chats" @click="router.push('/messages')" />
+      <MobileDockButton icon="👥" label="Contacts" :active="true" />
+      <MobileDockButton icon="🗺" label="Map" @click="router.push('/maps')" />
+      <MobileDockButton icon="⚙" label="Settings" @click="router.push('/settings')" />
+    </template>
+  </MobileContactsShell>
+
   <ShellPageFrame
+    v-else
     scroller-class="mc-sidebar--contacts"
     scroller-header-class="mc-sidebar-top--contacts"
     workspace-class="mc-content--contacts"

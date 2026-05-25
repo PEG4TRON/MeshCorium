@@ -8,6 +8,7 @@ import 'vue3-emoji-picker/css'
 import { useMessagesConversationList } from '../composables/useMessagesConversationList'
 import { useMessagesReadTracking } from '../composables/useMessagesReadTracking'
 import { useMessagesVirtualChat } from '../composables/useMessagesVirtualChat'
+import { useUpdateCheck } from '../composables/useUpdateCheck'
 import MessagesChatHistoryPane from '../components/messages/MessagesChatHistoryPane.vue'
 import MessagesComposerBar from '../components/messages/MessagesComposerBar.vue'
 import MessagesConfirmSheet from '../components/messages/MessagesConfirmSheet.vue'
@@ -19,6 +20,14 @@ import MessagesMessageContextMenu from '../components/messages/MessagesMessageCo
 import MessagesRouteMapSheetLoading from '../components/messages/MessagesRouteMapSheetLoading.vue'
 import ShellPageFrame from '../components/layout/ShellPageFrame.vue'
 import ShellPhonebar from '../components/layout/ShellPhonebar.vue'
+import MobileMessagesShell from '../components/layout/MobileMessagesShell.vue'
+import MobileDockButton from '../components/layout/MobileDockButton.vue'
+import { useIsMobile } from '../composables/useIsMobile'
+import {
+  buildCloseShellPanelLocation,
+  buildOpenShellPanelLocation,
+  buildToggleShellPanelLocation,
+} from '../lib/shellPanels'
 import {
   buildContactRoutePayloadFromMessage,
   buildKnownRoutePublicKeys,
@@ -49,6 +58,7 @@ const route = useRoute()
 const router = useRouter()
 const session = useSessionStore()
 const { t, locale } = useI18n()
+const { isMobile } = useIsMobile()
 
 const bellIconUrl = '/icons/bell-icon.svg'
 const messagesIconUrl = '/icons/paper-plane.png'
@@ -68,19 +78,7 @@ const DIALOG_SENT_HISTORY_MAX_ITEMS = 20
 const HYDRATION_DIALOG_SETTLE_MS = 1800
 const CONVERSATION_ROW_ESTIMATED_HEIGHT = 77
 
-const updateCheck = ref({ update_available: false, next_version: '' })
-
-async function loadUpdateCheck() {
-  try {
-    const data = await session.api('/api/update/check')
-    updateCheck.value = {
-      update_available: Boolean(data?.update_available),
-      next_version: data?.next_version || '',
-    }
-  } catch { /* non-critical */ }
-}
-
-const updateAvailable = computed(() => updateCheck.value.update_available && Boolean(updateCheck.value.next_version))
+const { updateCheck, updateAvailable, loadUpdateCheck } = useUpdateCheck(session)
 const CONVERSATION_ROW_OVERSCAN_PX = 500
 const MESSAGE_VIRTUAL_ESTIMATED_HEIGHT = 128
 const MESSAGE_VIRTUAL_GAP = 16
@@ -115,6 +113,12 @@ const gifPickerOffset = ref(0)
 const gifPickerHasMore = ref(true)
 const sending = ref(false)
 const activeConversationTotalMessages = ref(0)
+const mobileChatOpen = computed(() => {
+  return Boolean(
+    (selectedConversationKind.value === 'channel' && (selectedChannelIdx.value != null || selectedChannelIdentity.value)) ||
+    (selectedConversationKind.value === 'contact' && selectedContactKey.value)
+  )
+})
 const composerTextarea = ref(null)
 const emojiPickerOpen = ref(false)
 const animatedMessageKeys = ref([])
@@ -148,17 +152,22 @@ const notificationsOpen = computed({
   },
   set(value) {
     if (value) {
-      router.replace({ path: '/messages', query: { panel: 'notifications' } })
+      router.replace(buildOpenShellPanelLocation(route, 'notifications'))
       return
     }
     if (route.name === 'messages' && String(route.query.panel || '') === 'notifications') {
-      router.replace({ path: '/messages' })
+      router.replace(buildCloseShellPanelLocation(route))
     }
   },
 })
 const notificationsMentionsCollapsed = ref(false)
 const notificationsRegularCollapsed = ref(false)
 const chatActionsMenuOpen = ref(false)
+
+function toggleNotificationsPanel() {
+  void router.replace(buildToggleShellPanelLocation(route, 'notifications'))
+}
+
 const dialogHistoryCache = useStorage('meshcorium_dialog_history_cache_v1', {}, globalThis.sessionStorage)
 const channelDialogOrder = useStorage('meshcorium_channel_dialog_order_v1', [])
 const sentDraftHistoryCache = useStorage('meshcorium_sent_draft_history_v2', {}, globalThis.sessionStorage)
@@ -1112,6 +1121,7 @@ const currentConversation = computed(() => {
 const workspaceShowsChannelEditor = computed(() => {
   return workspaceMode.value === 'edit-channel' || workspaceMode.value === 'new-channel'
 })
+const mobileWorkspaceOpen = computed(() => mobileChatOpen.value || workspaceShowsChannelEditor.value)
 
 const editingChannel = computed(() => {
   const idx = Number(channelEditorForm.value.channelIdx ?? -1)
@@ -1450,6 +1460,23 @@ const conversationLoadedMeta = computed(() => {
 
 const nodePreviewUrl = computed(() => {
   return resolveNodePreviewUrl(session.deviceModel || session.selfName || '')
+})
+
+const channelCountSummary = computed(() => {
+  const visibleCount = Math.max(0, Number(session.sessionSnapshot?.channels_count || 0))
+  return {
+    visibleCount,
+    totalSlots: Math.max(0, Number(session.device?.max_channels || 0)),
+  }
+})
+
+const contactCountSummary = computed(() => {
+  const summary = session.sessionSnapshot?.contact_summary || {}
+  return {
+    nodeResident: Math.max(0, Number(summary?.node_resident || 0)),
+    nodeLimit: Math.max(0, Number(summary?.node_limit || 0)),
+    dbTotal: Math.max(0, Number(summary?.db_total || 0)),
+  }
 })
 
 const shellBlurred = computed(() => {
@@ -3728,6 +3755,8 @@ async function loadNewerMessages() {
         messages.value = mergeUniqueMessages(messages.value, newerMessages)
         activeConversationTotalMessages.value = Math.max(messages.value.length, Number(data?.total_count || activeConversationTotalMessages.value))
         scheduleConversationCacheWrite(targetConversationKey, messages.value, activeConversationTotalMessages.value)
+        await nextTick()
+        markVisibleMessagesRead()
       }
     } else if (selectedConversationKind.value === 'contact' && selectedContactKey.value) {
       const params = new URLSearchParams({
@@ -3747,11 +3776,21 @@ async function loadNewerMessages() {
         messages.value = mergeUniqueMessages(messages.value, newerMessages)
         activeConversationTotalMessages.value = Math.max(messages.value.length, Number(data?.total_count || activeConversationTotalMessages.value))
         scheduleConversationCacheWrite(targetConversationKey, messages.value, activeConversationTotalMessages.value)
+        await nextTick()
+        markVisibleMessagesRead()
       }
     }
   } finally {
     loadingNewerMessages.value = false
   }
+}
+
+function goBackFromChat() {
+  markVisibleMessagesRead()
+  selectedChannelIdx.value = null
+  selectedChannelIdentity.value = ''
+  selectedContactKey.value = ''
+  workspaceMode.value = 'empty'
 }
 
 async function selectChannel(channelOrIdx, options = {}) {
@@ -5347,12 +5386,170 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="mc-messages-route">
+  <!-- MOBILE: Conversation list -->
+  <MobileMessagesShell v-if="isMobile && !mobileWorkspaceOpen">
+    <template #phonebar>
+      <ShellPhonebar />
+    </template>
+
+    <template #conversations>
+      <div class="mc-sidebar-top">
+        <MessagesConversationSidebar
+          section="header"
+          :chat-edit-mode="chatEditMode"
+          @toggle-edit-mode="toggleChatEditMode"
+        />
+      </div>
+      <MessagesConversationSidebar
+        section="body"
+        :chat-edit-mode="chatEditMode"
+        :conversation-list-items="conversationListItems"
+        :visible-conversation-list-window="visibleConversationListWindow"
+        :scroller-entries-length="conversationHasEntries ? 1 : 0"
+        :bind-scroller-ref="setConversationListScroller"
+        :bind-row-element="bindConversationRowElement"
+        @update-scroller-metrics="updateConversationListMetrics"
+        @select-channel="selectChannel"
+        @select-contact="selectContact"
+        @open-channel-editor="openChannelEditor"
+        @start-new-channel-editor="startNewChannelEditor"
+        @reorder-channel="reorderChannelDialog"
+      />
+      <MessagesConversationSidebar
+        section="footer"
+        :status-text="footerStatusText"
+        :status-error="session.statusError"
+        :connected="session.connected"
+      />
+    </template>
+
+    <template #nodebar>
+      <div class="mc-phonebar-row">
+        <div class="mc-phonebar-left">
+          <div class="mc-metric">ch: <strong>{{ channelCountSummary.visibleCount }}/{{ channelCountSummary.totalSlots }}</strong></div>
+          <div class="mc-metric">cont: <strong>{{ contactCountSummary.nodeResident }}/{{ contactCountSummary.nodeLimit }}/{{ contactCountSummary.dbTotal }}</strong></div>
+        </div>
+        <div class="mc-phonebar-right">
+          <div class="mc-node-model">
+            <img v-if="nodePreviewUrl" :src="nodePreviewUrl" alt="" class="mc-node-model-preview" />
+            <strong>{{ session.device?.manufacturer_model || t('common.offline') }}</strong>
+          </div>
+          <span class="mc-node-led" :class="session.connected ? 'status-connected' : 'status-disconnected'"></span>
+          <div class="mc-node-name"><strong>{{ session.self?.name || session.selectedSavedConnection?.node_name || t('common.offline') }}</strong></div>
+        </div>
+      </div>
+    </template>
+
+    <template #dock>
+      <MobileDockButton icon="🔔" label="Notif" :badge="totalUnreadCount || ''" @click="toggleNotificationsPanel" />
+      <MobileDockButton icon="💬" label="Chats" :active="true" />
+      <MobileDockButton icon="👥" label="Contacts" @click="router.push('/contacts')" />
+      <MobileDockButton icon="🗺" label="Map" @click="router.push('/maps')" />
+      <MobileDockButton icon="⚙" label="Settings" @click="router.push('/settings')" />
+    </template>
+  </MobileMessagesShell>
+
+  <!-- MOBILE: Chat -->
+  <div v-else-if="isMobile && mobileWorkspaceOpen" class="mc-mobile-chat-overlay">
+    <ShellPhonebar />
+    <div class="mc-mobile-chat-topbar">
+      <button class="mc-mobile-back-btn" @click="goBackFromChat">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+      </button>
+      <div class="mc-mobile-chat-topbar-title">
+        <MessagesWorkspaceHeader
+          :model="workspaceHeaderModel"
+          :menu-open="chatActionsMenuOpen"
+          @update:menu-open="chatActionsMenuOpen = $event"
+          @close-editor="closeChannelEditor"
+          @open-clear-dialog="openClearMessagesDialogFromMenu"
+          @toggle-regular-mute="toggleCurrentConversationMuteMode('regular')"
+          @toggle-all-mute="toggleCurrentConversationMuteMode('all')"
+        />
+      </div>
+    </div>
+    <div class="mc-mobile-chat-overlay-body">
+      <MessagesChannelEditorWorkspace
+        v-if="workspaceShowsChannelEditor"
+        :model="channelEditorViewModel"
+        @set-type="setChannelEditorType"
+        @update:hashtag="updateChannelEditorHashtag"
+        @update:name="updateChannelEditorName"
+        @update:psk-hex="updateChannelEditorPskHex"
+        @close="closeChannelEditor"
+        @delete="requestDeleteChannelEditor"
+        @save="saveChannelEditor"
+      />
+      <MessagesEmptyWorkspace
+        v-else-if="!currentConversation"
+        :model="workspaceEmptyModel"
+      />
+      <div v-else class="mc-chat-workspace-pane" :style="chatWorkspacePaneStyle">
+        <MessagesChatHistoryPane
+          :loading-older-messages="loadingOlderMessages"
+          :loading-newer-messages="loadingNewerMessages"
+          :messages-length="messages.length"
+          :virtual-message-window="virtualMessageWindow"
+          :visible-rendered-messages="visibleRenderedMessages"
+          :loading-messages="loadingMessages"
+          :show-scroll-to-bottom-button="showScrollToBottomButton"
+          :gif-cdn-url="gifCdnUrl"
+          :bind-scroller-ref="setMessageScroller"
+          :bind-message-card-element="bindMessageCardElement"
+          @scroll="handleMessageScroll"
+          @scroll-to-bottom="scrollToNewestMessage"
+          @message-context-menu="openMessageContextMenu"
+          @open-contact="openContactFromMessage"
+        />
+        <MessagesComposerBar
+          v-if="workspaceMode === 'chat'"
+          :model="composerModel"
+          :emoji-picker-open="emojiPickerOpen"
+          :draft-text="draftText"
+          :gif-cdn-url="gifCdnUrl"
+          :bind-textarea-ref="setComposerTextarea"
+          :on-textarea-keydown="handleComposerTextareaKeydown"
+          @open-gif-picker="openGifPicker"
+          @update:emoji-picker-open="emojiPickerOpen = $event"
+          @select-emoji="handleEmojiSelect"
+          @clear-reply="clearReplyDraft"
+          @clear-draft-gif="clearDraftGif"
+          @update:draft-text="draftText = $event"
+          @send-message="sendMessage"
+        />
+      </div>
+    </div>
+    <div class="mc-mobile-nodebar">
+      <div class="mc-phonebar-row">
+        <div class="mc-phonebar-left">
+          <div class="mc-metric">ch: <strong>{{ channelCountSummary.visibleCount }}/{{ channelCountSummary.totalSlots }}</strong></div>
+          <div class="mc-metric">cont: <strong>{{ contactCountSummary.nodeResident }}/{{ contactCountSummary.nodeLimit }}/{{ contactCountSummary.dbTotal }}</strong></div>
+        </div>
+        <div class="mc-phonebar-right">
+          <div class="mc-node-model">
+            <img v-if="nodePreviewUrl" :src="nodePreviewUrl" alt="" class="mc-node-model-preview" />
+            <strong>{{ session.device?.manufacturer_model || t('common.offline') }}</strong>
+          </div>
+          <span class="mc-node-led" :class="session.connected ? 'status-connected' : 'status-disconnected'"></span>
+          <div class="mc-node-name"><strong>{{ session.self?.name || session.selectedSavedConnection?.node_name || t('common.offline') }}</strong></div>
+        </div>
+      </div>
+    </div>
+    <nav class="mc-mobile-dock">
+      <MobileDockButton icon="🔔" label="Notif" :badge="totalUnreadCount || ''" @click="toggleNotificationsPanel" />
+      <MobileDockButton icon="💬" label="Chats" :active="true" />
+      <MobileDockButton icon="👥" label="Contacts" @click="router.push('/contacts')" />
+      <MobileDockButton icon="🗺" label="Map" @click="router.push('/maps')" />
+      <MobileDockButton icon="⚙" label="Settings" @click="router.push('/settings')" />
+    </nav>
+  </div>
+
+  <!-- DESKTOP -->
+  <div v-else class="mc-messages-route">
     <ShellPageFrame workspace-class="mc-content--shell-body">
       <template #workspace-top>
         <ShellPhonebar />
       </template>
-
       <template #scroller-header>
         <MessagesConversationSidebar
           section="header"

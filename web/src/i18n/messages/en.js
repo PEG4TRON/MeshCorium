@@ -15,6 +15,7 @@ export default {
     cancel: 'Cancel',
     clear: 'Clear',
     close: 'Close',
+    back: 'Back',
     confirm: 'Confirm',
     confirmation: 'Confirmation',
     contacts: 'Contacts',
@@ -860,6 +861,11 @@ export default {
       themeDark: 'Dark',
       switchToLight: 'Switch map to the light version',
       switchToDark: 'Switch map to the dark version',
+    },
+    provider: {
+      title: 'Map provider',
+      subtitle: 'The choice is saved in the MeshCorium config file.',
+      saveFailed: 'Failed to save map provider.',
     },
     legend: {
       title: 'Legend',

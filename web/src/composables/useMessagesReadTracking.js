@@ -93,7 +93,7 @@ export function useMessagesReadTracking(options) {
               })
             }
           } else {
-            const channelKey = String(selectedChannelIdx.value ?? '')
+            const channelKey = String(selectedChannelIdentity?.value || '').trim() || String(selectedChannelIdx.value ?? '')
             if (channelKey) {
               session.patchUnreadSummary((summary) => {
                 summary.channel_unread_counts = { ...(summary.channel_unread_counts || {}), [channelKey]: 0 }

@@ -28,7 +28,7 @@ const { t } = useI18n()
 
 <template>
   <Teleport to="body">
-    <div v-if="model.open" class="mc-overlay" @click="emit('close')">
+    <div v-if="model.open" class="mc-overlay mc-overlay--notifications" @click="emit('close')">
       <section class="mc-notifications-sheet" @click.stop>
         <header class="mc-notifications-header">
           <div class="mc-notifications-copy">

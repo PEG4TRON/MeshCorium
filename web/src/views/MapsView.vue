@@ -7,8 +7,10 @@ import { useRoute, useRouter } from 'vue-router'
 import { ensureMapLibreLoaded } from '../lib/mapLibre'
 import { extractValidGeoPoint, geoDistanceKm, isGeoWithinHomeDistance, safeCoordinate as safeGeoCoordinate } from '../lib/geo'
 import { resolveNodePreviewUrl } from '../lib/nodePreview'
+import { useIsMobile } from '../composables/useIsMobile'
 import ShellPageFrame from '../components/layout/ShellPageFrame.vue'
 import ShellPhonebar from '../components/layout/ShellPhonebar.vue'
+import PluginDropdown from '../components/ui/PluginDropdown.vue'
 import { useSessionStore } from '../stores/session'
 import { filterStatusTextForTransport } from '../lib/statusText'
 
@@ -25,8 +27,41 @@ const MAP_DEFAULT_BOUNDS = {
   minLon: 37.35,
   maxLon: 37.85,
 }
-const MAP_PROVIDER_NAME = 'OpenFreeMap Liberty'
-const OPENFREEMAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty'
+const MAP_PROVIDER_OSM_RASTER = 'osm_raster'
+const MAP_PROVIDER_OFM_LIBERTY = 'ofm_liberty'
+const MAP_PROVIDER_DEFAULT = MAP_PROVIDER_OSM_RASTER
+const MAP_PROVIDER_OPTIONS = [
+  { value: MAP_PROVIDER_OSM_RASTER, label: 'OSM Raster', triggerLabel: 'OSM Raster' },
+  { value: MAP_PROVIDER_OFM_LIBERTY, label: 'OFM Liberty', triggerLabel: 'OFM Liberty' },
+]
+const OPENFREEMAP_STYLE_ORIGIN = 'https://tiles.openfreemap.org/styles/liberty'
+const OSM_RASTER_STYLE = {
+  version: 8,
+  sources: {
+    osm: {
+      type: 'raster',
+      tiles: [
+        'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+      ],
+      tileSize: 256,
+      attribution: '© OpenStreetMap contributors',
+    },
+  },
+  layers: [{ id: 'osm', type: 'raster', source: 'osm' }],
+}
+/** Proxy style URL through meshcorium to avoid mixed-content blocking on iOS Safari. */
+const OPENFREEMAP_STYLE_URL = `/api/tiles/proxy?url=${encodeURIComponent(OPENFREEMAP_STYLE_ORIGIN)}`
+/** Rewrite tile/glyph/sprite requests through the local proxy; stitched to each map instance. */
+const TILE_PROXY_ORIGINS = ['tiles.openfreemap.org', 'tile.openstreetmap.org']
+function tileTransformRequest(url, resourceType) {
+  if (url.startsWith('/api/tiles/proxy') || url.includes('/api/tiles/proxy?')) {
+    return { url }
+  }
+  if (TILE_PROXY_ORIGINS.some((origin) => url.includes(origin))) {
+    return { url: `/api/tiles/proxy?url=${encodeURIComponent(url)}` }
+  }
+  return { url }
+}
 const MAP_STYLE_BOOT_TIMEOUT_MS = 6000
 const MAP_MAIN_PATH = '/maps'
 const MAP_TRACE_PATH = '/maps/route-checks'
@@ -43,6 +78,8 @@ const viewportMode = ref('all')
 const manualView = ref(null)
 const emojiMarkersEnabled = useStorage('maps_emoji_markers_enabled', false)
 const mapThemeMode = useStorage('maps_theme_mode', 'light')
+const selectedMapProvider = computed(() => normalizeMapProvider(session.settingsPayload?.settings?.map_provider))
+const mapProviderOptions = computed(() => MAP_PROVIDER_OPTIONS)
 const traceSelectedKeys = ref([])
 const traceManualInput = ref('')
 const traceSequential = ref(true)
@@ -64,6 +101,16 @@ const mapContextMenu = ref({
 })
 const scrollerMode = ref('main')
 
+const { isMobile } = useIsMobile()
+const mobileScrollerOpen = ref(false)
+
+function toggleMobileScroller() {
+  mobileScrollerOpen.value = !mobileScrollerOpen.value
+}
+function closeMobileScroller() {
+  mobileScrollerOpen.value = false
+}
+
 const serviceStatusCopy = computed(() => {
   const selfName = String(session.self?.name || '').trim()
   if (session.connected) {
@@ -77,6 +124,19 @@ const serviceStatusCopy = computed(() => {
 
 const scrollerFooterStatus = computed(() => {
   return filterStatusTextForTransport(session.statusText, session.selectedTransportType) || serviceStatusCopy.value
+})
+
+const channelCountSummary = computed(() => {
+  const visibleCount = Math.max(0, Number(session.sessionSnapshot?.channels_count || 0))
+  return { visibleCount, totalSlots: Math.max(0, Number(session.device?.max_channels || 0)) }
+})
+const contactCountSummary = computed(() => {
+  const summary = session.sessionSnapshot?.contact_summary || {}
+  return {
+    nodeResident: Math.max(0, Number(summary?.node_resident || 0)),
+    nodeLimit: Math.max(0, Number(summary?.node_limit || 0)),
+    dbTotal: Math.max(0, Number(summary?.db_total || 0)),
+  }
 })
 
 const normalizedMapThemeMode = computed(() => {
@@ -108,21 +168,19 @@ let lastMarkerSyncSignature = ''
 let lastAppliedRouteFocusSignature = ''
 let lastOpenedRouteFocusPopupSignature = ''
 
+function normalizeMapProvider(value) {
+  const provider = String(value || '').trim().toLowerCase()
+  return provider === MAP_PROVIDER_OFM_LIBERTY ? MAP_PROVIDER_OFM_LIBERTY : MAP_PROVIDER_DEFAULT
+}
+
+function buildSelectedMapStyle(provider = selectedMapProvider.value) {
+  return normalizeMapProvider(provider) === MAP_PROVIDER_OFM_LIBERTY
+    ? OPENFREEMAP_STYLE_URL
+    : OSM_RASTER_STYLE
+}
+
 function buildFallbackMapStyle() {
-  return {
-    version: 8,
-    name: 'MeshCorium fallback',
-    sources: {},
-    layers: [
-      {
-        id: 'meshcorium-background',
-        type: 'background',
-        paint: {
-          'background-color': '#10202f',
-        },
-      },
-    ],
-  }
+  return OSM_RASTER_STYLE
 }
 
 function clearMapBootTimer() {
@@ -1338,6 +1396,46 @@ function fitPadding() {
     : { top: 84, right: 84, bottom: 84, left: 84 }
 }
 
+function applyMapProviderStyle(provider = selectedMapProvider.value) {
+  const instance = mapInstance.value
+  if (!instance) {
+    return
+  }
+  instance.__meshcoriumFallbackStyleApplied = false
+  try {
+    instance.setStyle(buildSelectedMapStyle(provider))
+  } catch (error) {
+    console.error('[meshcorium] map-provider-style', {
+      provider,
+      message: error instanceof Error ? error.message : String(error || 'unknown'),
+    })
+    instance.__meshcoriumFallbackStyleApplied = true
+    instance.setStyle(buildFallbackMapStyle())
+  }
+  window.requestAnimationFrame(() => {
+    if (mapInstance.value !== instance) {
+      return
+    }
+    instance.resize()
+    applyViewport({ force: true })
+    scheduleMessageRouteOverlayRender()
+  })
+}
+
+async function updateMapProvider(provider) {
+  const normalizedProvider = normalizeMapProvider(provider)
+  if (normalizedProvider === selectedMapProvider.value) {
+    return
+  }
+  applyMapProviderStyle(normalizedProvider)
+  try {
+    await session.updateClientSettings({ map_provider: normalizedProvider })
+  } catch (error) {
+    session.setStatus(error instanceof Error ? error.message : String(error || t('maps.provider.saveFailed')), true)
+    applyMapProviderStyle(selectedMapProvider.value)
+  }
+}
+
 function applyViewport({ animate = false, force = false } = {}) {
   if (!mapInstance.value) {
     return
@@ -1415,10 +1513,11 @@ async function mountMap() {
       const viewport = mapViewport.value
       const instance = new window.maplibregl.Map({
         container: mapViewportRef.value,
-        style: OPENFREEMAP_STYLE_URL,
+        style: buildSelectedMapStyle(),
         center: [viewport.center.lon, viewport.center.lat],
         zoom: viewport.zoom,
         attributionControl: false,
+        transformRequest: tileTransformRequest,
       })
       mapInstance.value = instance
 
@@ -1466,8 +1565,11 @@ async function mountMap() {
           return
         }
         const sourceId = String(event?.sourceId || event?.source?.id || '').trim()
-        const shouldFallback = Boolean(sourceId) || !mapReady.value
-        if (shouldFallback) {
+        const errorMessage = String(event?.error?.message || event?.message || '').trim()
+        // OpenFreeMap can finish the first render before sprites/raster/vector tiles fail on the LAN stand.
+        // Any source/tile/sprite error means the visible basemap may be incomplete, so switch to OSM raster.
+        const shouldFallback = Boolean(sourceId || errorMessage) || !mapReady.value
+        if (shouldFallback && selectedMapProvider.value === MAP_PROVIDER_OFM_LIBERTY) {
           fallbackToLocalStyle()
         }
       })
@@ -2063,7 +2165,414 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="mc-maps-route">
+  <!-- MOBILE: Fullscreen map with floating controls + bottom-sheet sidebar -->
+  <div v-if="isMobile" class="mc-maps-mobile-shell">
+    <ShellPhonebar class="mc-maps-mobile-phonebar-top" />
+
+    <div class="mc-maps-mobile-viewport">
+      <section class="mc-map-stage">
+        <div v-if="activeMessageRouteModel" class="mc-map-route-panel">
+          <div class="mc-map-route-panel-head">
+            <div>
+              <h3>{{ t('maps.messageRoute.title') }}</h3>
+              <p>{{ activeMessageRouteModel.preview || t('maps.messageRoute.emptyPreview') }}</p>
+            </div>
+            <button class="mc-map-route-close" type="button" @click="clearActiveMessageRoute">×</button>
+          </div>
+          <div class="mc-map-route-panel-meta">
+            <span class="mc-map-chip">{{ activeMessageRouteModel.conversationKind === 'contact' ? 'Direct' : 'Channel' }}</span>
+            <span class="mc-map-chip">{{ t('maps.messageRoute.hopCount', { count: activeMessageRouteModel.hops.length }) }}</span>
+            <span class="mc-map-chip">{{ t('maps.messageRoute.matchedCount', { count: activeMessageRouteModel.routeEntries.filter((entry) => entry.visiblePoints.length).length }) }}</span>
+          </div>
+          <div class="mc-map-route-panel-list">
+            <div
+              v-for="entry in activeMessageRouteModel.routeEntries"
+              :key="entry.hop"
+              class="mc-map-route-panel-item"
+              :class="{ missing: !entry.visiblePoints.length }"
+            >
+              <div class="mc-map-route-panel-item-head">
+                <span class="mc-map-route-panel-item-hop">{{ entry.displayHop }}</span>
+                <span class="mc-map-route-panel-item-state">
+                  {{ entry.visiblePoints.length ? t('maps.messageRoute.matched') : t('maps.messageRoute.missing') }}
+                </span>
+              </div>
+              <div class="mc-map-route-panel-item-body">
+                {{
+                  entry.visiblePoints.length
+                    ? entry.visiblePoints.map((point) => point.displayName).join(', ')
+                    : t('maps.messageRoute.noMatch')
+                }}
+              </div>
+            </div>
+          </div>
+        </div>
+        <div v-if="mapLoading && !mapInstance" class="mc-map-stage-overlay">
+          <div class="mc-workspace-empty mc-workspace-empty--maps">
+            <h3>{{ t('maps.status.loadingTitle') }}</h3>
+            <p>{{ t('maps.status.loadingSubtitle') }}</p>
+          </div>
+        </div>
+
+        <div v-else-if="mapError" class="mc-map-stage-overlay">
+          <div class="mc-workspace-empty mc-workspace-empty--maps">
+            <h3>{{ t('maps.status.unavailableTitle') }}</h3>
+            <p>{{ mapError }}</p>
+          </div>
+        </div>
+
+        <div
+          ref="mapViewportRef"
+          class="mc-map-viewport"
+          :class="{ 'is-ready': mapReady, 'is-dark': normalizedMapThemeMode === 'dark' }"
+          :aria-label="t('maps.title')"
+        ></div>
+        <div
+          v-if="mapContextMenu.open"
+          class="mc-map-context-layer"
+          @click="closeMapContextMenu"
+          @contextmenu.prevent="closeMapContextMenu"
+        >
+          <div
+            class="mc-map-context-menu"
+            :style="{ left: `${mapContextMenu.x}px`, top: `${mapContextMenu.y}px` }"
+            @click.stop
+            @contextmenu.prevent
+          >
+            <p class="mc-map-context-coords">
+              {{ Number(mapContextMenu.lat).toFixed(5) }}, {{ Number(mapContextMenu.lon).toFixed(5) }}
+            </p>
+            <template v-if="mapContextMenu.kind === 'ruler-point'">
+              <button
+                class="mc-map-action-button mc-map-context-action"
+                type="button"
+                @click="deleteRulerPointFromContextMenu"
+              >
+                {{ t('maps.contextMenu.deleteRulerPoint') }}
+              </button>
+            </template>
+            <template v-else>
+              <button
+                class="mc-map-action-button mc-map-context-action"
+                type="button"
+                @click="addRulerPointFromContextMenu"
+              >
+                {{ t('maps.contextMenu.addRulerPoint') }}
+              </button>
+              <button
+                class="mc-map-action-button mc-map-context-action"
+                type="button"
+                :disabled="!session.connected"
+                @click="applyNodeLocationFromContextMenu"
+              >
+                {{ t('maps.contextMenu.setHomeNodeGeo') }}
+              </button>
+            </template>
+          </div>
+        </div>
+      </section>
+
+      <!-- Floating map controls -->
+      <div class="mc-maps-mobile-float-controls">
+        <button
+          class="mc-maps-mobile-float-btn"
+          type="button"
+          :aria-label="t('maps.title')"
+          @click="toggleMobileScroller"
+        >
+          ☰
+        </button>
+        <button
+          class="mc-maps-mobile-float-btn"
+          type="button"
+          :aria-label="t('maps.controls.centerSelf')"
+          :disabled="!hasSelfCoordinates"
+          @click="centerOnSelf"
+        >
+          <img :src="geoIconUrl" alt="" style="width: 18px; height: 18px;" />
+        </button>
+        <button
+          class="mc-maps-mobile-float-btn"
+          type="button"
+          :aria-label="mapThemeToggleTooltip"
+          @click="toggleMapThemeMode"
+        >
+          {{ normalizedMapThemeMode === 'dark' ? '☀' : '🌙' }}
+        </button>
+      </div>
+    </div>
+
+    <!-- Sidebar bottom sheet overlay -->
+    <Teleport to="body">
+      <div v-if="mobileScrollerOpen" class="mc-maps-mobile-sidebar-overlay" @click.self="closeMobileScroller">
+        <div class="mc-maps-mobile-sidebar-panel" @click.stop>
+          <header class="mc-maps-mobile-sidebar-header">
+            <button class="mc-maps-mobile-sidebar-close" type="button" @click="closeMobileScroller">✕</button>
+            <h2 v-if="scrollerMode === 'trace'">{{ t('maps.trace.title') }}</h2>
+            <h2 v-else>{{ t('maps.title') }}</h2>
+          </header>
+
+          <div class="mc-maps-mobile-sidebar-body">
+            <template v-if="scrollerMode === 'trace'">
+              <section class="mc-map-trace-screen">
+                <button class="mc-map-back-button" type="button" @click="closeTraceScroller">
+                  {{ t('maps.trace.controls.back') }}
+                </button>
+
+                <section class="mc-map-trace-card">
+                  <div class="mc-map-location-header">
+                    <h2>{{ t('maps.trace.title') }}</h2>
+                  </div>
+                  <div class="mc-map-trace-controls">
+                    <label class="mc-map-trace-select mc-map-trace-select--route">
+                      <span>{{ t('maps.trace.controls.route') }}</span>
+                      <div class="mc-map-trace-input-row">
+                        <input
+                          :value="traceManualInput"
+                          class="mc-map-trace-input"
+                          type="text"
+                          :disabled="traceBusy"
+                          :placeholder="t('maps.trace.controls.routePlaceholder')"
+                          @input="rebuildTraceSelectionFromInput($event.target.value)"
+                        >
+                        <button class="mc-map-action-button mc-map-action-button--icon" type="button" :disabled="traceBusy" @click="openTracePicker">
+                          +
+                        </button>
+                      </div>
+                    </label>
+                    <label class="mc-map-trace-toggle">
+                      <input v-model="traceSequential" type="checkbox" :disabled="traceBusy">
+                      <span>{{ t('maps.trace.controls.sequential') }}</span>
+                    </label>
+                    <label class="mc-map-trace-select">
+                      <span>{{ t('maps.trace.controls.hashLen') }}</span>
+                      <select v-model.number="traceHashLen" :disabled="traceBusy">
+                        <option :value="1">1</option>
+                        <option :value="2">2</option>
+                        <option :value="4">4</option>
+                        <option :value="8">8</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div class="mc-map-trace-actions">
+                    <button class="mc-map-action-button" type="button" :disabled="traceBusy || !traceSelectedKeys.length" @click="startRouteTrace">
+                      {{ t('maps.trace.controls.start') }}
+                    </button>
+                    <button class="mc-map-action-button" type="button" :disabled="!traceBusy" @click="cancelRouteTrace('user-cancelled')">
+                      {{ t('maps.trace.controls.cancel') }}
+                    </button>
+                    <button class="mc-map-action-button" type="button" :disabled="traceBusy || !traceSelectedKeys.length" @click="clearTraceSelection">
+                      {{ t('maps.trace.controls.clear') }}
+                    </button>
+                  </div>
+                  <div class="mc-map-trace-status" :class="{ 'is-error': traceResult && !traceBusy && !traceResult.success && traceResult.status !== 'cancelled' }">
+                    {{ traceStatusSummary }}
+                  </div>
+                  <div v-if="selectedTracePoints.length" class="mc-map-trace-point-list">
+                    <button
+                      v-for="point in selectedTracePoints"
+                      :key="point.key"
+                      class="mc-map-trace-point"
+                      type="button"
+                      :class="{ active: true }"
+                      :disabled="traceBusy"
+                      @click="toggleTracePoint(point)"
+                      @dblclick.prevent="focusPoint(point)"
+                    >
+                      <span class="mc-map-trace-point-main">
+                        <span class="mc-map-trace-point-name">{{ point.displayName }}</span>
+                        <span class="mc-map-trace-point-meta">{{ t('maps.legend.repeater') }}</span>
+                      </span>
+                      <span class="mc-map-trace-point-check">●</span>
+                    </button>
+                  </div>
+                  <div v-else class="mc-map-trace-empty">
+                    {{ t('maps.trace.empty.noRoute') }}
+                  </div>
+                  <div v-if="traceStepModels.length" class="mc-map-trace-steps">
+                    <div
+                      v-for="step in traceStepModels"
+                      :key="step.key"
+                      class="mc-map-trace-step"
+                      :class="{ pending: step.pending, success: step.success, failed: step.failed }"
+                    >
+                      <div class="mc-map-trace-step-head">
+                        <span class="mc-map-trace-step-title">{{ t('maps.trace.step.title', { hop: step.prefixHops }) }}</span>
+                        <span class="mc-map-trace-step-state">
+                          {{
+                            step.pending
+                              ? t('maps.trace.step.pendingShort')
+                              : step.success
+                                ? t('maps.trace.step.successShort')
+                                : t('maps.trace.step.failedShort')
+                          }}
+                        </span>
+                      </div>
+                      <div class="mc-map-trace-step-route">{{ step.participantLabel }}</div>
+                      <div class="mc-map-trace-step-meta">{{ step.meta }}</div>
+                      <div v-if="step.hopLabels.length" class="mc-map-trace-step-hops">
+                        {{ step.hopLabels.join(' · ') }}
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              </section>
+            </template>
+
+            <template v-else>
+              <section class="mc-map-panel">
+                <div class="mc-map-summary">
+                  <div class="mc-map-summary-card">
+                    <span class="mc-map-summary-value">{{ mapPoints.length }}</span>
+                    <span class="mc-map-summary-label">{{ t('maps.stats.points') }}</span>
+                  </div>
+                  <div class="mc-map-summary-card">
+                    <span class="mc-map-summary-value">{{ contactLocationCount }}</span>
+                    <span class="mc-map-summary-label">{{ t('maps.stats.contactLocations') }}</span>
+                  </div>
+                  <div class="mc-map-summary-card">
+                    <span class="mc-map-summary-value">{{ favoritePointCount }}</span>
+                    <span class="mc-map-summary-label">{{ t('maps.stats.favorites') }}</span>
+                  </div>
+                </div>
+
+                <div class="mc-map-actions">
+                  <button class="mc-map-action-button" type="button" @click="fitAllPoints">
+                    {{ t('maps.controls.fitAll') }}
+                  </button>
+                  <button
+                    class="mc-map-action-button"
+                    type="button"
+                    :class="{ active: emojiMarkersEnabled }"
+                    @click="emojiMarkersEnabled = !emojiMarkersEnabled"
+                  >
+                    {{ t('maps.controls.emojiMarkers') }}
+                  </button>
+                </div>
+
+                <div class="mc-map-legend-card">
+                  <div class="mc-map-legend-title">{{ t('maps.legend.title') }}</div>
+                  <div class="mc-map-legend-list">
+                    <div class="mc-map-legend-item">
+                      <span class="mc-map-legend-self">
+                        <img v-if="selfPreviewUrl" :src="selfPreviewUrl" alt="" />
+                        <span v-else class="mc-map-legend-self-fallback"></span>
+                      </span>
+                      <span>{{ t('maps.legend.self') }}</span>
+                    </div>
+                    <div class="mc-map-legend-item">
+                      <span class="mc-map-legend-dot mc-map-legend-dot--contact"></span>
+                      <span>{{ t('maps.legend.contact') }}</span>
+                    </div>
+                    <div class="mc-map-legend-item">
+                      <span class="mc-map-legend-dot mc-map-legend-dot--repeater"></span>
+                      <span>{{ t('maps.legend.repeater') }}</span>
+                    </div>
+                    <div class="mc-map-legend-item">
+                      <span class="mc-map-legend-dot mc-map-legend-dot--contact is-favorite"></span>
+                      <span>{{ t('maps.legend.favoriteContact') }}</span>
+                    </div>
+                    <div class="mc-map-legend-item">
+                      <span class="mc-map-legend-dot mc-map-legend-dot--repeater is-favorite"></span>
+                      <span>{{ t('maps.legend.favoriteRepeater') }}</span>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <section class="mc-map-provider-card mc-settings-rows">
+                <label class="mc-settings-row mc-map-provider-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('maps.provider.title') }}</strong>
+                    <span>{{ t('maps.provider.subtitle') }}</span>
+                  </div>
+                  <div class="mc-settings-row-control">
+                    <PluginDropdown
+                      :model-value="selectedMapProvider"
+                      :options="mapProviderOptions"
+                      :min-width="220"
+                      @update:model-value="updateMapProvider"
+                    />
+                  </div>
+                </label>
+              </section>
+
+              <section class="mc-map-location-card">
+                <div class="mc-map-location-header">
+                  <h2>{{ t('maps.trace.title') }}</h2>
+                  <p>{{ t('maps.trace.subtitle') }}</p>
+                </div>
+                <button class="mc-map-action-button mc-map-action-button--wide" type="button" @click="openTraceScroller">
+                  {{ t('maps.trace.controls.open') }}
+                </button>
+              </section>
+            </template>
+          </div>
+
+          <footer class="mc-maps-mobile-sidebar-footer">
+            <div class="mc-status" :class="{ 'is-error': session.statusError }">
+              {{ scrollerFooterStatus }}
+            </div>
+          </footer>
+        </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div v-if="tracePickerOpen" class="mc-overlay mc-overlay--soft" @click="closeTracePicker">
+        <section class="mc-map-trace-picker" @click.stop>
+          <div class="mc-map-route-panel-head">
+            <div>
+              <h3>{{ t('maps.trace.controls.pickRepeater') }}</h3>
+              <p>{{ t('maps.trace.controls.pickRepeaterSubtitle') }}</p>
+            </div>
+            <button class="mc-map-route-close" type="button" @click="closeTracePicker">×</button>
+          </div>
+          <input
+            v-model="tracePickerSearch"
+            class="mc-map-trace-picker-search"
+            type="text"
+            :placeholder="t('maps.trace.controls.searchPlaceholder')"
+          >
+          <div class="mc-map-trace-picker-list mc-list-scroll">
+            <button
+              v-for="point in filteredTracePickerPoints"
+              :key="`picker:${point.key}`"
+              class="mc-map-trace-point"
+              type="button"
+              @click="addTracePointFromPicker(point)"
+            >
+              <span class="mc-map-trace-point-main">
+                <span class="mc-map-trace-point-name">{{ point.displayName }}</span>
+                <span class="mc-map-trace-point-meta">{{ point.shortPublicKey || t('maps.legend.repeater') }}</span>
+              </span>
+              <span class="mc-map-trace-point-check">+</span>
+            </button>
+            <div v-if="!filteredTracePickerPoints.length" class="mc-map-trace-empty">
+              {{ t('maps.trace.empty.noSearchMatches') }}
+            </div>
+          </div>
+        </section>
+      </div>
+    </Teleport>
+  </div>
+
+  <!-- Mobile nodebar -->
+  <div v-if="isMobile" class="mc-maps-mobile-nodebar">
+    <div class="mc-phonebar-row">
+      <div class="mc-phonebar-left">
+        <div class="mc-metric">ch: <strong>{{ channelCountSummary.visibleCount }}/{{ channelCountSummary.totalSlots }}</strong></div>
+        <div class="mc-metric">cont: <strong>{{ contactCountSummary.nodeResident }}/{{ contactCountSummary.nodeLimit }}/{{ contactCountSummary.dbTotal }}</strong></div>
+      </div>
+      <div class="mc-phonebar-right">
+        <span class="mc-node-led" :class="session.connected ? 'status-connected' : 'status-disconnected'"></span>
+        <div class="mc-node-name"><strong>{{ nodeDisplayName }}</strong></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DESKTOP: Split sidebar + map -->
+  <div v-else class="mc-maps-route">
     <ShellPageFrame
       scroller-class="mc-sidebar--maps"
       :scroller-header-class="scrollerMode === 'trace' ? 'mc-sidebar-top--maps-trace' : 'mc-sidebar-top--maps'"
@@ -2251,6 +2760,23 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
               </div>
+            </section>
+
+            <section class="mc-map-provider-card mc-settings-rows">
+              <label class="mc-settings-row mc-map-provider-row">
+                <div class="mc-settings-row-label">
+                  <strong>{{ t('maps.provider.title') }}</strong>
+                  <span>{{ t('maps.provider.subtitle') }}</span>
+                </div>
+                <div class="mc-settings-row-control">
+                  <PluginDropdown
+                    :model-value="selectedMapProvider"
+                    :options="mapProviderOptions"
+                    :min-width="220"
+                    @update:model-value="updateMapProvider"
+                  />
+                </div>
+              </label>
             </section>
 
             <section class="mc-map-location-card">

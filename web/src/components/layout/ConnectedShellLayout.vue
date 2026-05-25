@@ -5,17 +5,27 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
 import NodeConnectPanel from '../connect/NodeConnectPanel.vue'
+import MobileDockButton from './MobileDockButton.vue'
 import MessagesAdvertSheet from '../messages/MessagesAdvertSheet.vue'
 const MessagesNotificationsSheet = defineAsyncComponent(() => import('../messages/MessagesNotificationsSheet.vue'))
 const MessagesConsoleSheet = defineAsyncComponent(() => import('../messages/MessagesConsoleSheet.vue'))
 import { describeRestorePendingStatus, buildConnectedSessionStatus, packetTypeLabel } from '../../lib/sessionLiveState'
 import { useSessionStore } from '../../stores/session'
+import { useUpdateCheck } from '../../composables/useUpdateCheck'
+import { useIsMobile } from '../../composables/useIsMobile'
+import {
+  buildCloseShellPanelLocation,
+  buildOpenShellPanelLocation,
+  buildToggleShellPanelLocation,
+  getActiveShellPanel,
+} from '../../lib/shellPanels'
 
 const router = useRouter()
 const route = useRoute()
 const session = useSessionStore()
 const { t, locale } = useI18n()
 const visibility = useDocumentVisibility()
+const { isMobile } = useIsMobile()
 
 const bellIconUrl = '/icons/bell-icon.svg'
 const messagesIconUrl = '/icons/paper-plane.png'
@@ -48,35 +58,7 @@ const railGlowGeometry = ref({
 const unreadSummary = computed(() => session.unreadSummary || {})
 const railButtonElements = {}
 
-// Update check — polled every 5 minutes
-const updateCheck = ref({ update_available: false, next_version: '' })
-const updateCheckTimer = ref(0)
-
-async function loadUpdateCheck() {
-  try {
-    const data = await session.api('/api/update/check')
-    updateCheck.value = {
-      update_available: Boolean(data?.update_available),
-      next_version: data?.next_version || '',
-    }
-  } catch {
-    // silently ignore — update banner is non-critical
-  }
-}
-
-function startUpdateCheckPolling() {
-  loadUpdateCheck()
-  updateCheckTimer.value = window.setInterval(loadUpdateCheck, 300_000) // 5 min
-}
-
-function stopUpdateCheckPolling() {
-  if (updateCheckTimer.value) {
-    window.clearInterval(updateCheckTimer.value)
-    updateCheckTimer.value = 0
-  }
-}
-
-const updateAvailable = computed(() => updateCheck.value.update_available && Boolean(updateCheck.value.next_version))
+const { updateCheck, updateAvailable, startUpdateCheckPolling, stopUpdateCheckPolling } = useUpdateCheck(session)
 let railGlowMeasureFrame = 0
 let railGlowReleaseTimer = 0
 let unreadRefreshTimer = 0
@@ -184,8 +166,7 @@ function buildOwnerEventStreamKey() {
 }
 
 const activeShellPanel = computed(() => {
-  const panel = String(route.query.panel || '').trim()
-  return panel === 'notifications' || panel === 'console' || panel === 'advert' ? panel : ''
+  return getActiveShellPanel(route)
 })
 const globalAdvertOpen = computed(() => activeShellPanel.value === 'advert')
 const notificationsOpen = computed({
@@ -225,6 +206,7 @@ const isContactsRoute = computed(() => (
   || route.name === 'contacts-repeater-login'
   || route.name === 'contacts-repeater'
 ))
+const showGlobalMobileDock = computed(() => isMobile.value && !isMessagesRoute.value && !isContactsRoute.value)
 
 const activeRailKey = computed(() => {
   if (notificationsOpen.value) {
@@ -442,6 +424,15 @@ const totalDirectUnreadCount = computed(() => {
 })
 
 const totalUnreadCount = computed(() => totalRegularUnreadCount.value + totalDirectUnreadCount.value)
+const mobileNotificationBadge = computed(() => {
+  if (totalMentionCount.value > 0) {
+    return totalMentionCount.value > 99 ? '99+' : String(totalMentionCount.value)
+  }
+  if (totalUnreadCount.value > 0) {
+    return totalUnreadCount.value > 99 ? '99+' : String(totalUnreadCount.value)
+  }
+  return updateAvailable.value ? 'U' : ''
+})
 
 const totalMentionCount = computed(() => {
   const channelMentionCounts = unreadSummary.value.channel_mention_counts || {}
@@ -832,52 +823,25 @@ async function openShellPanel(panel = '') {
     await closeShellPanel()
     return
   }
-  if (activeShellPanel.value === nextPanel) {
-    await closeShellPanel()
-    return
-  }
-  await router.replace({
-    path: route.path,
-    query: {
-      ...route.query,
-      panel: nextPanel,
-    },
-  })
+  await router.replace(buildToggleShellPanelLocation(route, nextPanel))
 }
 
 async function closeShellPanel() {
   if (!activeShellPanel.value) {
     return
   }
-  const nextQuery = { ...route.query }
-  delete nextQuery.panel
-  await router.replace({
-    path: route.path,
-    query: nextQuery,
-  })
+  await router.replace(buildCloseShellPanelLocation(route))
 }
 
 async function openAdvertPanel() {
-  const nextQuery = {
-    ...route.query,
-    panel: 'advert',
-  }
-  await router.replace({
-    path: route.path,
-    query: nextQuery,
-  })
+  await router.replace(buildOpenShellPanelLocation(route, 'advert'))
 }
 
 async function closeGlobalAdvertPanel() {
   if (!globalAdvertOpen.value) {
     return
   }
-  const nextQuery = { ...route.query }
-  delete nextQuery.panel
-  await router.replace({
-    path: route.path,
-    query: nextQuery,
-  })
+  await router.replace(buildCloseShellPanelLocation(route))
 }
 
 async function sendAdvert(flood = false) {
@@ -1643,7 +1607,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="mc-page" :class="{ 'is-backdrop-blurred': pageBackdropBlurred }">
+  <div class="mc-page" :class="{ 'is-backdrop-blurred': pageBackdropBlurred, 'mc-page--global-mobile-dock': showGlobalMobileDock }">
     <div class="mc-shell" :class="{ 'is-blurred': shellBlurred }">
       <aside ref="railRef" class="mc-rail">
         <div
@@ -1749,6 +1713,21 @@ onBeforeUnmount(() => {
 
       <RouterView />
     </div>
+
+    <nav v-if="showGlobalMobileDock" class="mc-global-mobile-dock">
+      <MobileDockButton
+        icon="🔔"
+        label="Notif"
+        :active="notificationsOpen"
+        :badge="mobileNotificationBadge"
+        :badge-class="updateAvailable && !totalUnreadCount && !totalMentionCount ? 'update' : (totalMentionCount ? 'mention' : '')"
+        @click="openShellPanel('notifications')"
+      />
+      <MobileDockButton icon="💬" label="Chats" @click="openMessages()" />
+      <MobileDockButton icon="👥" label="Contacts" @click="openContacts" />
+      <MobileDockButton icon="🗺" label="Map" :active="isMapsRoute && !activeShellPanel" @click="openMaps" />
+      <MobileDockButton icon="⚙" label="Settings" :active="route.name === 'settings' && !activeShellPanel" @click="openSettings" />
+    </nav>
 
     <div v-if="bootstrapped && !session.connected && !disconnectOverlaySuppressed" class="mc-overlay" @click.self>
       <NodeConnectPanel @connected="loadUnreadCounts" />

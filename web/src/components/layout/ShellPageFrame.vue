@@ -12,6 +12,10 @@ defineProps({
     type: [String, Array, Object],
     default: '',
   },
+  hideWorkspace: {
+    type: Boolean,
+    default: false,
+  },
 })
 </script>
 
@@ -34,7 +38,11 @@ defineProps({
     </div>
   </aside>
 
-  <main class="mc-content mc-page-workspace mc-page-frame-workspace" :class="workspaceClass">
+  <main
+    v-if="!hideWorkspace"
+    class="mc-content mc-page-workspace mc-page-frame-workspace"
+    :class="workspaceClass"
+  >
     <div class="mc-page-frame-workspace-top">
       <slot name="workspace-top" />
     </div>

@@ -4,7 +4,18 @@ import { useI18n } from 'vue-i18n'
 
 import { ensureMapLibreLoaded } from '../../lib/mapLibre'
 
-const OPENFREEMAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty'
+const OPENFREEMAP_STYLE_ORIGIN = 'https://tiles.openfreemap.org/styles/liberty'
+const OPENFREEMAP_STYLE_URL = `/api/tiles/proxy?url=${encodeURIComponent(OPENFREEMAP_STYLE_ORIGIN)}`
+const TILE_PROXY_ORIGIN = 'tiles.openfreemap.org'
+function tileTransformRequest(url, resourceType) {
+  if (url.startsWith('/api/tiles/proxy') || url.includes('/api/tiles/proxy?')) {
+    return { url }
+  }
+  if (url.includes(TILE_PROXY_ORIGIN)) {
+    return { url: `/api/tiles/proxy?url=${encodeURIComponent(url)}` }
+  }
+  return { url }
+}
 
 const props = defineProps({
   model: {
@@ -236,6 +247,7 @@ async function mountMap() {
     center: [Number(anchorPoint.lon), Number(anchorPoint.lat)],
     zoom: points.length ? 8 : 2,
     attributionControl: false,
+    transformRequest: tileTransformRequest,
   })
   mapInstance.value = instance
   instance.addControl(new window.maplibregl.NavigationControl(), 'top-right')

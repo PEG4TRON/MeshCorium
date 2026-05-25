@@ -175,6 +175,8 @@ SIGNAL_METRICS_MAX_RETENTION_DAYS = 365
 BATTERY_HISTORY_DEFAULT_RETENTION_DAYS = 30
 BATTERY_HISTORY_RETENTION_CHOICES = (7, 30, 90, 180, 365)
 SIGNAL_METRICS_DEFAULT_POLL_SECONDS = 15
+MAP_PROVIDER_DEFAULT = "osm_raster"
+MAP_PROVIDER_CHOICES = {"osm_raster", "ofm_liberty"}
 SIGNAL_METRICS_MIN_POLL_SECONDS = 5
 SIGNAL_METRICS_MAX_POLL_SECONDS = 300
 EMOJI_CHOICES = [
@@ -220,6 +222,7 @@ def _default_client_settings() -> dict:
         "notification_direct_sound_file": default_direct,
         "page_background_id": "default",
         "chat_background_id": "chat-backplane-blue",
+        "map_provider": MAP_PROVIDER_DEFAULT,
         "page_background_blur_enabled": False,
         "page_background_blur_px": PAGE_BACKGROUND_BLUR_DEFAULT_PX,
         "muted_conversations": {},
@@ -235,6 +238,13 @@ def _default_client_settings() -> dict:
         "self_location_overrides": {},
         "battery_profile_by_node_id": {},
     }
+
+
+def _normalize_map_provider(value: object) -> str:
+    provider = str(value or "").strip().lower()
+    if provider in MAP_PROVIDER_CHOICES:
+        return provider
+    return MAP_PROVIDER_DEFAULT
 
 
 def _normalize_signal_metrics_retention_days(value: object) -> int:
@@ -630,6 +640,7 @@ def _normalize_client_settings(data: object) -> dict:
         ),
         "page_background_id": _normalize_page_background_id(raw.get("page_background_id", base["page_background_id"]), wallpaper_files),
         "chat_background_id": _normalize_chat_background_id(raw.get("chat_background_id", base["chat_background_id"]), wallpaper_files),
+        "map_provider": _normalize_map_provider(raw.get("map_provider", base["map_provider"])),
         "page_background_blur_enabled": bool(raw.get("page_background_blur_enabled", base["page_background_blur_enabled"])),
         "page_background_blur_px": _normalize_page_background_blur_px(raw.get("page_background_blur_px", base["page_background_blur_px"])),
         "muted_conversations": _normalize_muted_conversations(raw.get("muted_conversations", base["muted_conversations"])),
@@ -1170,6 +1181,8 @@ def _update_client_settings(payload: dict) -> dict:
                 payload.get("chat_background_id"),
                 available_wallpaper_files,
             )
+        if "map_provider" in payload:
+            settings["map_provider"] = _normalize_map_provider(payload.get("map_provider"))
         if "page_background_blur_enabled" in payload:
             settings["page_background_blur_enabled"] = bool(payload.get("page_background_blur_enabled"))
         if "page_background_blur_px" in payload:
@@ -1722,6 +1735,7 @@ def _build_client_settings_payload() -> dict:
             "notification_direct_sound_file": _normalize_notification_sound_file(settings.get("notification_direct_sound_file"), sound_files),
             "page_background_id": _normalize_page_background_id(settings.get("page_background_id"), wallpaper_files),
             "chat_background_id": _normalize_chat_background_id(settings.get("chat_background_id"), wallpaper_files),
+            "map_provider": _normalize_map_provider(settings.get("map_provider")),
             "page_background_blur_enabled": bool(settings.get("page_background_blur_enabled")),
             "page_background_blur_px": _normalize_page_background_blur_px(settings.get("page_background_blur_px")),
             "muted_conversations": _normalize_muted_conversations(settings.get("muted_conversations")),
@@ -2247,6 +2261,7 @@ class BackgroundCompanionSession:
     bootstrap_started_at: float = 0.0
     bootstrap_stage_started_at: float = 0.0
     bootstrap_last_update_at: int = 0
+    _suppress_initial_connected_broadcast: bool = False
 
 
 @dataclass
@@ -6926,23 +6941,26 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                         live_poll_timeout,
                     )
                 full_contacts_snapshot = list(refreshed_contacts.get("contacts") or [])
-                _broadcast_event(
-                    port,
-                    {
-                        "event": "connected",
-                        "device": device_dict,
-                        "self": self_dict,
-                        "collections_ready": True,
-                        "contacts": full_contacts_snapshot,
-                        "channels": channels_dict,
-                        "contacts_count": len(contacts_dict),
-                        "channels_count": len(channels_dict),
-                        "recent_repeaters_count": recent_repeaters_count,
-                        "radio_stats": radio_stats,
-                        "self_telemetry": self_telemetry,
-                        "battery_info": battery_info,
-                    },
-                )
+                if not session._suppress_initial_connected_broadcast:
+                    _broadcast_event(
+                        port,
+                        {
+                            "event": "connected",
+                            "device": device_dict,
+                            "self": self_dict,
+                            "collections_ready": True,
+                            "contacts": full_contacts_snapshot,
+                            "channels": channels_dict,
+                            "contacts_count": len(contacts_dict),
+                            "channels_count": len(channels_dict),
+                            "recent_repeaters_count": recent_repeaters_count,
+                            "radio_stats": radio_stats,
+                            "self_telemetry": self_telemetry,
+                            "battery_info": battery_info,
+                        },
+                    )
+                else:
+                    session._suppress_initial_connected_broadcast = False
                 _request_background_queue_drain_after_bootstrap(client, session, port, baudrate)
                 next_radio_stats_poll_at = time.monotonic() + _normalize_signal_metrics_poll_seconds(_get_client_settings().get("signal_metrics_poll_seconds"))
                 next_contact_eviction_sweep_at = time.monotonic() + _get_contact_eviction_sweep_interval_secs()
@@ -7725,7 +7743,7 @@ def _reset_background_session_reconnect_state(session: BackgroundCompanionSessio
         session.reconnect_attempts = 0
 
 
-def _start_background_session(config: dict, *, preserve_reconnect_state: bool = True) -> BackgroundCompanionSession:
+def _start_background_session(config: dict, *, preserve_reconnect_state: bool = True, suppress_initial_connected_broadcast: bool = False) -> BackgroundCompanionSession:
     port = str(config["port"])
     transport_type = str(config.get("transport_type") or SERIAL_TRANSPORT_TYPE).strip().lower() or SERIAL_TRANSPORT_TYPE
     if transport_type == SERIAL_TRANSPORT_TYPE:
@@ -7744,6 +7762,7 @@ def _start_background_session(config: dict, *, preserve_reconnect_state: bool = 
         session.stop_reason = None
         if not preserve_reconnect_state:
             _reset_background_session_reconnect_state(session)
+    session._suppress_initial_connected_broadcast = bool(suppress_initial_connected_broadcast)
     thread = threading.Thread(target=_run_background_session, args=(session,), name=f"meshcore-bg-{port}", daemon=True)
     session.thread = thread
     with BACKGROUND_SESSIONS_GUARD:
@@ -7813,7 +7832,7 @@ def _paused_background_session(port: str):
                 transport_id=str(snapshot.get("transport_id") or snapshot["port"]),
                 display_label=str((snapshot.get("connection") or {}).get("display_label") or snapshot["port"]),
             )
-            _start_background_session(config)
+            _start_background_session(config, suppress_initial_connected_broadcast=True)
 
 
 def _run_command_via_background_session(port: str, command: dict, timeout_secs: float = 10.0) -> dict:
@@ -12035,6 +12054,9 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                     "sent_history": get_contact_unique_outgoing_texts(public_key, 20),
                 })
             return
+        if parsed.path == "/api/tiles/proxy":
+            self._handle_tile_proxy(parsed)
+            return
         if parsed.path == "/api/events":
             self._stream_events(parsed)
             return
@@ -12042,6 +12064,138 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         self.send_error(HTTPStatus.NOT_FOUND)
+
+    def _handle_tile_proxy(self, parsed) -> None:
+        """Proxy OpenFreeMap requests through meshcorium without changing host networking.
+
+        iOS Safari may fail when the app is served from the LAN over HTTP and the
+        map fetches HTTPS cross-origin resources directly.  The test stand also
+        resolves AAAA records for tiles.openfreemap.org while IPv6 is unreachable,
+        so this proxy forces IPv4 only.  On failure it resolves A records via
+        public DNS servers and retries with curl --resolve, preserving Host/SNI.
+        """
+        import ipaddress as _ipaddress
+        import subprocess as _sp
+
+        params = parse_qs(parsed.query)
+        target_url = str(params.get("url", [""])[0] or "")
+        if not target_url:
+            self._send_json({"error": "Missing url parameter"}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        allowed_hosts = {"tiles.openfreemap.org", "tile.openstreetmap.org", "a.tile.openstreetmap.org", "b.tile.openstreetmap.org", "c.tile.openstreetmap.org"}
+        parsed_target = urlparse(target_url)
+        if parsed_target.scheme != "https" or parsed_target.hostname not in allowed_hosts:
+            self._send_json({"error": "Tile source not allowed"}, status=HTTPStatus.FORBIDDEN)
+            return
+
+        def curl_fetch(resolve_ip: str | None = None):
+            command = [
+                "curl",
+                "-4",
+                "--http1.1",
+                "--compressed",
+                "-sS",
+                "--max-time",
+                "12",
+                "-o",
+                "-",
+            ]
+            if resolve_ip:
+                command.extend(["--resolve", f"{parsed_target.hostname}:443:{resolve_ip}"])
+            command.append(target_url)
+            return _sp.run(command, capture_output=True, timeout=15)
+
+        def resolve_a_records(dns_server: str) -> list[str]:
+            result = _sp.run(
+                ["dig", "+short", "A", f"@{dns_server}", str(parsed_target.hostname)],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode != 0:
+                logging.warning(
+                    "tile proxy DNS lookup failed: server=%s rc=%s stderr=%s",
+                    dns_server,
+                    result.returncode,
+                    result.stderr[:300],
+                )
+                return []
+            addresses: list[str] = []
+            for line in result.stdout.splitlines():
+                candidate = line.strip()
+                try:
+                    addr = _ipaddress.ip_address(candidate)
+                except ValueError:
+                    continue
+                if addr.version == 4:
+                    addresses.append(candidate)
+            return addresses
+
+        tried: list[str] = []
+        try:
+            result = curl_fetch()
+            tried.append("curl -4")
+            if result.returncode != 0:
+                logging.warning(
+                    "tile proxy primary fetch failed: url=%s rc=%s bytes=%s stderr=%s",
+                    target_url,
+                    result.returncode,
+                    len(result.stdout or b""),
+                    result.stderr[:300],
+                )
+                seen_ips: set[str] = set()
+                for dns_server in ("8.8.8.8", "1.1.1.1"):
+                    for ip in resolve_a_records(dns_server):
+                        if ip in seen_ips:
+                            continue
+                        seen_ips.add(ip)
+                        tried.append(f"--resolve {ip} via {dns_server}")
+                        result = curl_fetch(ip)
+                        if result.returncode == 0:
+                            break
+                        logging.warning(
+                            "tile proxy resolved fetch failed: url=%s ip=%s dns=%s rc=%s bytes=%s stderr=%s",
+                            target_url,
+                            ip,
+                            dns_server,
+                            result.returncode,
+                            len(result.stdout or b""),
+                            result.stderr[:300],
+                        )
+                    if result.returncode == 0:
+                        break
+            if result.returncode != 0:
+                logging.error(
+                    "tile proxy fetch exhausted: url=%s tried=%s rc=%s bytes=%s stderr=%s",
+                    target_url,
+                    tried,
+                    result.returncode,
+                    len(result.stdout or b""),
+                    result.stderr[:500],
+                )
+                self.send_error(HTTPStatus.BAD_GATEWAY)
+                return
+
+            body = result.stdout
+            if target_url.endswith(".pbf") or "/planet/" in target_url or "/fonts/" in target_url:
+                content_type = "application/vnd.mapbox-vector-tile" if "/fonts/" not in target_url else "application/x-protobuf"
+            elif target_url.endswith(".png") or "tile.openstreetmap.org" in target_url:
+                content_type = "image/png"
+            elif target_url.endswith(".json") or "/styles/" in target_url or "/planet" in target_url or "/sprites/" in target_url:
+                content_type = "application/json"
+            else:
+                content_type = "application/octet-stream"
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Cache-Control", "public, max-age=86400")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self._write_response_body(body)
+        except Exception as exc:
+            logging.exception("tile proxy failed: url=%s error=%s", target_url, exc)
+            self.send_error(HTTPStatus.BAD_GATEWAY)
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)

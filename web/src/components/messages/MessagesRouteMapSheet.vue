@@ -21,7 +21,18 @@ const { t } = useI18n()
 
 const MAP_MIN_ZOOM = 1
 const MAP_MAX_ZOOM = 16
-const OPENFREEMAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty'
+const OPENFREEMAP_STYLE_ORIGIN = 'https://tiles.openfreemap.org/styles/liberty'
+const OPENFREEMAP_STYLE_URL = `/api/tiles/proxy?url=${encodeURIComponent(OPENFREEMAP_STYLE_ORIGIN)}`
+const TILE_PROXY_ORIGIN = 'tiles.openfreemap.org'
+function tileTransformRequest(url, resourceType) {
+  if (url.startsWith('/api/tiles/proxy') || url.includes('/api/tiles/proxy?')) {
+    return { url }
+  }
+  if (url.includes(TILE_PROXY_ORIGIN)) {
+    return { url: `/api/tiles/proxy?url=${encodeURIComponent(url)}` }
+  }
+  return { url }
+}
 const MAP_STYLE_BOOT_TIMEOUT_MS = 6000
 
 const mapViewportRef = ref(null)
@@ -610,6 +621,7 @@ async function mountMap() {
         center: [center.lon, center.lat],
         zoom,
         attributionControl: false,
+        transformRequest: tileTransformRequest,
       })
       mapInstance.value = instance
 

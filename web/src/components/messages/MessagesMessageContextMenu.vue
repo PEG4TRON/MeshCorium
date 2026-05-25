@@ -25,7 +25,6 @@ const emit = defineEmits([
         @click.stop
       >
         <p class="mc-message-context-title">{{ model.title }}</p>
-        <p v-if="model.preview" class="mc-message-context-preview">{{ model.preview }}</p>
         <button
           v-if="model.canReply"
           class="mc-button mc-button--ghost mc-message-context-action"
