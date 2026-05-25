@@ -61,3 +61,11 @@ Upgrade information is documented in:
 - [README_RU.md](./README_RU.md)
 - [README_EN.md](./README_EN.md)
 - [CHANGELOG.md](./CHANGELOG.md)
+
+---
+
+**⚠️ Release note:** Due to issues with the AI agent used during the release process, releases v0.7.1 through v0.7.4 experienced deployment and integrity problems. **v0.8.0 is considered the first fully working release** after this period. Users on v0.7.1–v0.7.4 should upgrade to v0.8.0 or later.
+
+---
+
+**⚠️ Примечание к релизам:** Из-за проблем с ИИ-агентом, использованным в процессе выпуска, релизы v0.7.1–v0.7.4 имели проблемы с деплоем и целостностью. **v0.8.0 считается первым полностью исправным релизом** после этого периода. Пользователям v0.7.1–v0.7.4 рекомендуется обновиться до v0.8.0 или выше.
