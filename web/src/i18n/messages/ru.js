@@ -1938,6 +1938,7 @@ export default {
       subtitle: 'Здесь собраны package/docs ссылки и git-репозитории, которые прямо используются проектом.',
       brandKicker: 'Клиент MeshCorium',
       versionLabel: 'Версия',
+      checkForUpdates: 'Проверить обновления',
       updateAvailable: 'Доступно обновление',
       updateTo: 'до {version}',
       updateToFull: 'Доступно обновление до {version}',

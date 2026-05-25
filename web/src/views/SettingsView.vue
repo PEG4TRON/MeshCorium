@@ -7010,7 +7010,18 @@ onBeforeUnmount(() => {
 
             <dl class="mc-settings-about-version">
               <dt>{{ t('settings.about.versionLabel') }}</dt>
-              <dd>{{ meshcoriumDisplayVersion }}</dd>
+              <dd>
+                <span>{{ meshcoriumDisplayVersion }}</span>
+                <button
+                  type="button"
+                  class="mc-settings-about-version-check"
+                  :disabled="updateCheckLoading"
+                  :title="t('settings.about.checkForUpdates')"
+                  @click="loadUpdateCheck"
+                >
+                  <SyncIcon :spinning="updateCheckLoading" :size="16" />
+                </button>
+              </dd>
             </dl>
           </div>
         </section>

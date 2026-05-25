@@ -6787,6 +6787,35 @@ button {
   font-size: 26px;
   font-weight: 700;
   letter-spacing: -0.03em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mc-settings-about-version-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  margin: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+  flex: 0 0 auto;
+  line-height: 1;
+}
+
+.mc-settings-about-version-check:hover:not(:disabled) {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.mc-settings-about-version-check:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 /* Update panel */

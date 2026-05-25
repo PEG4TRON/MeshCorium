@@ -1938,6 +1938,7 @@ export default {
       subtitle: 'This section gathers package/docs links and upstream git repositories that are directly used by the project.',
       brandKicker: 'MeshCorium client',
       versionLabel: 'Version',
+      checkForUpdates: 'Check for updates',
       updateAvailable: 'Update available',
       updateTo: 'to {version}',
       updateToFull: 'Update to {version} available',
