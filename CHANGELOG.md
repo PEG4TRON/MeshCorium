@@ -1,6 +1,6 @@
 # Changelog
 
-## Dev / Unreleased
+## v0.8.1 — Mobile UI & Maps (2026-05-26)
 
 ### Mobile Responsive UI (1024px breakpoint)
 - **Maps page**: Full-screen map with floating controls (☰ sidebar, 📍 center, ☀/🌙 theme), sidebar as bottom-sheet overlay (stats, legend, actions, route tracing), nodebar with ch/cont counters. Desktop unchanged.
