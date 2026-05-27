@@ -1,4 +1,30 @@
-.venv
-web/node_modules
+# Runtime artifacts
+.venv/
+web/node_modules/
 __pycache__/
 *.pyc
+*.pyo
+
+# User data (preserved across updates)
+data/
+logs/
+
+# Build artifact — INCLUDED in releases, NOT gitignored
+# web/dist/
+
+# Project-only artifacts (NOT on GitHub)
+AGENTS.md
+.codex/
+android-web-client/
+tools/
+screenshot/
+.user-logs/
+reference.d/
+.claude/
+
+# Tests (local only)
+web/e2e/
+
+# OS
+.DS_Store
+Thumbs.db
