@@ -177,6 +177,7 @@ BATTERY_HISTORY_RETENTION_CHOICES = (7, 30, 90, 180, 365)
 SIGNAL_METRICS_DEFAULT_POLL_SECONDS = 15
 MAP_PROVIDER_DEFAULT = "osm_raster"
 MAP_PROVIDER_CHOICES = {"osm_raster", "ofm_liberty"}
+HOME_NODE_GEO_MAX_DISTANCE_KM = 400
 SIGNAL_METRICS_MIN_POLL_SECONDS = 5
 SIGNAL_METRICS_MAX_POLL_SECONDS = 300
 EMOJI_CHOICES = [
@@ -223,6 +224,7 @@ def _default_client_settings() -> dict:
         "page_background_id": "default",
         "chat_background_id": "chat-backplane-blue",
         "map_provider": MAP_PROVIDER_DEFAULT,
+        "map_max_distance_km": 400,
         "page_background_blur_enabled": False,
         "page_background_blur_px": PAGE_BACKGROUND_BLUR_DEFAULT_PX,
         "muted_conversations": {},
@@ -245,6 +247,18 @@ def _normalize_map_provider(value: object) -> str:
     if provider in MAP_PROVIDER_CHOICES:
         return provider
     return MAP_PROVIDER_DEFAULT
+
+
+def _normalize_map_max_distance_km(value: object) -> int:
+    try:
+        km = int(value)
+    except (TypeError, ValueError):
+        return HOME_NODE_GEO_MAX_DISTANCE_KM
+    if km < 1:
+        return HOME_NODE_GEO_MAX_DISTANCE_KM
+    if km > 20000:
+        return 20000
+    return km
 
 
 def _normalize_signal_metrics_retention_days(value: object) -> int:
@@ -641,6 +655,7 @@ def _normalize_client_settings(data: object) -> dict:
         "page_background_id": _normalize_page_background_id(raw.get("page_background_id", base["page_background_id"]), wallpaper_files),
         "chat_background_id": _normalize_chat_background_id(raw.get("chat_background_id", base["chat_background_id"]), wallpaper_files),
         "map_provider": _normalize_map_provider(raw.get("map_provider", base["map_provider"])),
+        "map_max_distance_km": _normalize_map_max_distance_km(raw.get("map_max_distance_km", base["map_max_distance_km"])),
         "page_background_blur_enabled": bool(raw.get("page_background_blur_enabled", base["page_background_blur_enabled"])),
         "page_background_blur_px": _normalize_page_background_blur_px(raw.get("page_background_blur_px", base["page_background_blur_px"])),
         "muted_conversations": _normalize_muted_conversations(raw.get("muted_conversations", base["muted_conversations"])),
@@ -1183,6 +1198,8 @@ def _update_client_settings(payload: dict) -> dict:
             )
         if "map_provider" in payload:
             settings["map_provider"] = _normalize_map_provider(payload.get("map_provider"))
+        if "map_max_distance_km" in payload:
+            settings["map_max_distance_km"] = _normalize_map_max_distance_km(payload.get("map_max_distance_km"))
         if "page_background_blur_enabled" in payload:
             settings["page_background_blur_enabled"] = bool(payload.get("page_background_blur_enabled"))
         if "page_background_blur_px" in payload:
@@ -1736,6 +1753,7 @@ def _build_client_settings_payload() -> dict:
             "page_background_id": _normalize_page_background_id(settings.get("page_background_id"), wallpaper_files),
             "chat_background_id": _normalize_chat_background_id(settings.get("chat_background_id"), wallpaper_files),
             "map_provider": _normalize_map_provider(settings.get("map_provider")),
+            "map_max_distance_km": _normalize_map_max_distance_km(settings.get("map_max_distance_km")),
             "page_background_blur_enabled": bool(settings.get("page_background_blur_enabled")),
             "page_background_blur_px": _normalize_page_background_blur_px(settings.get("page_background_blur_px")),
             "muted_conversations": _normalize_muted_conversations(settings.get("muted_conversations")),

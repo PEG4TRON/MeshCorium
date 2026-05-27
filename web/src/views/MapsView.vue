@@ -5,7 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
 import { ensureMapLibreLoaded } from '../lib/mapLibre'
-import { extractValidGeoPoint, geoDistanceKm, isGeoWithinHomeDistance, safeCoordinate as safeGeoCoordinate } from '../lib/geo'
+import { extractValidGeoPoint, geoDistanceKm, isGeoWithinHomeDistance, safeCoordinate as safeGeoCoordinate, HOME_NODE_GEO_MAX_DISTANCE_KM } from '../lib/geo'
 import { resolveNodePreviewUrl } from '../lib/nodePreview'
 import { useIsMobile } from '../composables/useIsMobile'
 import ShellPageFrame from '../components/layout/ShellPageFrame.vue'
@@ -80,6 +80,11 @@ const emojiMarkersEnabled = useStorage('maps_emoji_markers_enabled', false)
 const mapThemeMode = useStorage('maps_theme_mode', 'light')
 const selectedMapProvider = computed(() => normalizeMapProvider(session.settingsPayload?.settings?.map_provider))
 const mapProviderOptions = computed(() => MAP_PROVIDER_OPTIONS)
+const mapMaxDistanceKm = computed(() => {
+  const raw = session.settingsPayload?.settings?.map_max_distance_km
+  const parsed = parseInt(raw, 10)
+  return Number.isFinite(parsed) && parsed >= 1 ? parsed : HOME_NODE_GEO_MAX_DISTANCE_KM
+})
 const traceSelectedKeys = ref([])
 const traceManualInput = ref('')
 const traceSequential = ref(true)
@@ -398,7 +403,7 @@ const mapPoints = computed(() => {
   const points = []
   for (const contact of Array.isArray(session.contacts) ? session.contacts : []) {
     const coords = extractValidGeoPoint(contact)
-    if (!coords || !isGeoWithinHomeDistance(coords, homePoint)) {
+    if (!coords || !isGeoWithinHomeDistance(coords, homePoint, mapMaxDistanceKm.value)) {
       continue
     }
     const publicKey = normalizePublicKey(contact?.public_key)
@@ -548,7 +553,7 @@ const contactLocationCount = computed(() => {
   const homePoint = extractValidGeoPoint(session.self)
   return (Array.isArray(session.contacts) ? session.contacts : []).reduce((sum, contact) => {
     const coords = extractValidGeoPoint(contact)
-    if (!coords || !isGeoWithinHomeDistance(coords, homePoint)) {
+    if (!coords || !isGeoWithinHomeDistance(coords, homePoint, mapMaxDistanceKm.value)) {
       return sum
     }
     return sum + 1
@@ -1433,6 +1438,19 @@ async function updateMapProvider(provider) {
   } catch (error) {
     session.setStatus(error instanceof Error ? error.message : String(error || t('maps.provider.saveFailed')), true)
     applyMapProviderStyle(selectedMapProvider.value)
+  }
+}
+
+async function updateMapMaxDistance(km) {
+  const parsed = parseInt(km, 10)
+  const value = Number.isFinite(parsed) && parsed >= 1 ? parsed : HOME_NODE_GEO_MAX_DISTANCE_KM
+  if (value === mapMaxDistanceKm.value) {
+    return
+  }
+  try {
+    await session.updateClientSettings({ map_max_distance_km: value })
+  } catch (error) {
+    session.setStatus(error instanceof Error ? error.message : String(error || t('maps.distance.saveFailed')), true)
   }
 }
 
@@ -2497,6 +2515,27 @@ onBeforeUnmount(() => {
                 </label>
               </section>
 
+              <section class="mc-map-distance-card mc-settings-rows">
+                <label class="mc-settings-row mc-map-distance-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('maps.distance.title') }}</strong>
+                    <span>{{ t('maps.distance.subtitle') }}</span>
+                  </div>
+                  <div class="mc-settings-row-control">
+                    <input
+                      class="mc-map-distance-input"
+                      type="number"
+                      :value="mapMaxDistanceKm"
+                      min="1"
+                      max="20000"
+                      step="1"
+                      @change="updateMapMaxDistance($event.target.value)"
+                    >
+                    <span class="mc-map-distance-unit">км</span>
+                  </div>
+                </label>
+              </section>
+
               <section class="mc-map-location-card">
                 <div class="mc-map-location-header">
                   <h2>{{ t('maps.trace.title') }}</h2>
@@ -2775,6 +2814,27 @@ onBeforeUnmount(() => {
                     :min-width="220"
                     @update:model-value="updateMapProvider"
                   />
+                </div>
+              </label>
+            </section>
+
+            <section class="mc-map-distance-card mc-settings-rows">
+              <label class="mc-settings-row mc-map-distance-row">
+                <div class="mc-settings-row-label">
+                  <strong>{{ t('maps.distance.title') }}</strong>
+                  <span>{{ t('maps.distance.subtitle') }}</span>
+                </div>
+                <div class="mc-settings-row-control">
+                  <input
+                    class="mc-map-distance-input"
+                    type="number"
+                    :value="mapMaxDistanceKm"
+                    min="1"
+                    max="20000"
+                    step="1"
+                    @change="updateMapMaxDistance($event.target.value)"
+                  >
+                  <span class="mc-map-distance-unit">км</span>
                 </div>
               </label>
             </section>

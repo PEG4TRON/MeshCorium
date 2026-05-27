@@ -4615,7 +4615,8 @@ button {
 }
 
 .mc-map-location-card,
-.mc-map-provider-card {
+.mc-map-provider-card,
+.mc-map-distance-card {
   display: grid;
   gap: 12px;
   padding: 16px;
@@ -4624,15 +4625,40 @@ button {
   border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.mc-map-provider-card .mc-settings-row {
+.mc-map-provider-card .mc-settings-row,
+.mc-map-distance-card .mc-settings-row {
   border: 0;
   padding: 0;
   background: transparent;
 }
 
-.mc-map-provider-card .mc-settings-row:hover {
+.mc-map-provider-card .mc-settings-row:hover,
+.mc-map-distance-card .mc-settings-row:hover {
   border-color: transparent;
   background: transparent;
+}
+
+.mc-map-distance-input {
+  width: 80px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.06);
+  color: #e0e0e0;
+  font-size: 14px;
+  font-family: inherit;
+  text-align: right;
+}
+
+.mc-map-distance-input:focus {
+  outline: none;
+  border-color: #228b22;
+}
+
+.mc-map-distance-unit {
+  margin-left: 6px;
+  font-size: 13px;
+  color: #888;
 }
 
 .mc-map-location-header h2 {

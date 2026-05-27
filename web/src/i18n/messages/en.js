@@ -867,6 +867,11 @@ export default {
       subtitle: 'The choice is saved in the MeshCorium config file.',
       saveFailed: 'Failed to save map provider.',
     },
+    distance: {
+      title: 'Max contact distance',
+      subtitle: 'Contacts farther than this will not be shown on the map.',
+      saveFailed: 'Failed to save max distance.',
+    },
     legend: {
       title: 'Legend',
       self: 'My node',

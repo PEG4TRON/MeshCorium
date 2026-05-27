@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { extractValidGeoPoint, isGeoWithinHomeDistance, safeCoordinate as safeGeoCoordinate } from '../../lib/geo'
+import { extractValidGeoPoint, isGeoWithinHomeDistance, safeCoordinate as safeGeoCoordinate, HOME_NODE_GEO_MAX_DISTANCE_KM } from '../../lib/geo'
 import { ensureMapLibreLoaded } from '../../lib/mapLibre'
 import { resolveNodePreviewUrl } from '../../lib/nodePreview'
 import { useSessionStore } from '../../stores/session'
@@ -18,6 +18,12 @@ const emit = defineEmits(['close'])
 
 const session = useSessionStore()
 const { t } = useI18n()
+
+const mapMaxDistanceKm = computed(() => {
+  const raw = session.settingsPayload?.settings?.map_max_distance_km
+  const parsed = parseInt(raw, 10)
+  return Number.isFinite(parsed) && parsed >= 1 ? parsed : HOME_NODE_GEO_MAX_DISTANCE_KM
+})
 
 const MAP_MIN_ZOOM = 1
 const MAP_MAX_ZOOM = 16
@@ -232,7 +238,7 @@ const repeaterMapPoints = computed(() => {
     .filter((contact) => Number(contact?.adv_type || 0) === 2)
     .map((contact) => {
       const coords = extractValidGeoPoint(contact)
-      if (!coords || !isGeoWithinHomeDistance(coords, homePoint)) {
+      if (!coords || !isGeoWithinHomeDistance(coords, homePoint, mapMaxDistanceKm.value)) {
         return null
       }
       return {
@@ -283,7 +289,7 @@ const participantMapPoints = computed(() => {
         || (normalizedName && entryName === normalizedName)
     }) || null)
     const coords = directCoords || extractValidGeoPoint(contact)
-    if (!coords || !isGeoWithinHomeDistance(coords, homePoint)) {
+    if (!coords || !isGeoWithinHomeDistance(coords, homePoint, mapMaxDistanceKm.value)) {
       return null
     }
     return {
