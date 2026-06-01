@@ -2,20 +2,17 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { ensureMapLibreLoaded } from '../../lib/mapLibre'
-
-const OPENFREEMAP_STYLE_ORIGIN = 'https://tiles.openfreemap.org/styles/liberty'
-const OPENFREEMAP_STYLE_URL = `/api/tiles/proxy?url=${encodeURIComponent(OPENFREEMAP_STYLE_ORIGIN)}`
-const TILE_PROXY_ORIGIN = 'tiles.openfreemap.org'
-function tileTransformRequest(url, resourceType) {
-  if (url.startsWith('/api/tiles/proxy') || url.includes('/api/tiles/proxy?')) {
-    return { url }
-  }
-  if (url.includes(TILE_PROXY_ORIGIN)) {
-    return { url: `/api/tiles/proxy?url=${encodeURIComponent(url)}` }
-  }
-  return { url }
-}
+import {
+  MAP_PROVIDER_OFM_LIBERTY,
+  MAP_STYLE_BOOT_TIMEOUT_MS,
+  buildFallbackMapStyle,
+  buildSelectedMapStyle,
+  ensureMapLibreLoaded,
+  normalizeMapProvider,
+  shouldFallbackToRasterMapStyle,
+  tileTransformRequest,
+} from '../../lib/mapLibre'
+import { useSessionStore } from '../../stores/session'
 
 const props = defineProps({
   model: {
@@ -37,11 +34,16 @@ const emit = defineEmits([
 ])
 
 const { t } = useI18n()
+const session = useSessionStore()
+const selectedMapProvider = computed(() => normalizeMapProvider(session.settingsPayload?.settings?.map_provider))
 
 const mapViewportRef = ref(null)
 const mapInstance = ref(null)
 const mapMarkers = ref([])
+const mapReady = ref(false)
 let overlayFrame = 0
+let mapBootTimerId = 0
+let mapMountToken = 0
 
 const mapSignature = computed(() => JSON.stringify({
   open: Boolean(props.model?.open),
@@ -72,7 +74,17 @@ function cancelOverlayFrame() {
   overlayFrame = 0
 }
 
+function clearMapBootTimer() {
+  if (!mapBootTimerId) {
+    return
+  }
+  window.clearTimeout(mapBootTimerId)
+  mapBootTimerId = 0
+}
+
 function destroyMap() {
+  mapMountToken += 1
+  clearMapBootTimer()
   cancelOverlayFrame()
   for (const marker of mapMarkers.value) {
     try {
@@ -90,6 +102,7 @@ function destroyMap() {
     }
   }
   mapInstance.value = null
+  mapReady.value = false
   if (mapViewportRef.value) {
     mapViewportRef.value.innerHTML = ''
   }
@@ -332,6 +345,7 @@ async function mountMap() {
     return
   }
   destroyMap()
+  const mountToken = ++mapMountToken
   const points = (Array.isArray(props.model?.routePoints) ? props.model.routePoints : [])
     .filter((point) => Number.isFinite(Number(point?.lat)) && Number.isFinite(Number(point?.lon)))
   const firstPoint = points[0] || (Array.isArray(props.model?.mapRepeaters) ? props.model.mapRepeaters[0] : null)
@@ -341,21 +355,55 @@ async function mountMap() {
   }
   const instance = new window.maplibregl.Map({
     container: mapViewportRef.value,
-    style: OPENFREEMAP_STYLE_URL,
+    style: buildSelectedMapStyle(selectedMapProvider.value),
     center: [Number(firstPoint.lon), Number(firstPoint.lat)],
     zoom: 8,
     attributionControl: false,
     transformRequest: tileTransformRequest,
   })
   mapInstance.value = instance
-  instance.addControl(new window.maplibregl.NavigationControl(), 'top-right')
   const sync = () => {
     syncMarkers()
     scheduleRouteOverlay()
   }
-  instance.on('load', () => {
+  const finalizeMapReady = () => {
+    if (mountToken !== mapMountToken || mapInstance.value !== instance) {
+      return
+    }
+    clearMapBootTimer()
+    mapReady.value = true
     fitMapToPoints()
     sync()
+  }
+  const fallbackToLocalStyle = () => {
+    if (mountToken !== mapMountToken || mapInstance.value !== instance || instance.__meshcoriumFallbackStyleApplied) {
+      return
+    }
+    instance.__meshcoriumFallbackStyleApplied = true
+    try {
+      instance.setStyle(buildFallbackMapStyle())
+    } catch {
+      // ignore style fallback failures
+    }
+  }
+  clearMapBootTimer()
+  mapBootTimerId = window.setTimeout(() => {
+    fallbackToLocalStyle()
+  }, MAP_STYLE_BOOT_TIMEOUT_MS)
+  instance.addControl(new window.maplibregl.NavigationControl(), 'top-right')
+  instance.on('load', finalizeMapReady)
+  instance.once('render', finalizeMapReady)
+  instance.once('idle', finalizeMapReady)
+  instance.on('error', (event) => {
+    if (instance.__meshcoriumFallbackStyleApplied) {
+      return
+    }
+    if (
+      shouldFallbackToRasterMapStyle(event, mapReady.value)
+      && selectedMapProvider.value === MAP_PROVIDER_OFM_LIBERTY
+    ) {
+      fallbackToLocalStyle()
+    }
   })
   instance.on('move', scheduleRouteOverlay)
   instance.on('moveend', scheduleRouteOverlay)

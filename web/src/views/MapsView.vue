@@ -4,7 +4,17 @@ import { useStorage } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
-import { ensureMapLibreLoaded } from '../lib/mapLibre'
+import {
+  MAP_PROVIDER_OFM_LIBERTY,
+  MAP_PROVIDER_OPTIONS,
+  MAP_STYLE_BOOT_TIMEOUT_MS,
+  buildFallbackMapStyle,
+  buildSelectedMapStyle,
+  ensureMapLibreLoaded,
+  normalizeMapProvider,
+  shouldFallbackToRasterMapStyle,
+  tileTransformRequest,
+} from '../lib/mapLibre'
 import { extractValidGeoPoint, geoDistanceKm, isGeoWithinHomeDistance, safeCoordinate as safeGeoCoordinate, HOME_NODE_GEO_MAX_DISTANCE_KM } from '../lib/geo'
 import { resolveNodePreviewUrl } from '../lib/nodePreview'
 import { useIsMobile } from '../composables/useIsMobile'
@@ -27,42 +37,6 @@ const MAP_DEFAULT_BOUNDS = {
   minLon: 37.35,
   maxLon: 37.85,
 }
-const MAP_PROVIDER_OSM_RASTER = 'osm_raster'
-const MAP_PROVIDER_OFM_LIBERTY = 'ofm_liberty'
-const MAP_PROVIDER_DEFAULT = MAP_PROVIDER_OSM_RASTER
-const MAP_PROVIDER_OPTIONS = [
-  { value: MAP_PROVIDER_OSM_RASTER, label: 'OSM Raster', triggerLabel: 'OSM Raster' },
-  { value: MAP_PROVIDER_OFM_LIBERTY, label: 'OFM Liberty', triggerLabel: 'OFM Liberty' },
-]
-const OPENFREEMAP_STYLE_ORIGIN = 'https://tiles.openfreemap.org/styles/liberty'
-const OSM_RASTER_STYLE = {
-  version: 8,
-  sources: {
-    osm: {
-      type: 'raster',
-      tiles: [
-        'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-      ],
-      tileSize: 256,
-      attribution: '© OpenStreetMap contributors',
-    },
-  },
-  layers: [{ id: 'osm', type: 'raster', source: 'osm' }],
-}
-/** Proxy style URL through meshcorium to avoid mixed-content blocking on iOS Safari. */
-const OPENFREEMAP_STYLE_URL = `/api/tiles/proxy?url=${encodeURIComponent(OPENFREEMAP_STYLE_ORIGIN)}`
-/** Rewrite tile/glyph/sprite requests through the local proxy; stitched to each map instance. */
-const TILE_PROXY_ORIGINS = ['tiles.openfreemap.org', 'tile.openstreetmap.org']
-function tileTransformRequest(url, resourceType) {
-  if (url.startsWith('/api/tiles/proxy') || url.includes('/api/tiles/proxy?')) {
-    return { url }
-  }
-  if (TILE_PROXY_ORIGINS.some((origin) => url.includes(origin))) {
-    return { url: `/api/tiles/proxy?url=${encodeURIComponent(url)}` }
-  }
-  return { url }
-}
-const MAP_STYLE_BOOT_TIMEOUT_MS = 6000
 const MAP_MAIN_PATH = '/maps'
 const MAP_TRACE_PATH = '/maps/route-checks'
 const geoIconUrl = '/icons/geo.svg'
@@ -172,21 +146,6 @@ let activeMapPopup = null
 let lastMarkerSyncSignature = ''
 let lastAppliedRouteFocusSignature = ''
 let lastOpenedRouteFocusPopupSignature = ''
-
-function normalizeMapProvider(value) {
-  const provider = String(value || '').trim().toLowerCase()
-  return provider === MAP_PROVIDER_OFM_LIBERTY ? MAP_PROVIDER_OFM_LIBERTY : MAP_PROVIDER_DEFAULT
-}
-
-function buildSelectedMapStyle(provider = selectedMapProvider.value) {
-  return normalizeMapProvider(provider) === MAP_PROVIDER_OFM_LIBERTY
-    ? OPENFREEMAP_STYLE_URL
-    : OSM_RASTER_STYLE
-}
-
-function buildFallbackMapStyle() {
-  return OSM_RASTER_STYLE
-}
 
 function clearMapBootTimer() {
   if (!mapBootTimerId) {
@@ -1531,7 +1490,7 @@ async function mountMap() {
       const viewport = mapViewport.value
       const instance = new window.maplibregl.Map({
         container: mapViewportRef.value,
-        style: buildSelectedMapStyle(),
+        style: buildSelectedMapStyle(selectedMapProvider.value),
         center: [viewport.center.lon, viewport.center.lat],
         zoom: viewport.zoom,
         attributionControl: false,
@@ -1582,11 +1541,9 @@ async function mountMap() {
         if (instance.__meshcoriumFallbackStyleApplied) {
           return
         }
-        const sourceId = String(event?.sourceId || event?.source?.id || '').trim()
-        const errorMessage = String(event?.error?.message || event?.message || '').trim()
         // OpenFreeMap can finish the first render before sprites/raster/vector tiles fail on the LAN stand.
         // Any source/tile/sprite error means the visible basemap may be incomplete, so switch to OSM raster.
-        const shouldFallback = Boolean(sourceId || errorMessage) || !mapReady.value
+        const shouldFallback = shouldFallbackToRasterMapStyle(event, mapReady.value)
         if (shouldFallback && selectedMapProvider.value === MAP_PROVIDER_OFM_LIBERTY) {
           fallbackToLocalStyle()
         }

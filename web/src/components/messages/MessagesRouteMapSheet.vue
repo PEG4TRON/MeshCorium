@@ -3,7 +3,16 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { extractValidGeoPoint, isGeoWithinHomeDistance, safeCoordinate as safeGeoCoordinate, HOME_NODE_GEO_MAX_DISTANCE_KM } from '../../lib/geo'
-import { ensureMapLibreLoaded } from '../../lib/mapLibre'
+import {
+  MAP_PROVIDER_OFM_LIBERTY,
+  MAP_STYLE_BOOT_TIMEOUT_MS,
+  buildFallbackMapStyle,
+  buildSelectedMapStyle,
+  ensureMapLibreLoaded,
+  normalizeMapProvider,
+  shouldFallbackToRasterMapStyle,
+  tileTransformRequest,
+} from '../../lib/mapLibre'
 import { resolveNodePreviewUrl } from '../../lib/nodePreview'
 import { useSessionStore } from '../../stores/session'
 
@@ -24,22 +33,10 @@ const mapMaxDistanceKm = computed(() => {
   const parsed = parseInt(raw, 10)
   return Number.isFinite(parsed) && parsed >= 1 ? parsed : HOME_NODE_GEO_MAX_DISTANCE_KM
 })
+const selectedMapProvider = computed(() => normalizeMapProvider(session.settingsPayload?.settings?.map_provider))
 
 const MAP_MIN_ZOOM = 1
 const MAP_MAX_ZOOM = 16
-const OPENFREEMAP_STYLE_ORIGIN = 'https://tiles.openfreemap.org/styles/liberty'
-const OPENFREEMAP_STYLE_URL = `/api/tiles/proxy?url=${encodeURIComponent(OPENFREEMAP_STYLE_ORIGIN)}`
-const TILE_PROXY_ORIGIN = 'tiles.openfreemap.org'
-function tileTransformRequest(url, resourceType) {
-  if (url.startsWith('/api/tiles/proxy') || url.includes('/api/tiles/proxy?')) {
-    return { url }
-  }
-  if (url.includes(TILE_PROXY_ORIGIN)) {
-    return { url: `/api/tiles/proxy?url=${encodeURIComponent(url)}` }
-  }
-  return { url }
-}
-const MAP_STYLE_BOOT_TIMEOUT_MS = 6000
 
 const mapViewportRef = ref(null)
 const mapInstance = ref(null)
@@ -161,23 +158,6 @@ function resolvePreferredRouteHopToken(hop, preferredHexLen = 4) {
 
 function expandRouteHopForDisplay(hop) {
   return resolvePreferredRouteHopToken(hop, 4) || normalizeRouteHopToken(hop)
-}
-
-function buildFallbackMapStyle() {
-  return {
-    version: 8,
-    name: 'MeshCorium fallback',
-    sources: {},
-    layers: [
-      {
-        id: 'meshcorium-background',
-        type: 'background',
-        paint: {
-          'background-color': '#10202f',
-        },
-      },
-    ],
-  }
 }
 
 function clearMapBootTimer() {
@@ -623,7 +603,7 @@ async function mountMap() {
       )
       const instance = new window.maplibregl.Map({
         container: mapViewportRef.value,
-        style: OPENFREEMAP_STYLE_URL,
+        style: buildSelectedMapStyle(selectedMapProvider.value),
         center: [center.lon, center.lat],
         zoom,
         attributionControl: false,
@@ -668,8 +648,14 @@ async function mountMap() {
       instance.on('load', finalizeMapReady)
       instance.once('render', finalizeMapReady)
       instance.once('idle', finalizeMapReady)
-      instance.on('error', () => {
-        if (!mapReady.value) {
+      instance.on('error', (event) => {
+        if (instance.__meshcoriumFallbackStyleApplied) {
+          return
+        }
+        if (
+          shouldFallbackToRasterMapStyle(event, mapReady.value)
+          && selectedMapProvider.value === MAP_PROVIDER_OFM_LIBERTY
+        ) {
           fallbackToLocalStyle()
         }
       })

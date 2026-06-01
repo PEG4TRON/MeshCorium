@@ -2,20 +2,17 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { ensureMapLibreLoaded } from '../../lib/mapLibre'
-
-const OPENFREEMAP_STYLE_ORIGIN = 'https://tiles.openfreemap.org/styles/liberty'
-const OPENFREEMAP_STYLE_URL = `/api/tiles/proxy?url=${encodeURIComponent(OPENFREEMAP_STYLE_ORIGIN)}`
-const TILE_PROXY_ORIGIN = 'tiles.openfreemap.org'
-function tileTransformRequest(url, resourceType) {
-  if (url.startsWith('/api/tiles/proxy') || url.includes('/api/tiles/proxy?')) {
-    return { url }
-  }
-  if (url.includes(TILE_PROXY_ORIGIN)) {
-    return { url: `/api/tiles/proxy?url=${encodeURIComponent(url)}` }
-  }
-  return { url }
-}
+import {
+  MAP_PROVIDER_OFM_LIBERTY,
+  MAP_STYLE_BOOT_TIMEOUT_MS,
+  buildFallbackMapStyle,
+  buildSelectedMapStyle,
+  ensureMapLibreLoaded,
+  normalizeMapProvider,
+  shouldFallbackToRasterMapStyle,
+  tileTransformRequest,
+} from '../../lib/mapLibre'
+import { useSessionStore } from '../../stores/session'
 
 const props = defineProps({
   model: {
@@ -30,10 +27,15 @@ const emit = defineEmits([
 ])
 
 const { t } = useI18n()
+const session = useSessionStore()
+const selectedMapProvider = computed(() => normalizeMapProvider(session.settingsPayload?.settings?.map_provider))
 
 const mapViewportRef = ref(null)
 const mapInstance = ref(null)
 const mapMarkers = ref([])
+const mapReady = ref(false)
+let mapBootTimerId = 0
+let mapMountToken = 0
 const mapContextMenu = ref({
   open: false,
   x: 0,
@@ -70,7 +72,17 @@ function closeMapContextMenu() {
   }
 }
 
+function clearMapBootTimer() {
+  if (!mapBootTimerId) {
+    return
+  }
+  window.clearTimeout(mapBootTimerId)
+  mapBootTimerId = 0
+}
+
 function destroyMap() {
+  mapMountToken += 1
+  clearMapBootTimer()
   closeMapContextMenu()
   for (const marker of mapMarkers.value) {
     try {
@@ -88,6 +100,7 @@ function destroyMap() {
     }
   }
   mapInstance.value = null
+  mapReady.value = false
   if (mapViewportRef.value) {
     mapViewportRef.value.innerHTML = ''
   }
@@ -236,6 +249,7 @@ async function mountMap() {
     return
   }
   destroyMap()
+  const mountToken = ++mapMountToken
   const points = markerPoints()
   const anchorPoint = points[0] || {
     lat: 0,
@@ -243,17 +257,51 @@ async function mountMap() {
   }
   const instance = new window.maplibregl.Map({
     container: mapViewportRef.value,
-    style: OPENFREEMAP_STYLE_URL,
+    style: buildSelectedMapStyle(selectedMapProvider.value),
     center: [Number(anchorPoint.lon), Number(anchorPoint.lat)],
     zoom: points.length ? 8 : 2,
     attributionControl: false,
     transformRequest: tileTransformRequest,
   })
   mapInstance.value = instance
-  instance.addControl(new window.maplibregl.NavigationControl(), 'top-right')
-  instance.on('load', () => {
+  const finalizeMapReady = () => {
+    if (mountToken !== mapMountToken || mapInstance.value !== instance) {
+      return
+    }
+    clearMapBootTimer()
+    mapReady.value = true
     syncMarkers()
     fitMapToPoints()
+  }
+  const fallbackToLocalStyle = () => {
+    if (mountToken !== mapMountToken || mapInstance.value !== instance || instance.__meshcoriumFallbackStyleApplied) {
+      return
+    }
+    instance.__meshcoriumFallbackStyleApplied = true
+    try {
+      instance.setStyle(buildFallbackMapStyle())
+    } catch {
+      // ignore style fallback failures
+    }
+  }
+  clearMapBootTimer()
+  mapBootTimerId = window.setTimeout(() => {
+    fallbackToLocalStyle()
+  }, MAP_STYLE_BOOT_TIMEOUT_MS)
+  instance.addControl(new window.maplibregl.NavigationControl(), 'top-right')
+  instance.on('load', finalizeMapReady)
+  instance.once('render', finalizeMapReady)
+  instance.once('idle', finalizeMapReady)
+  instance.on('error', (event) => {
+    if (instance.__meshcoriumFallbackStyleApplied) {
+      return
+    }
+    if (
+      shouldFallbackToRasterMapStyle(event, mapReady.value)
+      && selectedMapProvider.value === MAP_PROVIDER_OFM_LIBERTY
+    ) {
+      fallbackToLocalStyle()
+    }
   })
   instance.on('contextmenu', openMapContextMenu)
   instance.on('click', closeMapContextMenu)
