@@ -4576,35 +4576,65 @@ function attachMessageBottomPaginationIntentListeners(host) {
 }
 
 async function scrollToNewestMessage() {
-  if (!currentConversation.value || loadingNewerMessages.value) return
+  const conv = currentConversation.value
+  if (!conv || loadingNewerMessages.value) return
+  
+  const targetConversationKey = currentConversationKey.value
   
   loadingNewerMessages.value = true
   suspendProgrammaticReadTracking(520)
   
   try {
-    const conv = currentConversation.value
-    let url = `/api/messages/channel?channel_idx=${conv.channelIdx}&limit=${HISTORY_PAGE_SIZE}&latest=true`
-    if (conv.channelIdentity) url += `&channel_identity=${encodeURIComponent(conv.channelIdentity)}`
+    let data = null
+    let lastId = null
     
-    const keyBefore = currentConversationKey.value
-    const data = await session.api(url)
+    if (selectedConversationKind.value === 'channel' && (selectedChannelIdx.value != null || selectedChannelIdentity.value)) {
+      const params = new URLSearchParams({
+        channel_idx: String(selectedChannelIdx.value ?? 0),
+        limit: String(HISTORY_PAGE_SIZE),
+        latest: 'true',
+      })
+      if (selectedChannelIdentity.value) {
+        params.set('channel_identity', String(selectedChannelIdentity.value))
+      }
+      if (getOwnerPort()) {
+        params.set('port', getOwnerPort())
+      }
+      data = await session.api(`/api/messages/channel?${params.toString()}`)
+    } else if (selectedConversationKind.value === 'contact' && selectedContactKey.value) {
+      const params = new URLSearchParams({
+        public_key: String(selectedContactKey.value),
+        limit: String(HISTORY_PAGE_SIZE),
+        latest: 'true',
+      })
+      if (getOwnerPort()) {
+        params.set('port', getOwnerPort())
+      }
+      data = await session.api(`/api/messages/contact?${params.toString()}`)
+    }
     
-    if (currentConversationKey.value !== keyBefore) return
+    if (!data || currentConversationKey.value !== targetConversationKey) return
     
-    const list = data.messages || []
-    if (list.length > 0) {
-      messages.value = list
-      activeConversationTotalMessages.value = data.total_count || list.length
+    const latestMessages = sanitizeMessageList(data?.messages)
+    if (latestMessages.length > 0) {
+      messages.value = mergeUniqueMessages(messages.value, latestMessages)
+      activeConversationTotalMessages.value = Math.max(messages.value.length, Number(data?.total_count || activeConversationTotalMessages.value))
+      scheduleConversationCacheWrite(targetConversationKey, messages.value, activeConversationTotalMessages.value)
       
-      const lastId = list[list.length - 1].id
+      lastId = latestMessages[latestMessages.length - 1].id
+      await nextTick()
+    }
+    
+    // Mark all messages in channel as read up to the newest
+    if (lastId) {
       try {
         const readBody = { message_id: lastId }
-        if (conv.channelIdx !== undefined) {
+        if (selectedConversationKind.value === 'channel') {
           readBody.conversation_kind = 'channel'
-          readBody.conversation_value = String(conv.channelIdx)
-        } else if (conv.contactKey) {
+          readBody.conversation_value = String(selectedChannelIdx.value ?? 0)
+        } else if (selectedConversationKind.value === 'contact') {
           readBody.conversation_kind = 'contact'
-          readBody.conversation_value = conv.contactKey
+          readBody.conversation_value = String(selectedContactKey.value)
         }
         await session.api('/api/messages/read-up-to', readBody)
       } catch (_) {}
