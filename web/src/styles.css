@@ -7865,6 +7865,19 @@ button {
     display: none;
   }
 
+  /* Move message timestamp to footer on mobile */
+  .mc-message-head .mc-message-time {
+    display: none;
+  }
+
+  .mc-message-time--mobile {
+    display: block;
+    width: 100%;
+    text-align: right;
+    margin-top: 4px;
+    font-size: 10px;
+    color: var(--muted);
+  }
 }
 
 /* Mobile chat fullscreen overlay */

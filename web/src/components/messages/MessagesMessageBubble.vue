@@ -1,5 +1,8 @@
 <script setup>
 import { useI18n } from 'vue-i18n'
+import { useIsMobile } from '../../composables/useIsMobile'
+
+const { isMobile } = useIsMobile()
 
 const props = defineProps({
   renderedMessage: {
@@ -138,6 +141,7 @@ function openMessageContact(contact) {
           </div>
         </div>
         <span v-if="renderedMessage.routeMeta" class="mc-message-route">{{ renderedMessage.routeMeta }}</span>
+        <div v-if="isMobile" class="mc-message-time mc-message-time--mobile">{{ renderedMessage.timestampText }}</div>
       </footer>
     </article>
   </div>
