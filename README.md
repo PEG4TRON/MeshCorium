@@ -8,7 +8,7 @@ Basic project overview:
 
 MeshCorium is a self-hosted MeshCore client with a hybrid contact system and a local web interface for working with a MeshCore node through companion firmware.
 
-Current release `0.8.1--map-fixes` is a focused map stability update: all MapLibre surfaces now share the same provider selection and OSM Raster fallback behavior, with Docker/runtime version metadata aligned to `0.8.1`.
+Current release `0.8.1--mobile-ux-quality` is a mobile UX and quality release: scroll-to-newest messages, ghost channel detection, SVG icon system, extracted mobile components, unified CSS design tokens, and a11y improvements.
 
 ## Preview
 
@@ -18,17 +18,17 @@ Current release `0.8.1--map-fixes` is a focused map stability update: all MapLib
 
 ## Release Status
 
-The latest published release is `MeshCorium v0.8.1 -- map-fixes`.
+The latest published release is `MeshCorium v0.8.1 -- mobile-ux-quality`.
 
-### v0.8.1 — map-fixes
+### v0.8.1 — mobile-ux-quality
 
-Key differences relative to `v0.8.0`:
-
-- **Secondary maps**: message route maps, repeater geo picker, and contact route editor now use the same saved map provider and fallback logic as the main Maps page.
-- **Fallback**: OpenFreeMap / OFM Liberty failures and boot timeouts fall back to OSM Raster through the local tile proxy.
-- **Map distance**: `map_max_distance_km` lets users configure the maximum contact distance rendered on Maps.
-- **Settings/About**: manual update-check button next to the version.
-- **Docker**: container image now includes `.meshcorium_version`, Compose metadata is updated to `0.8.1`, and the Dockerfile explicitly copies all root Python files.
+- **Messages**: direct jump to newest messages with `latest=true` API, ghost channel detection (empty `channel_identity`), infinite-loop guard in scroll-to-newest.
+- **Mobile UI**: Send button repositioned (right, symmetric to GIF), paper-plane icon without text, message timestamp moved to bubble footer with year in format.
+- **Icon system**: all emoji replaced with stroke-based SVG icons in cyan-to-blue gradient, `MobileDockButton` supports SVG URLs.
+- **Components**: `MobileNodebar` and `MobileDockBar` extracted from duplicative HTML in `MessagesView`.
+- **CSS engineering**: `100vh`→`100dvh`, unified border-radius CSS vars, `:active`/`:focus-visible`/`transition` across all interactive elements, skeleton loaders, `@supports` replacing `.is-firefox` classes.
+- **Performance**: RAF debounce for conversation list scroll metrics.
+- **Docker**: image includes `.meshcorium_version`, `/api/update/check` reports `0.8.1`, all root Python files explicitly listed in Dockerfile.
 
 ### v0.7.0 — Docker + USB + BLE + WIFI/LAN
 
