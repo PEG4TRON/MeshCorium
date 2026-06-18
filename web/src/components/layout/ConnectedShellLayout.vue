@@ -992,6 +992,9 @@ const regularNotificationEntries = computed(() => {
       continue
     }
     const target = buildChannelNotificationTarget(channelKey)
+    if (!target.channelIdentity || target.channelIdentity === '') {
+      continue
+    }
     if (getChannelMuteMode(channelKey, target) === 'regular' || getChannelMuteMode(channelKey, target) === 'all') {
       continue
     }
