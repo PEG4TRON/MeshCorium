@@ -50,6 +50,12 @@ const router = useRouter()
 const { t } = useI18n()
 const { isMobile } = useIsMobile()
 
+const bellIconUrl = '/icons/bell-icon.svg'
+const messagesIconUrl = '/icons/paper-plane.png'
+const contactsIconUrl = '/icons/contacts-icon.svg'
+const mapIconUrl = '/icons/map-icon.svg'
+const settingsIconUrl = '/icons/settings-icon.svg'
+
 const contactsLoading = ref(false)
 const groupsLoading = ref(false)
 const contactsSearchTerm = ref('')
@@ -4562,11 +4568,11 @@ onBeforeUnmount(() => {
     </template>
 
     <template #dock>
-      <MobileDockButton icon="🔔" label="Notif" :badge="totalUnreadCount || ''" @click="toggleNotificationsPanel" />
-      <MobileDockButton icon="💬" label="Chats" @click="router.push('/messages')" />
-      <MobileDockButton icon="👥" label="Contacts" :active="true" />
-      <MobileDockButton icon="🗺" label="Map" @click="router.push('/maps')" />
-      <MobileDockButton icon="⚙" label="Settings" @click="router.push('/settings')" />
+      <MobileDockButton :icon="bellIconUrl" label="Notif" :badge="totalUnreadCount || ''" @click="toggleNotificationsPanel" />
+      <MobileDockButton :icon="messagesIconUrl" label="Chats" @click="router.push('/messages')" />
+      <MobileDockButton :icon="contactsIconUrl" label="Contacts" :active="true" />
+      <MobileDockButton :icon="mapIconUrl" label="Map" @click="router.push('/maps')" />
+      <MobileDockButton :icon="settingsIconUrl" label="Settings" @click="router.push('/settings')" />
     </template>
   </MobileContactsShell>
 
