@@ -8494,6 +8494,7 @@ def list_channel_messages(
     anchor_message_id: int | None = None,
     before_message_id: int | None = None,
     after_message_id: int | None = None,
+    latest: bool = False,
     *,
     owner_id: str | None = None,
     access_all: bool | None = None,
@@ -8509,34 +8510,39 @@ def list_channel_messages(
         else:
             base_where = f"{owner_where} AND message_kind = 'channel' AND channel_idx = ?"
             base_params = owner_params + (int(channel_idx),)
-        offset = _resolve_after_history_offset(
-            conn,
-            table_name="messages",
-            where_sql=base_where,
-            params=base_params,
-            after_message_id=after_message_id,
-        )
-        if offset is None:
-            offset = _resolve_before_history_offset(
-                conn,
-                table_name="messages",
-                where_sql=base_where,
-                params=base_params,
-                limit=safe_limit,
-                before_message_id=before_message_id,
-            )
-        if offset is None:
-            offset = _resolve_anchor_history_offset(
-                conn,
-                table_name="messages",
-                where_sql=base_where,
-                params=base_params,
-                limit=safe_limit,
-                anchor_message_id=anchor_message_id,
-            )
-        if offset is None:
+        if latest:
+            # Jump directly to latest messages — ignore all other parameters
             total_count = _count_rows(conn, "messages", base_where, base_params)
             offset = max(0, total_count - safe_limit)
+        else:
+            offset = _resolve_after_history_offset(
+                conn,
+                table_name="messages",
+                where_sql=base_where,
+                params=base_params,
+                after_message_id=after_message_id,
+            )
+            if offset is None:
+                offset = _resolve_before_history_offset(
+                    conn,
+                    table_name="messages",
+                    where_sql=base_where,
+                    params=base_params,
+                    limit=safe_limit,
+                    before_message_id=before_message_id,
+                )
+            if offset is None:
+                offset = _resolve_anchor_history_offset(
+                    conn,
+                    table_name="messages",
+                    where_sql=base_where,
+                    params=base_params,
+                    limit=safe_limit,
+                    anchor_message_id=anchor_message_id,
+                )
+            if offset is None:
+                total_count = _count_rows(conn, "messages", base_where, base_params)
+                offset = max(0, total_count - safe_limit)
         rows = conn.execute(
             f"""
             SELECT
@@ -8760,6 +8766,7 @@ def list_contact_messages(
     anchor_message_id: int | None = None,
     before_message_id: int | None = None,
     after_message_id: int | None = None,
+    latest: bool = False,
     *,
     owner_id: str | None = None,
     access_all: bool | None = None,
@@ -8771,34 +8778,39 @@ def list_contact_messages(
         conn.row_factory = sqlite3.Row
         base_where = f"{owner_where} AND pubkey_prefix = ?"
         base_params = owner_params + (prefix,)
-        offset = _resolve_after_history_offset(
-            conn,
-            table_name="contact_messages",
-            where_sql=base_where,
-            params=base_params,
-            after_message_id=after_message_id,
-        )
-        if offset is None:
-            offset = _resolve_before_history_offset(
-                conn,
-                table_name="contact_messages",
-                where_sql=base_where,
-                params=base_params,
-                limit=safe_limit,
-                before_message_id=before_message_id,
-            )
-        if offset is None:
-            offset = _resolve_anchor_history_offset(
-                conn,
-                table_name="contact_messages",
-                where_sql=base_where,
-                params=base_params,
-                limit=safe_limit,
-                anchor_message_id=anchor_message_id,
-            )
-        if offset is None:
+        if latest:
+            # Jump directly to latest messages — ignore all other parameters
             total_count = _count_rows(conn, "contact_messages", base_where, base_params)
             offset = max(0, total_count - safe_limit)
+        else:
+            offset = _resolve_after_history_offset(
+                conn,
+                table_name="contact_messages",
+                where_sql=base_where,
+                params=base_params,
+                after_message_id=after_message_id,
+            )
+            if offset is None:
+                offset = _resolve_before_history_offset(
+                    conn,
+                    table_name="contact_messages",
+                    where_sql=base_where,
+                    params=base_params,
+                    limit=safe_limit,
+                    before_message_id=before_message_id,
+                )
+            if offset is None:
+                offset = _resolve_anchor_history_offset(
+                    conn,
+                    table_name="contact_messages",
+                    where_sql=base_where,
+                    params=base_params,
+                    limit=safe_limit,
+                    anchor_message_id=anchor_message_id,
+                )
+            if offset is None:
+                total_count = _count_rows(conn, "contact_messages", base_where, base_params)
+                offset = max(0, total_count - safe_limit)
         rows = conn.execute(
             f"""
             SELECT
@@ -12057,9 +12069,11 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
             before_message_id = None if raw_before in ("", None) else int(raw_before)
             raw_after = params.get("after_message_id", [""])[0]
             after_message_id = None if raw_after in ("", None) else int(raw_after)
+            raw_latest = params.get("latest", [""])[0]
+            latest = raw_latest.lower() in ("1", "true", "yes", "on")
             with _messages_owner_scope(port=port, channel_identity=channel_identity):
                 self._send_json({
-                    "messages": list_channel_messages(channel_idx, limit, anchor_message_id=anchor_message_id, before_message_id=before_message_id, after_message_id=after_message_id),
+                    "messages": list_channel_messages(channel_idx, limit, anchor_message_id=anchor_message_id, before_message_id=before_message_id, after_message_id=after_message_id, latest=latest),
                     "total_count": get_channel_message_count(channel_idx),
                     "sent_history": get_channel_unique_outgoing_texts(channel_idx, 20),
                 })
@@ -12084,9 +12098,11 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
             before_message_id = None if raw_before in ("", None) else int(raw_before)
             raw_after = params.get("after_message_id", [""])[0]
             after_message_id = None if raw_after in ("", None) else int(raw_after)
+            raw_latest = params.get("latest", [""])[0]
+            latest = raw_latest.lower() in ("1", "true", "yes", "on")
             with _messages_owner_scope(port=port):
                 self._send_json({
-                    "messages": list_contact_messages(public_key, limit, anchor_message_id=anchor_message_id, before_message_id=before_message_id, after_message_id=after_message_id),
+                    "messages": list_contact_messages(public_key, limit, anchor_message_id=anchor_message_id, before_message_id=before_message_id, after_message_id=after_message_id, latest=latest),
                     "total_count": get_contact_message_count(public_key),
                     "sent_history": get_contact_unique_outgoing_texts(public_key, 20),
                 })
