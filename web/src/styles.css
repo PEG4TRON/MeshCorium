@@ -3051,65 +3051,77 @@ button {
   background: rgba(255, 255, 255, 0.05);
 }
 
-.is-firefox body {
-  background: #0d1923;
+@supports (-moz-appearance: none) {
+  body {
+    background: #0d1923;
+  }
 }
 
-.is-firefox .mc-shell,
-.is-firefox .mc-sidebar,
-.is-firefox .mc-content,
-.is-firefox .mc-phonebar,
-.is-firefox .mc-workspace-header,
-.is-firefox .mc-chat-body,
-.is-firefox .mc-list-avatar,
-.is-firefox .mc-list-avatar--add,
-.is-firefox .mc-chat-actions-menu,
-.is-firefox .mc-plugin-dropdown-menu,
-.is-firefox .mc-notifications-sheet,
-.is-firefox .mc-connect-float,
-.is-firefox .mc-gif-sheet,
-.is-firefox .mc-console-shell,
-.is-firefox .mc-mini-sheet {
-  background-image: none !important;
+@supports (-moz-appearance: none) {
+  .mc-shell,
+  .mc-sidebar,
+  .mc-content,
+  .mc-phonebar,
+  .mc-workspace-header,
+  .mc-chat-body,
+  .mc-list-avatar,
+  .mc-list-avatar--add,
+  .mc-chat-actions-menu,
+  .mc-plugin-dropdown-menu,
+  .mc-notifications-sheet,
+  .mc-connect-float,
+  .mc-gif-sheet,
+  .mc-console-shell,
+  .mc-mini-sheet {
+    background-image: none !important;
+  }
 }
 
-.is-firefox .v-popper--theme-meshcorium-tooltip .v-popper__inner,
-.is-firefox .mc-chat-actions-menu,
-.is-firefox .mc-plugin-dropdown-menu,
-.is-firefox .mc-overlay,
-.is-firefox .mc-connect-alert,
-.is-firefox .mc-scroll-to-bottom {
-  backdrop-filter: none !important;
+@supports (-moz-appearance: none) {
+  .v-popper--theme-meshcorium-tooltip .v-popper__inner,
+  .mc-chat-actions-menu,
+  .mc-plugin-dropdown-menu,
+  .mc-overlay,
+  .mc-connect-alert,
+  .mc-scroll-to-bottom {
+    backdrop-filter: none !important;
+  }
 }
 
-.is-firefox .mc-shell,
-.is-firefox .mc-message-card,
-.is-firefox .mc-notification-item,
-.is-firefox .mc-connect-history-card,
-.is-firefox .mc-chat-actions-menu,
-.is-firefox .mc-plugin-dropdown-menu,
-.is-firefox .mc-scroll-to-bottom,
-.is-firefox .mc-console-shell,
-.is-firefox .mc-connect-float,
-.is-firefox .mc-gif-sheet,
-.is-firefox .mc-mini-sheet {
-  box-shadow: none !important;
+@supports (-moz-appearance: none) {
+  .mc-shell,
+  .mc-message-card,
+  .mc-notification-item,
+  .mc-connect-history-card,
+  .mc-chat-actions-menu,
+  .mc-plugin-dropdown-menu,
+  .mc-scroll-to-bottom,
+  .mc-console-shell,
+  .mc-connect-float,
+  .mc-gif-sheet,
+  .mc-mini-sheet {
+    box-shadow: none !important;
+  }
 }
 
-.is-firefox .mc-list-scroll,
-.is-firefox .mc-chat-body,
-.is-firefox .mc-notifications-list,
-.is-firefox .mc-connect-history-list,
-.is-firefox .mc-console-log {
-  will-change: auto;
+@supports (-moz-appearance: none) {
+  .mc-list-scroll,
+  .mc-chat-body,
+  .mc-notifications-list,
+  .mc-connect-history-list,
+  .mc-console-log {
+    will-change: auto;
+  }
 }
 
-.is-firefox .mc-message-card,
-.is-firefox .mc-list-item,
-.is-firefox .mc-notification-item,
-.is-firefox .mc-connect-history-card {
-  content-visibility: visible;
-  contain: layout paint;
+@supports (-moz-appearance: none) {
+  .mc-message-card,
+  .mc-list-item,
+  .mc-notification-item,
+  .mc-connect-history-card {
+    content-visibility: visible;
+    contain: layout paint;
+  }
 }
 
 .mc-console-shell {
