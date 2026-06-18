@@ -625,6 +625,7 @@ function formatTimestamp(epoch) {
   }
   try {
     return new Date(timestamp * 1000).toLocaleString(locale.value === 'en' ? 'en-US' : 'ru-RU', {
+      year: 'numeric',
       day: '2-digit',
       month: '2-digit',
       hour: '2-digit',
