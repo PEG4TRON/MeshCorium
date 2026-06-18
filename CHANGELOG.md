@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.8.1 — Map Fixes (2026-06-01)
+## v0.8.1 — Mobile UX & Quality (2026-06-18)
 
 ### Map provider fallback
 - Unified MapLibre provider selection and fallback behavior across all secondary maps: message route maps, repeater geo picker, and contact route editor now honor the saved `map_provider` setting just like the main Maps page.
@@ -22,13 +22,62 @@
 - Added the previously omitted helper script `download_meshcore_node_svgs.py` to the Docker runtime copy list, keeping root Python files explicit in the Dockerfile.
 - Kept the cleaned release tree rules from v0.8.0: runtime data, logs, caches, virtual environments, and node modules are excluded from release artifacts.
 
+### Messages
+
+#### Scroll-to-newest
+- Added `latest=true` query parameter to `list_channel_messages` and `list_contact_messages` — direct jump to the newest DB messages instead of iterative pagination.
+- Rewrote `scrollToNewestMessage()` in `MessagesView.vue`: single API call replaces old messages instead of merging, marks all messages up to the newest as read via `POST /api/messages/read-up-to`.
+- Fixed infinite loop in `scrollToNewestMessage`: added `lastNewerLoadHadResults` ref guard in `canLoadNewerMessages` computed.
+- Fixed missing `/api` prefix and wrong endpoint (`/messages/list` → `/api/messages/channel` with GET query params) in scroll-to-newest.
+- Fixed `read-up-to` call: proper `POST` with `method` + `body: JSON.stringify(...)` and `conversation_kind`/`conversation_value` params.
+
+#### Ghost channels (empty channel_identity)
+- Backend: `_build_channel_unread_payload_for_port` now filters out messages with empty `channel_identity` from unread summary and logs a warning.
+- Frontend: `regularNotificationEntries` in `ConnectedShellLayout.vue` skips channels with empty `channel_identity` (no more #N + 🔒 entries).
+- Fixed `conn.fetchall()` on `sqlite3.Connection` (must be called on cursor, not connection).
+
+### Mobile UI
+
+#### Composer
+- Send button moved to the right side of the input row, symmetric to the GIF button on the left — 46×46px icon-only button with paper-plane icon, no text label.
+- `MessagesComposerBar.vue` imports `useIsMobile` for conditional rendering (icon on mobile, text label on desktop).
+
+#### Icons
+- All emoji icons (🔔💬👥🗺⚙) replaced with stroke-based SVG icons in the project's cyan-to-blue gradient style (#12B8F4→#5A74C9), viewBox 0 0 512 512.
+- Five new icons created: `contacts-icon.svg`, `map-icon.svg`, `settings-icon.svg`, `disconnect-icon.svg`, `console-icon.svg` in `/icons/`.
+- `MobileDockButton.vue` updated to support SVG URLs via `<img>` when icon starts with `/`.
+- Emoji icons replaced in `ConnectedShellLayout.vue` (desktop rail + mobile dock), `MessagesView.vue` (mobile dock ×2), and `ContactsView.vue` (mobile dock).
+
+#### Component extraction
+- Extracted `MobileNodebar.vue` and `MobileDockBar.vue` from duplicative HTML in `MessagesView.vue` — eliminates copy-paste between conversation list and chat overlay views.
+- Fixed vertical mobile dock regression: removed duplicate `<nav>` wrapper from `MobileDockBar.vue` (shell already provides the container).
+
+#### Timestamp
+- Added year to message timestamp format: `DD.MM, HH:MM` → `DD.MM.YYYY, HH:MM`.
+- On mobile, message timestamp moved from message header to footer — separate line, right-aligned, 10px muted text.
+
+### Frontend Engineering
+
+#### CSS system
+- All `100vh` replaced with `100dvh` (12 occurrences) for iOS Safari viewport stability.
+- Unified border-radius into 4 CSS custom properties: `--mc-radius-sm: 8px`, `--mc-radius: 12px`, `--mc-radius-lg: 16px`, `--mc-radius-pill: 999px` — replaces 9 ad-hoc values (167 replacements).
+- Added `:active` tactile button feedback: `scale(0.98) translateY(1px)`.
+- Added `:focus-visible` a11y outlines: 2px accent border with 2px offset on all interactive elements.
+- Added 200ms `transition` on `background-color`, `color`, `border-color`, `opacity`, `transform` for all interactive elements.
+- Unified monospace font fallback: `"IBM Plex Mono", monospace` — removed `"Fira Code"`, `"Consolas"`, `"JetBrains Mono"` variants.
+- Added skeleton loader CSS: `.mc-skeleton` with pulse animation, conversation and message bubble skeleton variants.
+- Replaced 42 `.is-firefox` class selectors with `@supports (-moz-appearance: none)` feature queries.
+
+#### Performance
+- Added RAF debounce (`requestAnimationFrame` guard) for `updateConversationListMetrics()` in `useMessagesConversationList.js` — prevents double recalculation per frame from scroll + ResizeObserver events.
+
 ### Difference from v0.8.0
 - v0.8.0 introduced the stable mobile UI and the initial Maps provider selector/fallback path on the main Maps page.
 - v0.8.1 is a focused map-fixes release: it extends the same provider/fallback logic to every secondary MapLibre surface, adds a configurable contact distance limit, and fixes Docker/runtime version metadata for the new release.
 
 ---
 
-## v0.8.1 — Исправления карт (2026-06-01) [RU]
+## v0.8.1 — Mobile UX & Quality (2026-06-18) [RU]
 
 ### Fallback провайдера карт
 - Унифицирован выбор MapLibre-провайдера и fallback-поведение во всех вторичных картах: карты маршрутов в сообщениях, выбор геопозиции repeater и редактор маршрута контакта теперь учитывают сохранённую настройку `map_provider`, как и основная страница Maps.
@@ -49,6 +98,55 @@
 - Docker Compose metadata обновлены до `0.8.1` / `0.8.1--map-fixes`.
 - В Dockerfile добавлен ранее пропущенный helper `download_meshcore_node_svgs.py`, чтобы root Python-файлы оставались явно перечислены.
 - Сохранены правила чистого релизного дерева v0.8.0: пользовательские данные, логи, кэши, virtualenv и node_modules не входят в релизные артефакты.
+
+### Сообщения
+
+#### Прокрутка к новым
+- Добавлен параметр `latest=true` в `list_channel_messages` и `list_contact_messages` — прямой переход к новейшим сообщениям в БД вместо итеративной пагинации.
+- Переписан `scrollToNewestMessage()` в `MessagesView.vue`: один API-вызов заменяет старые сообщения вместо слияния, помечает все сообщения до новейшего как прочитанные через `POST /api/messages/read-up-to`.
+- Исправлен бесконечный цикл в `scrollToNewestMessage`: добавлен guard `lastNewerLoadHadResults` ref в computed `canLoadNewerMessages`.
+- Исправлен отсутствующий префикс `/api` и неверный endpoint (`/messages/list` → `/api/messages/channel` с GET query params) в scroll-to-newest.
+- Исправлен вызов `read-up-to`: корректный `POST` с `method` + `body: JSON.stringify(...)` и параметрами `conversation_kind`/`conversation_value`.
+
+#### Призрачные каналы (пустой channel_identity)
+- Бэкенд: `_build_channel_unread_payload_for_port` теперь фильтрует сообщения с пустым `channel_identity` из unread-сводки и логирует предупреждение.
+- Фронтенд: `regularNotificationEntries` в `ConnectedShellLayout.vue` пропускает каналы с пустым `channel_identity` (больше нет #N + 🔒 записей).
+- Исправлен `conn.fetchall()` на `sqlite3.Connection` (должен вызываться на курсоре, а не на connection).
+
+### Мобильный UI
+
+#### Композер
+- Кнопка отправки перемещена в правую часть строки ввода, симметрично кнопке GIF слева — иконка 46×46px с paper-plane, без текстовой метки.
+- `MessagesComposerBar.vue` импортирует `useIsMobile` для условного рендеринга (иконка на mobile, текстовая метка на desktop).
+
+#### Иконки
+- Все emoji-иконки (🔔💬👥🗺⚙) заменены на stroke-based SVG иконки в градиентном стиле cyan-to-blue (#12B8F4→#5A74C9), viewBox 0 0 512 512.
+- Создано пять новых иконок: `contacts-icon.svg`, `map-icon.svg`, `settings-icon.svg`, `disconnect-icon.svg`, `console-icon.svg` в `/icons/`.
+- `MobileDockButton.vue` обновлён для поддержки SVG URL через `<img>`, когда иконка начинается с `/`.
+- Emoji-иконки заменены в `ConnectedShellLayout.vue` (desktop rail + mobile dock), `MessagesView.vue` (mobile dock ×2) и `ContactsView.vue` (mobile dock).
+
+#### Выделение компонентов
+- Выделены `MobileNodebar.vue` и `MobileDockBar.vue` из дублирующего HTML в `MessagesView.vue` — устранён copy-paste между списком диалогов и оверлеем чата.
+- Исправлена регрессия вертикального mobile dock: удалена дублирующая обёртка `<nav>` из `MobileDockBar.vue` (shell уже предоставляет контейнер).
+
+#### Временные метки
+- Добавлен год в формат временных меток сообщений: `DD.MM, HH:MM` → `DD.MM.YYYY, HH:MM`.
+- На mobile временная метка перемещена из заголовка сообщения в футер — отдельная строка, выравнивание вправо, muted-текст 10px.
+
+### Фронтенд-инженерия
+
+#### CSS-система
+- Все `100vh` заменены на `100dvh` (12 вхождений) для стабильности viewport в iOS Safari.
+- Унифицирован border-radius в 4 CSS custom properties: `--mc-radius-sm: 8px`, `--mc-radius: 12px`, `--mc-radius-lg: 16px`, `--mc-radius-pill: 999px` — заменяет 9 ad-hoc значений (167 замен).
+- Добавлена тактильная обратная связь `:active` для кнопок: `scale(0.98) translateY(1px)`.
+- Добавлены a11y-обводки `:focus-visible`: акцентная рамка 2px с отступом 2px на всех интерактивных элементах.
+- Добавлен 200ms `transition` для `background-color`, `color`, `border-color`, `opacity`, `transform` на всех интерактивных элементах.
+- Унифицирован fallback моноширинного шрифта: `"IBM Plex Mono", monospace` — удалены варианты `"Fira Code"`, `"Consolas"`, `"JetBrains Mono"`.
+- Добавлен CSS для skeleton loader: `.mc-skeleton` с pulse-анимацией, варианты скелета для диалогов и пузырей сообщений.
+- 42 селектора `.is-firefox` заменены на feature-запросы `@supports (-moz-appearance: none)`.
+
+#### Производительность
+- Добавлен RAF debounce (`requestAnimationFrame` guard) для `updateConversationListMetrics()` в `useMessagesConversationList.js` — предотвращает двойной пересчёт за кадр от событий scroll + ResizeObserver.
 
 ### Отличия от v0.8.0
 - v0.8.0 принёс стабильный mobile UI и начальный selector/fallback провайдера карт на основной странице Maps.
