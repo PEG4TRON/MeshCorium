@@ -5592,13 +5592,15 @@ onBeforeUnmount(() => {
       :node-name="session.self?.name || session.selectedSavedConnection?.node_name || t('common.offline')"
       :node-preview-url="nodePreviewUrl"
     />
-    <MobileDockBar
-      :badge="totalUnreadCount || ''"
-      @notifications="toggleNotificationsPanel"
-      @contacts="router.push('/contacts')"
-      @maps="router.push('/maps')"
-      @settings="router.push('/settings')"
-    />
+    <nav class="mc-mobile-dock">
+      <MobileDockBar
+        :badge="totalUnreadCount || ''"
+        @notifications="toggleNotificationsPanel"
+        @contacts="router.push('/contacts')"
+        @maps="router.push('/maps')"
+        @settings="router.push('/settings')"
+      />
+    </nav>
   </div>
 
   <!-- DESKTOP -->

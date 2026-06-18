@@ -1,11 +1,9 @@
 <template>
-  <nav class="mc-mobile-dock">
-    <MobileDockButton :icon="bellIcon" label="Notif" :badge="badge" @click="$emit('notifications')" />
-    <MobileDockButton :icon="messagesIcon" label="Chats" :active="true" />
-    <MobileDockButton :icon="contactsIcon" label="Contacts" @click="$emit('contacts')" />
-    <MobileDockButton :icon="mapIcon" label="Map" @click="$emit('maps')" />
-    <MobileDockButton :icon="settingsIcon" label="Settings" @click="$emit('settings')" />
-  </nav>
+  <MobileDockButton :icon="bellIcon" label="Notif" :badge="badge" @click="$emit('notifications')" />
+  <MobileDockButton :icon="messagesIcon" label="Chats" :active="true" />
+  <MobileDockButton :icon="contactsIcon" label="Contacts" @click="$emit('contacts')" />
+  <MobileDockButton :icon="mapIcon" label="Map" @click="$emit('maps')" />
+  <MobileDockButton :icon="settingsIcon" label="Settings" @click="$emit('settings')" />
 </template>
 
 <script setup>
