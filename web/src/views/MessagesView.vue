@@ -4617,8 +4617,8 @@ async function scrollToNewestMessage() {
     
     const latestMessages = sanitizeMessageList(data?.messages)
     if (latestMessages.length > 0) {
-      messages.value = mergeUniqueMessages(messages.value, latestMessages)
-      activeConversationTotalMessages.value = Math.max(messages.value.length, Number(data?.total_count || activeConversationTotalMessages.value))
+      messages.value = latestMessages
+      activeConversationTotalMessages.value = Number(data?.total_count || latestMessages.length)
       scheduleConversationCacheWrite(targetConversationKey, messages.value, activeConversationTotalMessages.value)
       
       lastId = latestMessages[latestMessages.length - 1].id
