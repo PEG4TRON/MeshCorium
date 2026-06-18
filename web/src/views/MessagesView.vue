@@ -21,7 +21,8 @@ import MessagesRouteMapSheetLoading from '../components/messages/MessagesRouteMa
 import ShellPageFrame from '../components/layout/ShellPageFrame.vue'
 import ShellPhonebar from '../components/layout/ShellPhonebar.vue'
 import MobileMessagesShell from '../components/layout/MobileMessagesShell.vue'
-import MobileDockButton from '../components/layout/MobileDockButton.vue'
+import MobileNodebar from '../components/layout/MobileNodebar.vue'
+import MobileDockBar from '../components/layout/MobileDockBar.vue'
 import { useIsMobile } from '../composables/useIsMobile'
 import {
   buildCloseShellPanelLocation,
@@ -5492,28 +5493,24 @@ onBeforeUnmount(() => {
     </template>
 
     <template #nodebar>
-      <div class="mc-phonebar-row">
-        <div class="mc-phonebar-left">
-          <div class="mc-metric">ch: <strong>{{ channelCountSummary.visibleCount }}/{{ channelCountSummary.totalSlots }}</strong></div>
-          <div class="mc-metric">cont: <strong>{{ contactCountSummary.nodeResident }}/{{ contactCountSummary.nodeLimit }}/{{ contactCountSummary.dbTotal }}</strong></div>
-        </div>
-        <div class="mc-phonebar-right">
-          <div class="mc-node-model">
-            <img v-if="nodePreviewUrl" :src="nodePreviewUrl" alt="" class="mc-node-model-preview" />
-            <strong>{{ session.device?.manufacturer_model || t('common.offline') }}</strong>
-          </div>
-          <span class="mc-node-led" :class="session.connected ? 'status-connected' : 'status-disconnected'"></span>
-          <div class="mc-node-name"><strong>{{ session.self?.name || session.selectedSavedConnection?.node_name || t('common.offline') }}</strong></div>
-        </div>
-      </div>
+      <MobileNodebar
+        :channels="`${channelCountSummary.visibleCount}/${channelCountSummary.totalSlots}`"
+        :contacts="`${contactCountSummary.nodeResident}/${contactCountSummary.nodeLimit}/${contactCountSummary.dbTotal}`"
+        :connected="session.connected"
+        :device-model="session.device?.manufacturer_model || t('common.offline')"
+        :node-name="session.self?.name || session.selectedSavedConnection?.node_name || t('common.offline')"
+        :node-preview-url="nodePreviewUrl"
+      />
     </template>
 
     <template #dock>
-      <MobileDockButton :icon="bellIconUrl" label="Notif" :badge="totalUnreadCount || ''" @click="toggleNotificationsPanel" />
-      <MobileDockButton :icon="messagesIconUrl" label="Chats" :active="true" />
-      <MobileDockButton :icon="contactsIconUrl" label="Contacts" @click="router.push('/contacts')" />
-      <MobileDockButton :icon="mapIconUrl" label="Map" @click="router.push('/maps')" />
-      <MobileDockButton :icon="settingsIconUrl" label="Settings" @click="router.push('/settings')" />
+      <MobileDockBar
+        :badge="totalUnreadCount || ''"
+        @notifications="toggleNotificationsPanel"
+        @contacts="router.push('/contacts')"
+        @maps="router.push('/maps')"
+        @settings="router.push('/settings')"
+      />
     </template>
   </MobileMessagesShell>
 
@@ -5587,29 +5584,21 @@ onBeforeUnmount(() => {
         />
       </div>
     </div>
-    <div class="mc-mobile-nodebar">
-      <div class="mc-phonebar-row">
-        <div class="mc-phonebar-left">
-          <div class="mc-metric">ch: <strong>{{ channelCountSummary.visibleCount }}/{{ channelCountSummary.totalSlots }}</strong></div>
-          <div class="mc-metric">cont: <strong>{{ contactCountSummary.nodeResident }}/{{ contactCountSummary.nodeLimit }}/{{ contactCountSummary.dbTotal }}</strong></div>
-        </div>
-        <div class="mc-phonebar-right">
-          <div class="mc-node-model">
-            <img v-if="nodePreviewUrl" :src="nodePreviewUrl" alt="" class="mc-node-model-preview" />
-            <strong>{{ session.device?.manufacturer_model || t('common.offline') }}</strong>
-          </div>
-          <span class="mc-node-led" :class="session.connected ? 'status-connected' : 'status-disconnected'"></span>
-          <div class="mc-node-name"><strong>{{ session.self?.name || session.selectedSavedConnection?.node_name || t('common.offline') }}</strong></div>
-        </div>
-      </div>
-    </div>
-    <nav class="mc-mobile-dock">
-      <MobileDockButton :icon="bellIconUrl" label="Notif" :badge="totalUnreadCount || ''" @click="toggleNotificationsPanel" />
-      <MobileDockButton :icon="messagesIconUrl" label="Chats" :active="true" />
-      <MobileDockButton :icon="contactsIconUrl" label="Contacts" @click="router.push('/contacts')" />
-      <MobileDockButton :icon="mapIconUrl" label="Map" @click="router.push('/maps')" />
-      <MobileDockButton :icon="settingsIconUrl" label="Settings" @click="router.push('/settings')" />
-    </nav>
+    <MobileNodebar
+      :channels="`${channelCountSummary.visibleCount}/${channelCountSummary.totalSlots}`"
+      :contacts="`${contactCountSummary.nodeResident}/${contactCountSummary.nodeLimit}/${contactCountSummary.dbTotal}`"
+      :connected="session.connected"
+      :device-model="session.device?.manufacturer_model || t('common.offline')"
+      :node-name="session.self?.name || session.selectedSavedConnection?.node_name || t('common.offline')"
+      :node-preview-url="nodePreviewUrl"
+    />
+    <MobileDockBar
+      :badge="totalUnreadCount || ''"
+      @notifications="toggleNotificationsPanel"
+      @contacts="router.push('/contacts')"
+      @maps="router.push('/maps')"
+      @settings="router.push('/settings')"
+    />
   </div>
 
   <!-- DESKTOP -->
