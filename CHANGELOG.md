@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.8.2 — Auto-Update Fix (2026-06-18)
+
+### Service & Deployment
+- **CRITICAL FIX**: Added missing `--supervise` flag to systemd service `ExecStart` line in `meshcorium-launcher.sh`. Without this flag, the launcher ran in default `--run` mode — starting the Python process directly without the supervisor loop that handles GitHub release checks and the self-update lifecycle. This prevented automatic update discovery from working in all previous releases that used systemd.
+
+- **Impact**: After this fix, `meshcorium.service` runs `meshcorium-launcher.sh --supervise` instead of `meshcorium-launcher.sh` (default `--run`). The supervisor now polls GitHub every 30 minutes for new releases, writes `.meshcorium_update_available` flag file, and manages the full install/rollback lifecycle via `updater.sh`.
+
+- **Upgrade note**: Existing installations must run `meshcorium-launcher.sh --install` (or manually update the systemd unit) after upgrading to v0.8.2 to apply the corrected `ExecStart` line.
+
+---
+
 ## v0.8.1 — Mobile UX & Quality (2026-06-18)
 
 ### Map provider fallback
@@ -75,6 +86,17 @@
 ### Difference from v0.8.0
 - v0.8.0 introduced the stable mobile UI and the initial Maps provider selector/fallback path on the main Maps page.
 - v0.8.1 is a focused map-fixes release: it extends the same provider/fallback logic to every secondary MapLibre surface, adds a configurable contact distance limit, and fixes Docker/runtime version metadata for the new release.
+
+---
+
+## v0.8.2 — Auto-Update Fix (2026-06-18) [RU]
+
+### Сервис и деплой
+- **КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ**: Добавлен отсутствующий флаг `--supervise` в строку `ExecStart` systemd-сервиса в `meshcorium-launcher.sh`. Без этого флага лаунчер работал в режиме `--run` по умолчанию — запуская Python-процесс напрямую, без цикла supervisor, который отвечает за проверку GitHub-релизов и жизненный цикл самообновления. Это делало автоматическое обнаружение обновлений нерабочим во всех предыдущих версиях, использующих systemd.
+
+- **Эффект**: После этого исправления `meshcorium.service` запускает `meshcorium-launcher.sh --supervise` вместо `meshcorium-launcher.sh` (по умолчанию `--run`). Supervisor теперь опрашивает GitHub каждые 30 минут на наличие новых релизов, создаёт флаг-файл `.meshcorium_update_available` и управляет полным циклом установки/отката через `updater.sh`.
+
+- **Примечание по обновлению**: Существующие установки должны выполнить `meshcorium-launcher.sh --install` (или вручную обновить systemd unit) после обновления до v0.8.2, чтобы применить исправленную строку `ExecStart`.
 
 ---
 

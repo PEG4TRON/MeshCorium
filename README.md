@@ -8,7 +8,7 @@ Basic project overview:
 
 MeshCorium is a self-hosted MeshCore client with a hybrid contact system and a local web interface for working with a MeshCore node through companion firmware.
 
-Current release `0.8.1--mobile-ux-quality` is a mobile UX and quality release: scroll-to-newest messages, ghost channel detection, SVG icon system, extracted mobile components, unified CSS design tokens, and a11y improvements.
+Current release `0.8.2--auto-update-fix` is a critical hotfix: adds missing `--supervise` flag to systemd service `ExecStart`, enabling the self-update lifecycle that was broken in all previous releases.
 
 ## Preview
 
@@ -18,7 +18,12 @@ Current release `0.8.1--mobile-ux-quality` is a mobile UX and quality release: s
 
 ## Release Status
 
-The latest published release is `MeshCorium v0.8.1 -- mobile-ux-quality`.
+The latest published release is `MeshCorium v0.8.2 -- auto-update-fix`.
+
+### v0.8.2 — auto-update-fix
+
+- **CRITICAL**: Added `--supervise` to `ExecStart` in systemd unit template. Without it, auto-update never worked — supervisor loop (GitHub polling, `.meshcorium_update_available`, install/rollback) was never started.
+- Existing installations must run `meshcorium-launcher.sh --install` after upgrading to apply the fix.
 
 ### v0.8.1 — mobile-ux-quality
 
@@ -28,7 +33,7 @@ The latest published release is `MeshCorium v0.8.1 -- mobile-ux-quality`.
 - **Components**: `MobileNodebar` and `MobileDockBar` extracted from duplicative HTML in `MessagesView`.
 - **CSS engineering**: `100vh`→`100dvh`, unified border-radius CSS vars, `:active`/`:focus-visible`/`transition` across all interactive elements, skeleton loaders, `@supports` replacing `.is-firefox` classes.
 - **Performance**: RAF debounce for conversation list scroll metrics.
-- **Docker**: image includes `.meshcorium_version`, `/api/update/check` reports `0.8.1`, all root Python files explicitly listed in Dockerfile.
+- **Docker**: image includes `.meshcorium_version`, `/api/update/check` reports `0.8.2`, all root Python files explicitly listed in Dockerfile.
 
 ### v0.7.0 — Docker + USB + BLE + WIFI/LAN
 
@@ -65,8 +70,8 @@ Upgrade information is documented in:
 
 ---
 
-**⚠️ Release note:** Due to issues with the AI agent used during the release process, releases v0.7.1 through v0.7.4 experienced deployment and integrity problems. **v0.8.0 is considered the first fully working release** after this period. Users on v0.7.1–v0.7.4 should upgrade to v0.8.1 or later.
+**⚠️ Release note:** Due to issues with the AI agent used during the release process, releases v0.7.1 through v0.7.4 experienced deployment and integrity problems. **v0.8.0 is considered the first fully working release** after this period. Users on v0.7.1–v0.7.4 should upgrade to v0.8.2 or later.
 
 ---
 
-**⚠️ Примечание к релизам:** Из-за проблем с ИИ-агентом, использованным в процессе выпуска, релизы v0.7.1–v0.7.4 имели проблемы с деплоем и целостностью. **v0.8.0 считается первым полностью исправным релизом** после этого периода. Пользователям v0.7.1–v0.7.4 рекомендуется обновиться до v0.8.1 или выше.
+**⚠️ Примечание к релизам:** Из-за проблем с ИИ-агентом, использованным в процессе выпуска, релизы v0.7.1–v0.7.4 имели проблемы с деплоем и целостностью. **v0.8.0 считается первым полностью исправным релизом** после этого периода. Пользователям v0.7.1–v0.7.4 рекомендуется обновиться до v0.8.2 или выше.

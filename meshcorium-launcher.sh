@@ -164,7 +164,7 @@ Type=simple
 User=${SYSTEMD_INSTALL_USER}
 Group=${SYSTEMD_INSTALL_GROUP}
 WorkingDirectory=${SCRIPT_DIR}
-ExecStart=${SCRIPT_DIR}/meshcorium-launcher.sh
+ExecStart=${SCRIPT_DIR}/meshcorium-launcher.sh --supervise
 Restart=on-failure
 RestartSec=3
 
