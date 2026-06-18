@@ -455,15 +455,20 @@ button {
   min-height: 0;
   overflow: auto;
   overflow-x: hidden;
-  /* autoprefixer: ignore next */
-  -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
   touch-action: pan-y;
 }
 
+.mc-list-scroll {
+  will-change: transform;
+  contain: strict;
+}
+
 .mc-list-item {
   width: 100%;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 77px;
   display: grid;
   grid-template-columns: 48px minmax(0, 1fr) auto;
   align-items: center;
