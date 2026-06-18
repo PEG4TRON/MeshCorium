@@ -10,17 +10,17 @@
 #   This script fixes the installed systemd unit on the local machine WITHOUT
 #   modifying any MeshCorium project files. It only edits the systemd unit.
 #
+#   The script auto-detects the service user and uses sudo ONLY where actually
+#   needed (editing system files, running systemctl). It does NOT require
+#   sudo for the initial run — just `bash fix-autoupdate.sh`.
+#
 # Usage:
 #   curl -sSL https://raw.githubusercontent.com/PEG4TRON/MeshCorium/main/fix-autoupdate.sh | bash
 #   OR
 #   wget -qO- https://raw.githubusercontent.com/PEG4TRON/MeshCorium/main/fix-autoupdate.sh | bash
-#   OR (offline):
+#   OR (offline, local file):
 #   bash fix-autoupdate.sh
 #   bash fix-autoupdate.sh /opt/MeshCorium
-#
-# Requirements:
-#   - sudo access (NOPASSWD recommended, or be ready to enter password)
-#   - meshcorium.service must already be installed (via meshcorium-launcher.sh --install)
 #
 # Safety:
 #   - Idempotent: safe to run multiple times
@@ -28,10 +28,8 @@
 #   - Validates the fix with systemd-analyze verify before reloading
 #   - Rolls back on failure
 
-set -euo pipefail
-
 # ──────────────────────────────────────────────
-# 1. Locate the MeshCorium installation
+# 0. Helper functions and initialisation
 # ──────────────────────────────────────────────
 
 MESHCORIUM_DIR="${1:-}"
@@ -55,15 +53,26 @@ banner() {
     echo ""
 }
 
-ok()  { echo -e "  ${GREEN}✓${NC} $*"; }
-warn(){ echo -e "  ${YELLOW}⚠${NC} $*"; }
-err() { echo -e "  ${RED}✗${NC} $*"; }
-info(){ echo -e "  ${CYAN}i${NC} $*"; }
+ok()   { echo -e "  ${GREEN}✓${NC} $*"; }
+warn() { echo -e "  ${YELLOW}⚠${NC} $*"; }
+err()  { echo -e "  ${RED}✗${NC} $*"; }
+info() { echo -e "  ${CYAN}i${NC} $*"; }
+
+# SUDO helpers — escalate only when needed
+_escalate() {
+    if [[ "$(id -u)" -eq 0 ]]; then
+        # Already root, no escalation needed
+        "$@"
+    else
+        sudo "$@"
+    fi
+}
+_systemctl() { _escalate systemctl "$@"; }
 
 banner
 
 # ──────────────────────────────────────────────
-# 2. Auto-detect installation directory
+# 1. Auto-detect installation directory
 # ──────────────────────────────────────────────
 
 if [[ -z "${MESHCORIUM_DIR}" ]]; then
@@ -71,7 +80,6 @@ if [[ -z "${MESHCORIUM_DIR}" ]]; then
         MESHCORIUM_DIR="$(grep -oP '^WorkingDirectory=\K.*' "${SERVICE_FILE}" 2>/dev/null || true)"
     fi
     if [[ -z "${MESHCORIUM_DIR}" ]]; then
-        # Try common locations
         for candidate in /opt/MeshCorium /opt/meshcorium /home/*/MeshCorium; do
             if [[ -f "${candidate}/.meshcorium_version" ]]; then
                 MESHCORIUM_DIR="${candidate}"
@@ -100,13 +108,24 @@ if [[ ! -f "${MESHCORIUM_DIR}/.meshcorium_version" ]]; then
 fi
 
 # ──────────────────────────────────────────────
-# 3. Read current version and launcher info
+# 2. Read version and detect service user
 # ──────────────────────────────────────────────
 
 CURRENT_VERSION="$(cat "${MESHCORIUM_DIR}/.meshcorium_version")"
 LAUNCHER="${MESHCORIUM_DIR}/meshcorium-launcher.sh"
 
 info "Found MeshCorium v${CURRENT_VERSION} at ${MESHCORIUM_DIR}"
+
+# Detect service user from systemd unit (the user that runs meshcorium)
+SERVICE_USER=""
+if [[ -f "${SERVICE_FILE}" ]]; then
+    SERVICE_USER="$(grep -oP '^User=\K.*' "${SERVICE_FILE}" 2>/dev/null || true)"
+fi
+if [[ -z "${SERVICE_USER}" ]]; then
+    SERVICE_USER="peg4tron"
+    warn "Could not detect service user from systemd unit, assuming '${SERVICE_USER}'"
+fi
+info "Service user: ${SERVICE_USER}"
 echo ""
 
 if [[ ! -f "${LAUNCHER}" ]]; then
@@ -115,15 +134,57 @@ if [[ ! -f "${LAUNCHER}" ]]; then
 fi
 
 # ──────────────────────────────────────────────
+# 3. Fix permissions on MeshCorium files owned by root
+# ──────────────────────────────────────────────
+
+info "Checking file ownership in ${MESHCORIUM_DIR}..."
+
+FIXED_PERMS=0
+ROOT_OWNED_FILES=(
+    ".meshcorium_update_available"
+    ".meshcorium_update_state"
+    ".meshcorium_update_error"
+    ".meshcorium_pending_update"
+    ".meshcorium_version"
+    "fix-autoupdate.sh"
+    "fix-update-permissions.sh"
+)
+
+for f in "${ROOT_OWNED_FILES[@]}"; do
+    FP="${MESHCORIUM_DIR}/${f}"
+    if [[ -f "${FP}" ]]; then
+        OWNER="$(stat -c '%U' "${FP}" 2>/dev/null || true)"
+        if [[ "${OWNER}" == "root" ]]; then
+            _escalate chown "${SERVICE_USER}:${SERVICE_USER}" "${FP}" 2>/dev/null && FIXED_PERMS=1 || true
+        fi
+    fi
+done
+
+# Also fix old-releases/ and logs/ ownership if needed
+for d in "old-releases" "logs"; do
+    DP="${MESHCORIUM_DIR}/${d}"
+    if [[ -d "${DP}" ]]; then
+        if [[ "$(stat -c '%U' "${DP}" 2>/dev/null)" == "root" ]]; then
+            _escalate chown -R "${SERVICE_USER}:${SERVICE_USER}" "${DP}" 2>/dev/null && FIXED_PERMS=1 || true
+        fi
+    fi
+done
+
+if [[ "${FIXED_PERMS}" -eq 1 ]]; then
+    ok "Fixed file permissions (root → ${SERVICE_USER})"
+else
+    ok "File permissions already correct"
+fi
+echo ""
+
+# ──────────────────────────────────────────────
 # 4. Check if the launcher HAS the supervisor code
 # ──────────────────────────────────────────────
 
 if ! grep -q 'supervise_loop\|--supervise' "${LAUNCHER}" 2>/dev/null; then
     err "This version (v${CURRENT_VERSION}) does not have supervisor/auto-update support."
     echo ""
-    echo "  The supervisor loop (GitHub polling, self-update) was introduced in the"
-    echo "  launcher. Your version's launcher does not contain the supervise_loop"
-    echo "  function or --supervise flag. Auto-update is not available."
+    echo "  The supervisor loop (GitHub polling, self-update) is not in your launcher."
     echo ""
     echo "  Recommendation: perform a fresh install of v0.8.2+ using:"
     echo "    cd ${MESHCORIUM_DIR}"
@@ -142,17 +203,12 @@ echo ""
 # ──────────────────────────────────────────────
 
 if [[ ! -f "${SERVICE_FILE}" ]]; then
-    # Check if systemd is even available
     if ! command -v systemctl &>/dev/null; then
         info "systemd not detected — this host is not using systemd for MeshCorium."
         echo ""
         echo "  If you start MeshCorium manually (meshcorium-launcher.sh --run),"
         echo "  switch to: meshcorium-launcher.sh --supervise"
         echo ""
-        echo "  If you are using Docker, see instructions below."
-        echo ""
-        
-        # ─── Docker guidance ───
         if command -v docker &>/dev/null && docker ps --format '{{.Names}}' 2>/dev/null | grep -qi 'meshcorium'; then
             info "Docker detected."
             echo ""
@@ -160,25 +216,19 @@ if [[ ! -f "${SERVICE_FILE}" ]]; then
             echo "  meshcorium_web.py directly (no launcher, no supervisor)."
             echo ""
             echo "  To use auto-update with Docker:"
-            echo "  1. Replace the entrypoint to use meshcorium-launcher.sh --supervise"
-            echo "  2. Or pull the latest image manually: docker pull <image>:latest"
-            echo "  3. Or use docker-compose pull && docker-compose up -d"
-            echo ""
-            echo "  Recommended: update your docker-compose.yml to use"
-            echo "  image: ghcr.io/PEG4TRON/meshcorium:0.8.2 (or :latest)"
-            echo "  and restart the container. Then run:"
-            echo "    docker exec <container> bash fix-autoupdate.sh"
-            echo "  inside the container to apply the systemd-independent fix."
+            echo "  1. Copy this script into the container:"
+            echo "     docker cp fix-autoupdate.sh <container>:/tmp/"
+            echo "  2. Run inside: docker exec <container> bash /tmp/fix-autoupdate.sh"
+            echo "  3. Update docker-compose.yml to use the latest image"
         else
             warn "No Docker containers found either."
         fi
         echo ""
         echo "  Manual fix for non-systemd, non-Docker installations:"
-        echo "    Update your startup command to include --supervise:"
-        echo "      ${MESHCORIUM_DIR}/meshcorium-launcher.sh --supervise"
+        echo "    ${MESHCORIUM_DIR}/meshcorium-launcher.sh --supervise"
         exit 1
     fi
-    
+
     err "Systemd unit not found: ${SERVICE_FILE}"
     echo ""
     echo "  MeshCorium is installed but the systemd service was never created."
@@ -202,8 +252,6 @@ if [[ "${CURRENT_EXEC}" == *"--supervise"* ]]; then
     echo ""
     echo "  Current ExecStart: ${CURRENT_EXEC}"
     echo ""
-    
-    # Quick health check
     if systemctl is-active --quiet "${SERVICE_NAME}" 2>/dev/null; then
         ok "Service is running."
     else
@@ -235,7 +283,7 @@ fi
 
 BACKUP="${SERVICE_FILE}.bak.${TIMESTAMP}"
 
-if ! sudo cp -p "${SERVICE_FILE}" "${BACKUP}"; then
+if ! _escalate cp -p "${SERVICE_FILE}" "${BACKUP}"; then
     err "Failed to create backup at ${BACKUP}"
     exit 1
 fi
@@ -247,23 +295,17 @@ ok "Backup created: ${BACKUP}"
 
 NEW_EXEC="${CURRENT_EXEC} --supervise"
 
-# Use sed to replace the ExecStart line
-# Pattern: match ExecStart=...meshcorium-launcher.sh (with optional flags)
-# Replace: append --supervise
-
-if ! sudo sed -i "s|^ExecStart=${CURRENT_EXEC}\$|ExecStart=${NEW_EXEC}|" "${SERVICE_FILE}"; then
-    err "Failed to modify service file"
-    echo "  Restoring backup..."
-    sudo cp -p "${BACKUP}" "${SERVICE_FILE}"
+if ! _escalate sed -i "s|^ExecStart=${CURRENT_EXEC}\$|ExecStart=${NEW_EXEC}|" "${SERVICE_FILE}"; then
+    err "Failed to modify service file — restoring backup"
+    _escalate cp -p "${BACKUP}" "${SERVICE_FILE}"
     exit 1
 fi
 
-# Verify the change
+# Verify
 NEW_EXEC_VERIFY="$(grep -oP '^ExecStart=\K.*' "${SERVICE_FILE}")"
 if [[ "${NEW_EXEC_VERIFY}" != *"--supervise"* ]]; then
     err "Verification failed — --supervise not found in new ExecStart"
-    echo "  Restoring backup..."
-    sudo cp -p "${BACKUP}" "${SERVICE_FILE}"
+    _escalate cp -p "${BACKUP}" "${SERVICE_FILE}"
     exit 1
 fi
 
@@ -276,11 +318,11 @@ echo ""
 # ──────────────────────────────────────────────
 
 if command -v systemd-analyze &>/dev/null; then
-    if sudo systemd-analyze verify "${SERVICE_FILE}" &>/dev/null; then
+    if _escalate systemd-analyze verify "${SERVICE_FILE}" &>/dev/null; then
         ok "systemd-analyze verify: passed"
     else
         warn "systemd-analyze verify reported issues (non-fatal for this fix)"
-        sudo systemd-analyze verify "${SERVICE_FILE}" 2>&1 | head -5 | while read -r line; do
+        _escalate systemd-analyze verify "${SERVICE_FILE}" 2>&1 | head -5 | while read -r line; do
             warn "  ${line}"
         done
     fi
@@ -290,14 +332,14 @@ fi
 # 11. Reload systemd and restart
 # ──────────────────────────────────────────────
 
-sudo systemctl daemon-reload
+_systemctl daemon-reload
 ok "systemd daemon-reload"
 
 if systemctl is-active --quiet "${SERVICE_NAME}" 2>/dev/null; then
-    sudo systemctl restart "${SERVICE_NAME}"
+    _systemctl restart "${SERVICE_NAME}"
     ok "Service restarted"
 else
-    sudo systemctl start "${SERVICE_NAME}" 2>/dev/null || true
+    _systemctl start "${SERVICE_NAME}" 2>/dev/null || true
     ok "Service started"
 fi
 
@@ -322,7 +364,7 @@ if systemctl is-active --quiet "${SERVICE_NAME}" 2>/dev/null; then
     echo ""
     echo "  What happens next:"
     echo "    - Supervisor will check GitHub every 30 minutes for updates"
-    echo "    - When v0.8.2+ is detected, a green 'U' badge appears"
+    echo "    - When a new release is found, a green 'U' badge appears"
     echo "    - Click 'Settings → About → Install Update' to upgrade"
     echo ""
     echo "  To verify:"
