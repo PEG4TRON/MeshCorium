@@ -31,6 +31,44 @@
     linear-gradient(180deg, rgba(18, 28, 39, 0.96), rgba(11, 19, 28, 0.985));
 }
 
+/* Tactile feedback for all interactive elements */
+button:active,
+.mc-button:active,
+.mc-rail-button:active,
+.mc-dock-button:active,
+[role="button"]:active {
+  transform: scale(0.98) translateY(1px);
+}
+
+/* Focus indicators for keyboard navigation */
+:focus-visible {
+  outline: 2px solid var(--mc-accent, #3390ec);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+button:focus-visible,
+a:focus-visible,
+[role="button"]:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--mc-accent, #3390ec);
+  outline-offset: 2px;
+}
+
+/* Smooth transitions for interactive elements */
+button,
+.mc-button,
+.mc-rail-button,
+.mc-dock-button,
+a,
+input,
+textarea,
+select,
+[role="button"] {
+  transition: background-color 200ms ease, color 200ms ease, border-color 200ms ease, opacity 200ms ease, transform 200ms ease;
+}
+
 .v-popper--theme-meshcorium-tooltip .v-popper__inner {
   padding: 8px 12px;
   border-radius: 14px;
@@ -1677,7 +1715,7 @@ button {
 
 .mc-message-route {
   flex: 1 1 100%;
-  font-family: "IBM Plex Mono", "Fira Code", monospace;
+  font-family: "IBM Plex Mono", monospace;
   letter-spacing: 0.04em;
   color: rgba(183, 211, 238, 0.92);
   overflow-wrap: anywhere;
@@ -3185,7 +3223,7 @@ button {
   min-height: 0;
   white-space: pre-wrap;
   word-break: break-word;
-  font-family: "IBM Plex Mono", "Consolas", monospace;
+  font-family: "IBM Plex Mono", monospace;
   font-size: 12px;
   line-height: 1.45;
   color: rgba(235, 242, 248, 0.82);
@@ -6195,7 +6233,7 @@ button {
   border: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(9, 15, 22, 0.72);
   color: #dce6f0;
-  font-family: "IBM Plex Mono", "JetBrains Mono", monospace;
+  font-family: "IBM Plex Mono", monospace;
   font-size: 12px;
   line-height: 1.55;
   white-space: pre-wrap;
