@@ -4583,29 +4583,30 @@ async function scrollToNewestMessage() {
   
   try {
     const conv = currentConversation.value
-    const body = { limit: HISTORY_PAGE_SIZE, latest: true }
-    
-    if (conv.channelIdx !== undefined) {
-      body.channel_idx = conv.channelIdx
-    } else if (conv.contactKey) {
-      body.contact_key = conv.contactKey
-    } else {
-      return
-    }
+    let url = `/messages/channel?channel_idx=${conv.channelIdx}&limit=${HISTORY_PAGE_SIZE}&latest=true`
+    if (conv.channelIdentity) url += `&channel_identity=${encodeURIComponent(conv.channelIdentity)}`
     
     const keyBefore = currentConversationKey.value
-    const data = await session.api('/messages/list', body)
+    const data = await session.api(url)
     
     if (currentConversationKey.value !== keyBefore) return
     
-    const list = data.list || data.messages || []
+    const list = data.messages || []
     if (list.length > 0) {
       messages.value = list
       activeConversationTotalMessages.value = data.total_count || list.length
       
       const lastId = list[list.length - 1].id
       try {
-        await session.api('/messages/read-up-to', { message_id: lastId })
+        const readBody = { message_id: lastId }
+        if (conv.channelIdx !== undefined) {
+          readBody.conversation_kind = 'channel'
+          readBody.conversation_value = String(conv.channelIdx)
+        } else if (conv.contactKey) {
+          readBody.conversation_kind = 'contact'
+          readBody.conversation_value = conv.contactKey
+        }
+        await session.api('/api/messages/read-up-to', readBody)
       } catch (_) {}
     }
     
