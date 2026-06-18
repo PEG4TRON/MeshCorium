@@ -1,5 +1,6 @@
 <script setup>
 import { computed, defineAsyncComponent } from 'vue'
+import { useIsMobile } from '../../composables/useIsMobile'
 
 const EmojiPicker = defineAsyncComponent(() => import('vue3-emoji-picker'))
 
@@ -49,6 +50,8 @@ const draftTextModel = computed({
   get: () => props.draftText,
   set: (value) => emit('update:draft-text', value),
 })
+
+const { isMobile } = useIsMobile()
 
 function handleTextareaKeydown(event) {
   if (typeof props.onTextareaKeydown === 'function') {
@@ -149,7 +152,8 @@ function handleTextareaKeydown(event) {
       <div class="mc-composer-send-stack">
         <span class="mc-composer-bytes" :class="{ 'is-over': model.draftIsOverflow }">{{ model.composerByteCounterText }}</span>
         <button class="mc-button mc-button--primary" type="button" :disabled="!model.canSendCurrentDraft" @click="emit('send-message')">
-          {{ model.sendLabel }}
+          <img v-if="isMobile" :src="'/icons/paper-plane.png'" alt="Send" />
+          <template v-else>{{ model.sendLabel }}</template>
         </button>
       </div>
     </div>

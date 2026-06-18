@@ -7543,15 +7543,23 @@ button {
   }
 
   .mc-composer-row {
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-
-  .mc-composer-send-stack {
-    grid-column: 1 / -1;
+    grid-template-columns: auto minmax(0, 1fr) auto;
   }
 
   .mc-composer-row .mc-button--primary {
-    width: 100%;
+    width: 46px;
+    height: 46px;
+    min-width: 46px;
+    padding: 0;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .mc-composer-row .mc-button--primary img {
+    width: 22px;
+    height: 22px;
   }
 
   .mc-scroll-to-bottom {
