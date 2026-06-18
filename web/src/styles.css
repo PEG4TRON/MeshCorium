@@ -460,11 +460,6 @@ button {
   touch-action: pan-y;
 }
 
-.mc-list-scroll {
-  will-change: transform;
-  contain: strict;
-}
-
 .mc-list-item {
   width: 100%;
   display: grid;
