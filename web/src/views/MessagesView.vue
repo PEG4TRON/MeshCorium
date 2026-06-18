@@ -98,6 +98,7 @@ const loadingConversationDirectory = ref(false)
 const loadingMessages = ref(false)
 const loadingOlderMessages = ref(false)
 const loadingNewerMessages = ref(false)
+const lastNewerLoadHadResults = ref(true)
 const draftText = ref('')
 const composerHistoryIndex = ref(-1)
 const composerHistoryDraftSnapshot = ref('')
@@ -1196,6 +1197,7 @@ const canLoadNewerMessages = computed(() => {
     && !loadingMessages.value
     && !loadingNewerMessages.value
     && messages.value.length > 0
+    && lastNewerLoadHadResults.value
     && loadedConversationMessages.value < effectiveConversationTotalMessages.value
     && Number(messages.value[messages.value.length - 1]?.id || 0) > 0,
   )
@@ -3733,6 +3735,7 @@ async function loadNewerMessages() {
   const requestSeq = historyLoadSeq.value
   const host = messageScroller.value
   loadingNewerMessages.value = true
+  lastNewerLoadHadResults.value = false
   try {
     if (selectedConversationKind.value === 'channel' && (selectedChannelIdx.value != null || selectedChannelIdentity.value)) {
       const params = new URLSearchParams({
@@ -3757,6 +3760,7 @@ async function loadNewerMessages() {
         scheduleConversationCacheWrite(targetConversationKey, messages.value, activeConversationTotalMessages.value)
         await nextTick()
         markVisibleMessagesRead()
+        lastNewerLoadHadResults.value = true
       }
     } else if (selectedConversationKind.value === 'contact' && selectedContactKey.value) {
       const params = new URLSearchParams({
@@ -3778,6 +3782,7 @@ async function loadNewerMessages() {
         scheduleConversationCacheWrite(targetConversationKey, messages.value, activeConversationTotalMessages.value)
         await nextTick()
         markVisibleMessagesRead()
+        lastNewerLoadHadResults.value = true
       }
     }
   } finally {
@@ -4571,18 +4576,47 @@ function attachMessageBottomPaginationIntentListeners(host) {
 }
 
 async function scrollToNewestMessage() {
+  if (!currentConversation.value || loadingNewerMessages.value) return
+  
+  loadingNewerMessages.value = true
   suspendProgrammaticReadTracking(520)
-  const targetConversationKey = currentConversationKey.value
-  while (canLoadNewerMessages.value) {
-    await loadNewerMessages()
-    if (currentConversationKey.value !== targetConversationKey) {
+  
+  try {
+    const conv = currentConversation.value
+    const body = { limit: HISTORY_PAGE_SIZE, latest: true }
+    
+    if (conv.channelIdx !== undefined) {
+      body.channel_idx = conv.channelIdx
+    } else if (conv.contactKey) {
+      body.contact_key = conv.contactKey
+    } else {
       return
     }
+    
+    const keyBefore = currentConversationKey.value
+    const data = await session.api('/messages/list', body)
+    
+    if (currentConversationKey.value !== keyBefore) return
+    
+    const list = data.list || data.messages || []
+    if (list.length > 0) {
+      messages.value = list
+      activeConversationTotalMessages.value = data.total_count || list.length
+      
+      const lastId = list[list.length - 1].id
+      try {
+        await session.api('/messages/read-up-to', { message_id: lastId })
+      } catch (_) {}
+    }
+    
+    await nextTick()
+    scrollMessagesToBottom('smooth')
+    updateMessageScrollerMetrics()
+    updateScrollToBottomButtonVisibility()
+  } finally {
+    loadingNewerMessages.value = false
+    scheduleVisibleReadTracking(40)
   }
-  scrollMessagesToBottom('smooth')
-  updateMessageScrollerMetrics()
-  updateScrollToBottomButtonVisibility()
-  scheduleVisibleReadTracking(40)
 }
 
 function insertEmojiAtCursor(emojiText) {
