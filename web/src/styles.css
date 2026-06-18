@@ -7540,6 +7540,7 @@ button {
 
   .mc-composer {
     grid-template-columns: 1fr;
+    padding-bottom: calc(14px + 10px + env(safe-area-inset-bottom, 0px));
   }
 
   .mc-composer-row {
