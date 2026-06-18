@@ -92,7 +92,7 @@ button {
   position: relative;
   isolation: isolate;
   width: 100%;
-  height: 100vh;
+  height: 100dvh;
   padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
   overflow: hidden;
 }
@@ -130,7 +130,7 @@ button {
 .mc-shell {
   --mc-shell-top-row-height: 68px;
   width: min(1420px, calc(100vw - var(--safe-left) - var(--safe-right)));
-  height: calc(100vh - var(--safe-top) - var(--safe-bottom));
+  height: calc(100dvh - var(--safe-top) - var(--safe-bottom));
   margin: 0 auto;
   display: grid;
   grid-template-columns: 78px 420px minmax(0, 1fr);
@@ -1931,7 +1931,7 @@ button {
 
 .mc-gif-sheet {
   width: min(980px, calc(100vw - 36px));
-  height: min(70vh, calc(100vh - 36px));
+  height: min(70vh, calc(100dvh - 36px));
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   border: 1px solid rgba(255, 255, 255, 0.14);
@@ -2827,7 +2827,7 @@ button {
 
 .mc-notifications-sheet {
   width: min(940px, calc(100vw - 36px));
-  height: min(820px, calc(100vh - 36px));
+  height: min(820px, calc(100dvh - 36px));
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   border: 1px solid rgba(255, 255, 255, 0.14);
@@ -3072,7 +3072,7 @@ button {
 
 .mc-console-shell {
   width: min(1580px, calc(100vw - 36px));
-  height: min(860px, calc(100vh - 36px));
+  height: min(860px, calc(100dvh - 36px));
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   border: 1px solid rgba(112, 255, 184, 0.12);
@@ -3219,7 +3219,7 @@ button {
 
 .mc-message-route-sheet {
   width: min(1180px, calc(100vw - 36px));
-  height: min(82vh, calc(100vh - 36px));
+  height: min(82vh, calc(100dvh - 36px));
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 22px;
   background: var(--mc-float-surface-strong);
@@ -4061,7 +4061,7 @@ button {
 
 .mc-contact-route-sheet {
   width: min(1240px, calc(100vw - 40px));
-  height: min(84vh, calc(100vh - 40px));
+  height: min(84vh, calc(100dvh - 40px));
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -4073,7 +4073,7 @@ button {
 
 .mc-contact-route-sheet--geo {
   width: min(1080px, calc(100vw - 56px));
-  height: min(80vh, calc(100vh - 56px));
+  height: min(80vh, calc(100dvh - 56px));
 }
 
 .mc-contact-route-head {
@@ -7060,7 +7060,7 @@ button {
 @media (max-width: 980px) {
   .mc-shell {
     width: calc(100vw - var(--safe-left) - var(--safe-right));
-    height: calc(100vh - var(--safe-top) - var(--safe-bottom));
+    height: calc(100dvh - var(--safe-top) - var(--safe-bottom));
     border-radius: 18px;
     grid-template-columns: 64px 320px minmax(0, 1fr);
   }
@@ -7179,7 +7179,7 @@ button {
 
   .mc-contact-route-sheet {
     width: min(100vw - 20px, 1240px);
-    height: min(90vh, calc(100vh - 20px));
+    height: min(90vh, calc(100dvh - 20px));
     border-radius: 18px;
   }
 
@@ -7256,7 +7256,7 @@ button {
 
   .mc-message-route-sheet {
     width: min(100vw - 20px, 1180px);
-    height: min(88vh, calc(100vh - 20px));
+    height: min(88vh, calc(100dvh - 20px));
     border-radius: 18px;
   }
 
@@ -7574,7 +7574,7 @@ button {
   .mc-notifications-sheet,
   .mc-console-shell {
     width: calc(100vw - 16px);
-    height: calc(100vh - 16px);
+    height: calc(100dvh - 16px);
   }
 
   .mc-console-stack {
