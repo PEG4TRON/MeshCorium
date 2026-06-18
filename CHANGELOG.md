@@ -7,7 +7,11 @@
 
 - **Impact**: After this fix, `meshcorium.service` runs `meshcorium-launcher.sh --supervise` instead of `meshcorium-launcher.sh` (default `--run`). The supervisor now polls GitHub every 30 minutes for new releases, writes `.meshcorium_update_available` flag file, and manages the full install/rollback lifecycle via `updater.sh`.
 
-- **Upgrade note**: Existing installations must run `meshcorium-launcher.sh --install` (or manually update the systemd unit) after upgrading to v0.8.2 to apply the corrected `ExecStart` line.
+- **Upgrade note**: Existing installations can fix the systemd unit without reinstalling by running the provided fix script:
+  ```bash
+  cd /opt/MeshCorium && curl -sSL https://raw.githubusercontent.com/PEG4TRON/MeshCorium/main/fix-autoupdate.sh | sudo bash
+  ```
+  The script detects the installation, creates a backup, patches `ExecStart`, validates with `systemd-analyze verify`, and restarts the service. Alternatively, run `meshcorium-launcher.sh --install` to recreate the unit from the corrected template.
 
 ---
 
@@ -96,7 +100,11 @@
 
 - **Эффект**: После этого исправления `meshcorium.service` запускает `meshcorium-launcher.sh --supervise` вместо `meshcorium-launcher.sh` (по умолчанию `--run`). Supervisor теперь опрашивает GitHub каждые 30 минут на наличие новых релизов, создаёт флаг-файл `.meshcorium_update_available` и управляет полным циклом установки/отката через `updater.sh`.
 
-- **Примечание по обновлению**: Существующие установки должны выполнить `meshcorium-launcher.sh --install` (или вручную обновить systemd unit) после обновления до v0.8.2, чтобы применить исправленную строку `ExecStart`.
+- **Примечание по обновлению**: Существующие установки могут исправить systemd unit без переустановки, запустив скрипт:
+  ```bash
+  cd /opt/MeshCorium && curl -sSL https://raw.githubusercontent.com/PEG4TRON/MeshCorium/main/fix-autoupdate.sh | sudo bash
+  ```
+  Скрипт определяет установку, создаёт резервную копию, исправляет `ExecStart`, проверяет через `systemd-analyze verify` и перезапускает сервис. Альтернативно можно выполнить `meshcorium-launcher.sh --install` для создания unit из исправленного шаблона.
 
 ---
 

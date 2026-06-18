@@ -8,6 +8,41 @@ Basic project overview:
 
 MeshCorium is a self-hosted MeshCore client with a hybrid contact system and a local web interface for working with a MeshCore node through companion firmware.
 
+## ⚠️ Critical fix: auto-update was broken in all versions before v0.8.2
+
+All MeshCorium releases prior to v0.8.2 have a bug where the systemd service unit starts `meshcorium-launcher.sh` **without** the `--supervise` flag. This means the supervisor loop (GitHub release polling, self-update lifecycle) never starts — your installation will never discover or install updates.
+
+**Fix (one command, safe for all versions):**
+
+```bash
+cd /opt/MeshCorium && curl -sSL https://raw.githubusercontent.com/PEG4TRON/MeshCorium/main/fix-autoupdate.sh | sudo bash
+```
+
+Or if curl is not available:
+
+```bash
+cd /opt/MeshCorium && wget -qO- https://raw.githubusercontent.com/PEG4TRON/MeshCorium/main/fix-autoupdate.sh | sudo bash
+```
+
+What the script does:
+- Detects your MeshCorium installation and version
+- Checks if the launcher supports `--supervise` (versions ≥ 0.5.0)
+- Creates a timestamped backup of the systemd unit
+- Adds `--supervise` to the `ExecStart` line
+- Runs `systemd-analyze verify` to validate
+- Reloads and restarts the service
+
+**Docker users**: The Docker entrypoint runs `meshcorium_web.py` directly (no launcher). To fix, copy the script into the running container:
+
+```bash
+docker cp fix-autoupdate.sh meshcorium:/tmp/
+docker exec meshcorium bash /tmp/fix-autoupdate.sh
+```
+
+Then update your `docker-compose.yml` to use the latest image.
+
+After the fix, supervisor will poll GitHub every 30 minutes. When a new release is found, a green "U" badge appears on the bell icon — click it, go to Settings → About, and press "Install Update".
+
 Current release `0.8.2--auto-update-fix` is a critical hotfix: adds missing `--supervise` flag to systemd service `ExecStart`, enabling the self-update lifecycle that was broken in all previous releases.
 
 ## Preview
