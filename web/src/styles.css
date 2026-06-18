@@ -8487,3 +8487,75 @@ button {
     display: none !important;
   }
 }
+
+/* ============================================
+   Skeleton Loaders
+   ============================================ */
+
+@keyframes mc-skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.mc-skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(255,255,255,0.04) 25%,
+    rgba(255,255,255,0.08) 50%,
+    rgba(255,255,255,0.04) 75%
+  );
+  background-size: 200% 100%;
+  animation: mc-skeleton-pulse 1.5s ease-in-out infinite;
+  border-radius: var(--mc-radius-sm, 8px);
+}
+
+/* Conversation list item skeleton (matches .mc-list-item layout) */
+.mc-skeleton-conversation {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 18px;
+  min-height: var(--mc-shell-dialog-tile-height, 77px);
+}
+
+.mc-skeleton-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--mc-radius-pill, 999px);
+}
+
+.mc-skeleton-line {
+  height: 13px;
+  border-radius: var(--mc-radius-sm, 8px);
+}
+
+.mc-skeleton-line--short {
+  width: 60%;
+}
+
+.mc-skeleton-line--medium {
+  width: 80%;
+}
+
+/* Message bubble skeleton */
+.mc-skeleton-message {
+  display: flex;
+  gap: 10px;
+  padding: 8px 16px;
+  align-items: flex-end;
+}
+
+.mc-skeleton-message--incoming {
+  flex-direction: row;
+}
+
+.mc-skeleton-message--outgoing {
+  flex-direction: row-reverse;
+}
+
+.mc-skeleton-bubble {
+  height: 40px;
+  width: 200px;
+  border-radius: var(--mc-radius-lg, 16px);
+}
