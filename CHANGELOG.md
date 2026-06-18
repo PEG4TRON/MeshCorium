@@ -9,7 +9,7 @@
 
 - **Upgrade note**: Existing installations can fix the systemd unit without reinstalling by running the provided fix script:
   ```bash
-  cd /opt/MeshCorium && curl -sSL https://raw.githubusercontent.com/PEG4TRON/MeshCorium/main/fix-autoupdate.sh | sudo bash
+  cd /opt/MeshCorium && curl -sSL https://raw.githubusercontent.com/PEG4TRON/MeshCorium/main/fix-autoupdate.sh | bash
   ```
   The script detects the installation, creates a backup, patches `ExecStart`, validates with `systemd-analyze verify`, and restarts the service. Alternatively, run `meshcorium-launcher.sh --install` to recreate the unit from the corrected template.
 
@@ -102,7 +102,7 @@
 
 - **Примечание по обновлению**: Существующие установки могут исправить systemd unit без переустановки, запустив скрипт:
   ```bash
-  cd /opt/MeshCorium && curl -sSL https://raw.githubusercontent.com/PEG4TRON/MeshCorium/main/fix-autoupdate.sh | sudo bash
+  cd /opt/MeshCorium && curl -sSL https://raw.githubusercontent.com/PEG4TRON/MeshCorium/main/fix-autoupdate.sh | bash
   ```
   Скрипт определяет установку, создаёт резервную копию, исправляет `ExecStart`, проверяет через `systemd-analyze verify` и перезапускает сервис. Альтернативно можно выполнить `meshcorium-launcher.sh --install` для создания unit из исправленного шаблона.
 

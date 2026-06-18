@@ -15,13 +15,13 @@ All MeshCorium releases prior to v0.8.2 have a bug where the systemd service uni
 **Fix (one command, safe for all versions):**
 
 ```bash
-cd /opt/MeshCorium && curl -sSL https://raw.githubusercontent.com/PEG4TRON/MeshCorium/main/fix-autoupdate.sh | sudo bash
+cd /opt/MeshCorium && curl -sSL https://raw.githubusercontent.com/PEG4TRON/MeshCorium/main/fix-autoupdate.sh | bash
 ```
 
 Or if curl is not available:
 
 ```bash
-cd /opt/MeshCorium && wget -qO- https://raw.githubusercontent.com/PEG4TRON/MeshCorium/main/fix-autoupdate.sh | sudo bash
+cd /opt/MeshCorium && wget -qO- https://raw.githubusercontent.com/PEG4TRON/MeshCorium/main/fix-autoupdate.sh | bash
 ```
 
 What the script does:
