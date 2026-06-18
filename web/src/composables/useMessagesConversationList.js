@@ -216,13 +216,20 @@ export function useMessagesConversationList(options) {
     }
   })
 
+  let _metricsTick = false
+
   function updateConversationListMetrics() {
-    const host = conversationListScroller.value
-    if (!(host instanceof HTMLElement)) {
-      return
-    }
-    conversationListScrollTop.value = host.scrollTop
-    conversationListViewportHeight.value = host.clientHeight
+    if (_metricsTick) return
+    _metricsTick = true
+    requestAnimationFrame(() => {
+      _metricsTick = false
+      const host = conversationListScroller.value
+      if (!(host instanceof HTMLElement)) {
+        return
+      }
+      conversationListScrollTop.value = host.scrollTop
+      conversationListViewportHeight.value = host.clientHeight
+    })
   }
 
   function setConversationListScroller(element) {
