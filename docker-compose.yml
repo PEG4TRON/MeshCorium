@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: meshcorium:v0.7.0
+    image: meshcorium:0.8.1
     container_name: meshcorium
     restart: unless-stopped
     privileged: true
@@ -15,7 +15,7 @@ services:
       MESHCORIUM_CONFIG_DIR: "/etc/meshcorium"
       MESHCORIUM_DATA_DIR: "/var/lib/meshcorium"
       MESHCORIUM_LOG_DIR: "/var/log/meshcorium"
-      MESHCORIUM_RELEASE_VERSION: "v0.7.0-docker-usb-ble-wifi-lan"
+      MESHCORIUM_RELEASE_VERSION: "0.8.1--map-fixes"
       DBUS_SYSTEM_BUS_ADDRESS: "unix:path=/run/dbus/system_bus_socket"
     volumes:
       - "${MESHCORIUM_HOST_CONFIG_DIR:-/etc/meshcorium}:/etc/meshcorium"

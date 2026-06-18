@@ -12,12 +12,12 @@ Current transports:
 - `BLE`
 - `Wi-Fi / LAN`
 
-`MeshCorium v0.7.0 -- Docker + USB + BLE + WIFI/LAN` release status:
+`MeshCorium v0.8.1 -- map-fixes` release status:
 
 - `USB serial` — permanent and validated connection path, not being removed from the project
 - `BLE` — additional companion-node connection path through Linux / BlueZ, available alongside USB serial
 - `Wi-Fi / LAN` — manual TCP `host:port` connection path, available alongside USB serial and BLE
-- `Docker Compose` — deployment variant kept alongside the ordinary launcher/systemd flow
+- `Docker Compose` — deployment variant kept alongside the ordinary launcher/systemd flow; Docker metadata and runtime version reporting are aligned to `0.8.1`
 
 BLE is implemented through a dedicated transport adapter and is available in the connection UI. It is still a new connection path whose behavior depends on the Linux host, BlueZ, and the specific BLE adapter.
 
@@ -37,6 +37,16 @@ BLE is implemented through a dedicated transport adapter and is available in the
 - node battery percentage for BLE/Wi-Fi connections and battery history
 - remote repeater/room-server management through the companion session
 - systemd-friendly launcher for local installation as a service
+
+## Main Difference Between `v0.8.1` And `v0.8.0`
+
+`v0.8.1` is a focused map-fixes release. It keeps the stable mobile UI and transports from `v0.8.0` and additionally adds:
+
+- shared MapLibre provider/fallback logic for every secondary map surface, not only the main Maps page;
+- OpenFreeMap / OFM Liberty boot-timeout and error fallback to OSM Raster on message route maps, repeater geo picker, and contact route editor;
+- persisted `map_max_distance_km` setting for controlling how far contacts are rendered on the map;
+- a manual update-check button in Settings -> About;
+- Docker runtime version reporting fixed by copying `.meshcorium_version` into the image and updating Compose metadata to `0.8.1`.
 
 ## Main Difference Between `v0.7.0` And `v0.6.1`
 
@@ -136,11 +146,12 @@ This release also ships a Docker-based runtime variant:
 
 This does not replace the ordinary launcher or systemd flow. It is an additional way to run the same build.
 
-In `v0.7.0`, the Docker variant is aligned with the current application code:
+In `v0.8.1`, the Docker variant is aligned with the current application code and release version metadata:
 
 - the image builds the current Vue frontend during Docker build
 - the backend includes the new known-node, DB import/export, and BLE transport modules
 - the backend now also includes the Wi-Fi/LAN TCP transport module used by the ordinary launcher runtime
+- the image includes `.meshcorium_version`, so Settings/About and `/api/update/check` report `0.8.1` inside Docker
 - USB serial remains available through host `/dev` passthrough
 - BLE uses host BlueZ through the host system D-Bus socket
 - Wi-Fi/LAN TCP transport works through ordinary container networking without special device passthrough
@@ -190,7 +201,7 @@ Recommended update flow:
    - `data/meshcorium_contacts.sqlite3`
    - `data/client_settings.json`
 
-3. Extract `MeshCorium v0.7.0 -- Docker + USB + BLE + WIFI/LAN` into a new directory next to the old installation.
+3. Extract `MeshCorium v0.8.1 -- map-fixes` into a new directory next to the old installation.
 
 4. Copy the preserved data files from the old `v0.5.0` installation into the new `data/` directory.
 
@@ -214,7 +225,7 @@ Update notes:
   - `expected CONTACTS_START, got code 18`
   this release includes backend hardening for that startup failure mode.
 - If `v0.5.1` still showed generic connect/bootstrap timeouts, this release adds deeper backend startup telemetry and transport/runtime hardening for diagnosis and stabilization.
-- Keep the old installation directory as a rollback copy until `v0.7.0` is confirmed to work correctly.
+- Keep the old installation directory as a rollback copy until `v0.8.1` is confirmed to work correctly.
 
 ## Remove The systemd Service
 

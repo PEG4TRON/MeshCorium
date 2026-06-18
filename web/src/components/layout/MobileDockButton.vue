@@ -1,5 +1,7 @@
 <script setup>
-defineProps({
+import { computed } from 'vue'
+
+const props = defineProps({
   icon: { type: String, default: '' },
   label: { type: String, default: '' },
   active: { type: Boolean, default: false },
@@ -8,6 +10,8 @@ defineProps({
 })
 
 const emit = defineEmits(['click'])
+
+const isIconUrl = computed(() => typeof props.icon === 'string' && props.icon.startsWith('/'))
 </script>
 
 <template>
@@ -16,7 +20,10 @@ const emit = defineEmits(['click'])
     :class="{ active }"
     @click="emit('click')"
   >
-    <span class="mc-dock-icon">{{ icon }}</span>
+    <span class="mc-dock-icon">
+      <img v-if="isIconUrl" :src="icon" :alt="label" />
+      <template v-else>{{ icon }}</template>
+    </span>
     <span v-if="label" class="mc-dock-label">{{ label }}</span>
     <span v-if="badge" class="mc-dock-badge" :class="badgeClass">{{ badge }}</span>
   </button>
@@ -51,6 +58,12 @@ const emit = defineEmits(['click'])
 .mc-dock-icon {
   font-size: 22px;
   line-height: 1;
+}
+
+.mc-dock-icon img {
+  width: 22px;
+  height: 22px;
+  display: block;
 }
 
 .mc-dock-label {

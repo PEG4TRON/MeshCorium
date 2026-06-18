@@ -8,7 +8,7 @@ Basic project overview:
 
 MeshCorium is a self-hosted MeshCore client with a hybrid contact system and a local web interface for working with a MeshCore node through companion firmware.
 
-Current dev version adds full mobile responsive UI (1024px breakpoint) for all major views: Maps, Contacts, Messages, Settings, and Repeater Management. Desktop layout and all existing transports (USB, BLE, Wi-Fi/LAN, Docker) remain unchanged.
+Current release `0.8.1--map-fixes` is a focused map stability update: all MapLibre surfaces now share the same provider selection and OSM Raster fallback behavior, with Docker/runtime version metadata aligned to `0.8.1`.
 
 ## Preview
 
@@ -18,16 +18,17 @@ Current dev version adds full mobile responsive UI (1024px breakpoint) for all m
 
 ## Release Status
 
-The latest published release is `MeshCorium v0.7.0 -- Docker + USB + BLE + WIFI/LAN`.
+The latest published release is `MeshCorium v0.8.1 -- map-fixes`.
 
-### Dev (current)
+### v0.8.1 — map-fixes
 
-- **Mobile Responsive UI**: Maps, Contacts, Messages, Settings, Repeater Management — all adapted for 1024px breakpoint with dedicated mobile shells, overlays, and bottom docks.
-- **Maps**: Map provider selector (OSM Raster / OFM Liberty), reliable tile loading through local proxy, fixed OSM raster fallback template.
-- **SSE**: Cascading disconnection prevention when resuming background sessions.
-- **Read tracking**: Fixed read marker on mobile back navigation, channel unread key mismatch, loadNewerMessages auto-mark.
-- **Service**: Systemd unit with automatic ttyACM0/ttyUSB* permission fix.
-- **Architecture**: `useIsMobile`, `useUpdateCheck`, `shellPanels.js`, `contactRoutes.js`, `statusText.js`.
+Key differences relative to `v0.8.0`:
+
+- **Secondary maps**: message route maps, repeater geo picker, and contact route editor now use the same saved map provider and fallback logic as the main Maps page.
+- **Fallback**: OpenFreeMap / OFM Liberty failures and boot timeouts fall back to OSM Raster through the local tile proxy.
+- **Map distance**: `map_max_distance_km` lets users configure the maximum contact distance rendered on Maps.
+- **Settings/About**: manual update-check button next to the version.
+- **Docker**: container image now includes `.meshcorium_version`, Compose metadata is updated to `0.8.1`, and the Dockerfile explicitly copies all root Python files.
 
 ### v0.7.0 — Docker + USB + BLE + WIFI/LAN
 
@@ -64,8 +65,8 @@ Upgrade information is documented in:
 
 ---
 
-**⚠️ Release note:** Due to issues with the AI agent used during the release process, releases v0.7.1 through v0.7.4 experienced deployment and integrity problems. **v0.8.0 is considered the first fully working release** after this period. Users on v0.7.1–v0.7.4 should upgrade to v0.8.0 or later.
+**⚠️ Release note:** Due to issues with the AI agent used during the release process, releases v0.7.1 through v0.7.4 experienced deployment and integrity problems. **v0.8.0 is considered the first fully working release** after this period. Users on v0.7.1–v0.7.4 should upgrade to v0.8.1 or later.
 
 ---
 
-**⚠️ Примечание к релизам:** Из-за проблем с ИИ-агентом, использованным в процессе выпуска, релизы v0.7.1–v0.7.4 имели проблемы с деплоем и целостностью. **v0.8.0 считается первым полностью исправным релизом** после этого периода. Пользователям v0.7.1–v0.7.4 рекомендуется обновиться до v0.8.0 или выше.
+**⚠️ Примечание к релизам:** Из-за проблем с ИИ-агентом, использованным в процессе выпуска, релизы v0.7.1–v0.7.4 имели проблемы с деплоем и целостностью. **v0.8.0 считается первым полностью исправным релизом** после этого периода. Пользователям v0.7.1–v0.7.4 рекомендуется обновиться до v0.8.1 или выше.

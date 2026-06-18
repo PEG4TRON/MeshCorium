@@ -1,5 +1,59 @@
 # Changelog
 
+## v0.8.1 — Map Fixes (2026-06-01)
+
+### Map provider fallback
+- Unified MapLibre provider selection and fallback behavior across all secondary maps: message route maps, repeater geo picker, and contact route editor now honor the saved `map_provider` setting just like the main Maps page.
+- Extracted shared map provider constants, style builders, tile proxy rewriting, provider normalization, and raster fallback helpers into `web/src/lib/mapLibre.js`.
+- Added a 6-second map style boot timeout and error-triggered fallback from OpenFreeMap / OFM Liberty to OSM Raster for secondary map sheets, matching the main Maps page behavior.
+- Continued routing both OpenFreeMap and OSM raster tile requests through the local `/api/tiles/proxy` endpoint to avoid direct LAN/browser tile loading problems.
+
+### Map settings and data filtering
+- Added a persisted `map_max_distance_km` client setting with a default of 400 km and a supported range of 1–20000 km.
+- Added desktop and mobile Maps UI controls for changing the maximum contact-rendering distance. Contacts outside the configured home-node radius are filtered from map display.
+
+### Settings and update UX
+- Added a manual update-check button next to the displayed version in Settings → About.
+- Corrected the Settings/About fallback display version for this release.
+
+### Docker and release packaging
+- Added `.meshcorium_version` to the Docker runtime image so containerized `/api/update/check` reports the same `0.8.1` version as the normal launcher build.
+- Updated Docker Compose image/release metadata to `0.8.1` / `0.8.1--map-fixes`.
+- Added the previously omitted helper script `download_meshcore_node_svgs.py` to the Docker runtime copy list, keeping root Python files explicit in the Dockerfile.
+- Kept the cleaned release tree rules from v0.8.0: runtime data, logs, caches, virtual environments, and node modules are excluded from release artifacts.
+
+### Difference from v0.8.0
+- v0.8.0 introduced the stable mobile UI and the initial Maps provider selector/fallback path on the main Maps page.
+- v0.8.1 is a focused map-fixes release: it extends the same provider/fallback logic to every secondary MapLibre surface, adds a configurable contact distance limit, and fixes Docker/runtime version metadata for the new release.
+
+---
+
+## v0.8.1 — Исправления карт (2026-06-01) [RU]
+
+### Fallback провайдера карт
+- Унифицирован выбор MapLibre-провайдера и fallback-поведение во всех вторичных картах: карты маршрутов в сообщениях, выбор геопозиции repeater и редактор маршрута контакта теперь учитывают сохранённую настройку `map_provider`, как и основная страница Maps.
+- Общие константы провайдеров, сборщики стилей, переписывание URL тайлов через proxy, нормализация провайдера и helpers растрового fallback вынесены в `web/src/lib/mapLibre.js`.
+- Добавлен 6-секундный таймаут загрузки map style и fallback по ошибкам OpenFreeMap / OFM Liberty → OSM Raster для вторичных карт, в том же стиле, что и на главной странице Maps.
+- Запросы тайлов OpenFreeMap и OSM raster продолжают идти через локальный `/api/tiles/proxy`, чтобы избежать проблем прямой загрузки тайлов из браузера в LAN-сценариях.
+
+### Настройки карты и фильтрация данных
+- Добавлена сохраняемая настройка клиента `map_max_distance_km`: по умолчанию 400 км, допустимый диапазон 1–20000 км.
+- На desktop и mobile Maps добавлены элементы управления максимальной дистанцией отображения контактов. Контакты за пределами настроенного радиуса от home-ноды отфильтровываются с карты.
+
+### Settings и проверка обновлений
+- Добавлена кнопка ручной проверки обновлений рядом с версией в Settings → About.
+- Исправлена fallback-версия, показываемая в Settings/About для этого релиза.
+
+### Docker и релизная упаковка
+- `.meshcorium_version` добавлен в runtime-образ Docker, поэтому контейнерный `/api/update/check` сообщает ту же версию `0.8.1`, что и обычный launcher-сценарий.
+- Docker Compose metadata обновлены до `0.8.1` / `0.8.1--map-fixes`.
+- В Dockerfile добавлен ранее пропущенный helper `download_meshcore_node_svgs.py`, чтобы root Python-файлы оставались явно перечислены.
+- Сохранены правила чистого релизного дерева v0.8.0: пользовательские данные, логи, кэши, virtualenv и node_modules не входят в релизные артефакты.
+
+### Отличия от v0.8.0
+- v0.8.0 принёс стабильный mobile UI и начальный selector/fallback провайдера карт на основной странице Maps.
+- v0.8.1 — точечный релиз исправлений карт: тот же provider/fallback распространён на все вторичные MapLibre-поверхности, добавлен настраиваемый лимит дистанции контактов, а Docker/runtime metadata версии исправлены для нового релиза.
+
 ## v0.8.0 — Mobile UI & Maps (stable) (2026-05-26)
 
 ### Mobile Responsive UI (1024px breakpoint)
