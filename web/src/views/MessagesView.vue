@@ -4636,7 +4636,7 @@ async function scrollToNewestMessage() {
           readBody.conversation_kind = 'contact'
           readBody.conversation_value = String(selectedContactKey.value)
         }
-        await session.api('/api/messages/read-up-to', readBody)
+        await session.api('/api/messages/read-up-to', { method: 'POST', body: JSON.stringify(readBody) })
       } catch (_) {}
     }
     
