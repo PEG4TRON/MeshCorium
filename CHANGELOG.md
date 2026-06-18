@@ -25,6 +25,7 @@
 ### Messages
 
 #### Scroll-to-newest
+- **Fixed broken scroll-to-bottom button** in conversations: clicking "scroll to newest" now jumps directly to the last message in the database, loading a fresh batch of 50 latest messages and marking all previous messages as read.
 - Added `latest=true` query parameter to `list_channel_messages` and `list_contact_messages` — direct jump to the newest DB messages instead of iterative pagination.
 - Rewrote `scrollToNewestMessage()` in `MessagesView.vue`: single API call replaces old messages instead of merging, marks all messages up to the newest as read via `POST /api/messages/read-up-to`.
 - Fixed infinite loop in `scrollToNewestMessage`: added `lastNewerLoadHadResults` ref guard in `canLoadNewerMessages` computed.
@@ -102,6 +103,7 @@
 ### Сообщения
 
 #### Прокрутка к новым
+- **Исправлена сломанная кнопка прокрутки до конца** в диалогах: нажатие «к последнему» теперь переходит напрямую к последнему сообщению в базе данных, загружая свежую пачку из 50 последних сообщений и отмечая все предыдущие как прочитанные.
 - Добавлен параметр `latest=true` в `list_channel_messages` и `list_contact_messages` — прямой переход к новейшим сообщениям в БД вместо итеративной пагинации.
 - Переписан `scrollToNewestMessage()` в `MessagesView.vue`: один API-вызов заменяет старые сообщения вместо слияния, помечает все сообщения до новейшего как прочитанные через `POST /api/messages/read-up-to`.
 - Исправлен бесконечный цикл в `scrollToNewestMessage`: добавлен guard `lastNewerLoadHadResults` ref в computed `canLoadNewerMessages`.

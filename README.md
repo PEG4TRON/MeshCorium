@@ -22,7 +22,7 @@ The latest published release is `MeshCorium v0.8.1 -- mobile-ux-quality`.
 
 ### v0.8.1 — mobile-ux-quality
 
-- **Messages**: direct jump to newest messages with `latest=true` API, ghost channel detection (empty `channel_identity`), infinite-loop guard in scroll-to-newest.
+- **Messages**: fixed broken scroll-to-bottom button — direct jump to newest DB messages with `latest=true` API, ghost channel detection (empty `channel_identity`), infinite-loop guard in scroll-to-newest.
 - **Mobile UI**: Send button repositioned (right, symmetric to GIF), paper-plane icon without text, message timestamp moved to bubble footer with year in format.
 - **Icon system**: all emoji replaced with stroke-based SVG icons in cyan-to-blue gradient, `MobileDockButton` supports SVG URLs.
 - **Components**: `MobileNodebar` and `MobileDockBar` extracted from duplicative HTML in `MessagesView`.
