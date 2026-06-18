@@ -29,6 +29,10 @@
   --mc-float-surface-strong:
     linear-gradient(180deg, rgba(86, 152, 212, 0.1), rgba(55, 111, 157, 0.04)),
     linear-gradient(180deg, rgba(18, 28, 39, 0.96), rgba(11, 19, 28, 0.985));
+  --mc-radius-sm: 8px;
+  --mc-radius: 12px;
+  --mc-radius-lg: 16px;
+  --mc-radius-pill: 999px;
 }
 
 /* Tactile feedback for all interactive elements */
@@ -71,7 +75,7 @@ select,
 
 .v-popper--theme-meshcorium-tooltip .v-popper__inner {
   padding: 8px 12px;
-  border-radius: 14px;
+  border-radius: var(--mc-radius);
   border: 1px solid rgba(255, 255, 255, 0.14);
   color: var(--text);
   font-size: 12px;
@@ -176,7 +180,7 @@ button {
     linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0)),
     var(--shell);
   border: 1px solid rgba(255, 255, 255, 0.05);
-  border-radius: 20px;
+  border-radius: var(--mc-radius-lg);
   overflow: hidden;
   box-shadow: var(--shadow);
 }
@@ -213,7 +217,7 @@ button {
   position: absolute;
   left: 0;
   top: 0;
-  border-radius: 20px;
+  border-radius: var(--mc-radius-lg);
   pointer-events: none;
   z-index: 0;
   opacity: 0;
@@ -256,7 +260,7 @@ button {
   place-items: center;
   padding: 0;
   border: 0;
-  border-radius: 14px;
+  border-radius: var(--mc-radius);
   color: var(--text);
   font-size: 20px;
   background: rgba(255, 255, 255, 0.04);
@@ -293,7 +297,7 @@ button {
   top: calc(50% + 4px);
   width: 32px;
   height: 32px;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   transform: translate(-50%, -50%);
   opacity: 0;
   pointer-events: none;
@@ -346,7 +350,7 @@ button {
   padding: 0 5px;
   display: inline-grid;
   place-items: center;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   font-size: 10px;
   font-weight: 700;
   line-height: 1;
@@ -390,7 +394,7 @@ button {
   align-items: center;
   gap: 6px;
   padding: 4px;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.03);
 }
@@ -409,7 +413,7 @@ button {
   height: 32px;
   padding: 0 10px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   color: var(--muted);
   font-size: 11px;
   font-weight: 700;
@@ -534,7 +538,7 @@ button {
   left: 18px;
   right: 18px;
   height: 2px;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   background: #76d6bf;
   box-shadow: 0 0 14px rgba(118, 214, 191, 0.52);
 }
@@ -623,7 +627,7 @@ button {
 .mc-list-drag-handle span {
   width: 16px;
   height: 2px;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   background: currentColor;
   box-shadow: 0 0 8px rgba(118, 214, 191, 0.18);
 }
@@ -693,7 +697,7 @@ button {
   width: 34px;
   height: 34px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 10px;
+  border-radius: var(--mc-radius-sm);
   color: var(--text);
   background: rgba(255, 255, 255, 0.04);
 }
@@ -704,7 +708,7 @@ button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(255, 255, 255, 0.04);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
@@ -731,7 +735,7 @@ button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.04);
   color: var(--muted);
@@ -747,7 +751,7 @@ button {
 .mc-chat-note {
   margin: 18px;
   padding: 14px 16px;
-  border-radius: 14px;
+  border-radius: var(--mc-radius);
   color: var(--muted);
   text-align: center;
   background: rgba(255, 255, 255, 0.03);
@@ -761,7 +765,7 @@ button {
   margin: 10px 18px 18px;
   padding: 12px 14px;
   min-height: 44px;
-  border-radius: 12px;
+  border-radius: var(--mc-radius);
   background: rgba(79, 188, 159, 0.1);
   color: #9ae1d0;
 }
@@ -785,7 +789,7 @@ button {
   display: grid;
   gap: 12px;
   padding: 16px;
-  border-radius: 20px;
+  border-radius: var(--mc-radius-lg);
   border: 1px solid rgba(118, 214, 191, 0.34);
   background:
     radial-gradient(circle at 16% 0%, rgba(121, 215, 197, 0.22), transparent 34%),
@@ -818,7 +822,7 @@ button {
 .mc-channel-sync-float__bar {
   height: 10px;
   overflow: hidden;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   background: rgba(255, 255, 255, 0.08);
 }
 
@@ -1072,7 +1076,7 @@ button {
 
 .mc-signal span {
   width: 3px;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   background: var(--accent);
   opacity: 0.34;
 }
@@ -1235,7 +1239,7 @@ button {
   gap: 8px;
   padding: 12px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 16px;
+  border-radius: var(--mc-radius);
   background:
     linear-gradient(180deg, rgba(110, 178, 235, 0.16), rgba(60, 116, 161, 0.06)),
     linear-gradient(180deg, rgba(18, 29, 40, 0.992), rgba(9, 17, 25, 0.998));
@@ -1297,7 +1301,7 @@ button {
   gap: 18px;
   padding: 22px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 22px;
+  border-radius: var(--mc-radius-lg);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.025));
   box-shadow: 0 22px 46px rgba(0, 0, 0, 0.16);
 }
@@ -1609,7 +1613,7 @@ button {
   align-items: center;
   min-height: 24px;
   padding: 0 10px;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   border: 1px solid rgba(124, 205, 255, 0.28);
   background: rgba(124, 205, 255, 0.08);
   color: rgba(231, 237, 244, 0.92);
@@ -1642,7 +1646,7 @@ button {
   align-items: center;
   min-height: 24px;
   padding: 0 10px;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   border: 1px solid rgba(255, 214, 123, 0.24);
   background: rgba(255, 214, 123, 0.08);
   color: rgba(255, 226, 162, 0.92);
@@ -1704,7 +1708,7 @@ button {
   max-height: 240px;
   display: block;
   object-fit: cover;
-  border-radius: 14px;
+  border-radius: var(--mc-radius);
   background: rgba(255, 255, 255, 0.04);
 }
 
@@ -1748,7 +1752,7 @@ button {
   gap: 12px;
   align-items: start;
   border: 1px solid rgba(255, 214, 123, 0.16);
-  border-radius: 14px;
+  border-radius: var(--mc-radius);
   background: linear-gradient(180deg, rgba(255, 214, 123, 0.08), rgba(255, 214, 123, 0.03));
 }
 
@@ -1789,7 +1793,7 @@ button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.05);
   color: var(--muted);
@@ -1843,7 +1847,7 @@ button {
   width: 100%;
   color: var(--text);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
+  border-radius: var(--mc-radius);
   background: rgba(255, 255, 255, 0.04);
 }
 
@@ -1862,7 +1866,7 @@ button {
   gap: 10px;
   align-items: start;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
+  border-radius: var(--mc-radius);
   background: rgba(255, 255, 255, 0.04);
 }
 
@@ -1871,7 +1875,7 @@ button {
   max-height: 170px;
   display: block;
   object-fit: cover;
-  border-radius: 10px;
+  border-radius: var(--mc-radius-sm);
 }
 
 .mc-composer-gif-clear {
@@ -1915,7 +1919,7 @@ button {
   padding: 0;
   display: grid;
   place-items: center;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(51, 144, 236, 0.72);
   color: #f7fbff;
@@ -1938,7 +1942,7 @@ button {
   padding: 12px;
   display: grid;
   gap: 8px;
-  border-radius: 18px;
+  border-radius: var(--mc-radius-lg);
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(12, 20, 28, 0.96);
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.32);
@@ -1973,7 +1977,7 @@ button {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 22px;
+  border-radius: var(--mc-radius-lg);
   background:
     linear-gradient(180deg, rgba(110, 178, 235, 0.18), rgba(60, 116, 161, 0.08)),
     linear-gradient(180deg, rgba(18, 29, 40, 0.992), rgba(9, 17, 25, 0.998));
@@ -2056,7 +2060,7 @@ button {
   padding: 0;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 14px;
+  border-radius: var(--mc-radius);
   background: rgba(255, 255, 255, 0.04);
 }
 
@@ -2096,7 +2100,7 @@ button {
   height: 420px;
   margin: 0;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 18px;
+  border-radius: var(--mc-radius-lg);
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.32);
   background: linear-gradient(180deg, rgba(24, 36, 49, 0.98), rgba(15, 24, 35, 0.98));
   --v3-picker-bg: rgba(13, 22, 31, 0.98);
@@ -2118,7 +2122,7 @@ button {
 
 .mc-emoji-picker-shell .v3-emoji-picker .v3-search input {
   height: 34px;
-  border-radius: 10px;
+  border-radius: var(--mc-radius-sm);
   font-size: 13px;
 }
 
@@ -2159,7 +2163,7 @@ button {
   padding: 14px;
   display: grid;
   place-items: center;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   border: 1px solid rgba(255, 255, 255, 0.12);
   background:
     radial-gradient(circle at 32% 28%, rgba(115, 193, 255, 0.20), transparent 42%),
@@ -2195,7 +2199,7 @@ button {
 .mc-button,
 .mc-icon-button {
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
+  border-radius: var(--mc-radius);
   color: var(--text);
   background: rgba(255, 255, 255, 0.04);
 }
@@ -2318,7 +2322,7 @@ button {
   text-align: center;
   color: var(--text);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
+  border-radius: var(--mc-radius);
   background: color-mix(in srgb, var(--accent) 24%, #12202d 76%);
 }
 
@@ -2357,7 +2361,7 @@ button {
 .v-popper--theme-meshcorium-dropdown .v-popper__inner {
   padding: 0;
   border: 0;
-  border-radius: 18px;
+  border-radius: var(--mc-radius-lg);
   background: rgba(7, 13, 20, 0.22);
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.22);
   backdrop-filter: blur(18px) saturate(1.08);
@@ -2373,7 +2377,7 @@ button {
   overflow: hidden;
   display: grid;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 18px;
+  border-radius: var(--mc-radius-lg);
   background: color-mix(in srgb, var(--accent) 18%, #13202c 82%);
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.32);
 }
@@ -2390,7 +2394,7 @@ button {
   padding: 0 12px;
   color: var(--text);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
+  border-radius: var(--mc-radius);
   outline: none;
   background: rgba(12, 20, 29, 0.92);
 }
@@ -2505,7 +2509,7 @@ button {
 .mc-connect-float {
   width: min(1040px, calc(100vw - 36px));
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 22px;
+  border-radius: var(--mc-radius-lg);
   background: var(--mc-float-surface);
 }
 
@@ -2541,7 +2545,7 @@ button {
 .mc-connect-alert {
   margin: 0 14px 14px;
   padding: 12px 14px;
-  border-radius: 14px;
+  border-radius: var(--mc-radius);
   border: 1px solid rgba(255, 130, 130, 0.28);
   background: rgba(160, 48, 48, 0.18);
   color: #ffd1d1;
@@ -2558,7 +2562,7 @@ button {
 .mc-connect-float-card,
 .mc-connect-history-shell {
   padding: 16px;
-  border-radius: 18px;
+  border-radius: var(--mc-radius-lg);
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.04);
 }
@@ -2581,7 +2585,7 @@ button {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   padding: 6px;
-  border-radius: 16px;
+  border-radius: var(--mc-radius);
   background: rgba(255, 255, 255, 0.045);
   border: 1px solid rgba(255, 255, 255, 0.07);
 }
@@ -2589,7 +2593,7 @@ button {
 .mc-connect-transport-option {
   min-height: 38px;
   border: 0;
-  border-radius: 12px;
+  border-radius: var(--mc-radius);
   color: var(--muted);
   background: transparent;
   font-weight: 800;
@@ -2617,7 +2621,7 @@ button {
   justify-content: center;
   width: 20px;
   height: 20px;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   color: #9fe6ff;
   background: rgba(83, 220, 255, 0.14);
   box-shadow: inset 0 0 0 1px rgba(83, 220, 255, 0.2);
@@ -2634,7 +2638,7 @@ button {
   width: 34px;
   height: 34px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--mc-radius-sm);
   color: #ffe3ea;
   background: rgba(255, 92, 92, 0.12);
   box-shadow: inset 0 0 0 1px rgba(255, 92, 92, 0.24);
@@ -2650,7 +2654,7 @@ button {
   height: 2px;
   background: rgba(255, 132, 132, 0.9);
   transform: rotate(-32deg);
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
 }
 
 .mc-connect-history-unpair {
@@ -2691,7 +2695,7 @@ button {
   height: 12px;
   border: 2px solid rgba(255, 203, 203, 0.3);
   border-top-color: rgba(255, 226, 226, 0.95);
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   animation: mc-icon-spin 0.85s linear infinite;
   flex: 0 0 auto;
 }
@@ -2705,7 +2709,7 @@ button {
   display: grid;
   gap: 7px;
   padding: 15px;
-  border-radius: 16px;
+  border-radius: var(--mc-radius);
   color: var(--muted);
   background:
     radial-gradient(circle at 90% 10%, rgba(255, 172, 68, 0.18), transparent 42%),
@@ -2727,7 +2731,7 @@ button {
 .mc-connect-meta,
 .mc-connect-float-note {
   padding: 12px 14px;
-  border-radius: 14px;
+  border-radius: var(--mc-radius);
   background: rgba(255, 255, 255, 0.04);
 }
 
@@ -2760,7 +2764,7 @@ button {
   text-align: left;
   color: inherit;
   border: 0;
-  border-radius: 16px;
+  border-radius: var(--mc-radius);
   background: rgba(255, 255, 255, 0.04);
   cursor: pointer;
 }
@@ -2781,7 +2785,7 @@ button {
   height: 54px;
   display: grid;
   place-items: center;
-  border-radius: 14px;
+  border-radius: var(--mc-radius);
   background: rgba(255, 255, 255, 0.05);
 }
 
@@ -2822,7 +2826,7 @@ button {
   padding: 0 8px;
   display: inline-flex;
   align-items: center;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   background: rgba(51, 144, 236, 0.16);
   color: #91d3ff;
   font-size: 11px;
@@ -2838,7 +2842,7 @@ button {
   min-height: 24px;
   padding: 0 8px;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   color: #ffc4c4;
   background: rgba(180, 54, 54, 0.14);
   font-size: 11px;
@@ -2869,7 +2873,7 @@ button {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 22px;
+  border-radius: var(--mc-radius-lg);
   background:
     linear-gradient(180deg, rgba(62, 122, 176, 0.08), rgba(34, 70, 102, 0.03)),
     linear-gradient(180deg, rgba(13, 20, 29, 0.97), rgba(8, 14, 21, 0.992));
@@ -2934,7 +2938,7 @@ button {
   top: calc(50% + 4px);
   width: 36px;
   height: 36px;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   transform: translate(-50%, -50%);
   opacity: 0;
   pointer-events: none;
@@ -2995,7 +2999,7 @@ button {
   height: 30px;
   padding: 0;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--mc-radius-sm);
   color: var(--text);
   background: rgba(255, 255, 255, 0.04);
   display: inline-grid;
@@ -3016,7 +3020,7 @@ button {
 .mc-notification-pill {
   color: #fff9ec;
   background: rgba(214, 168, 79, 0.18);
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   padding: 4px 8px;
 }
 
@@ -3039,7 +3043,7 @@ button {
   text-align: left;
   color: inherit;
   border: 1px solid rgba(255, 255, 255, 0.05);
-  border-radius: 14px;
+  border-radius: var(--mc-radius);
   background: rgba(255, 255, 255, 0.03);
 }
 
@@ -3114,7 +3118,7 @@ button {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   border: 1px solid rgba(112, 255, 184, 0.12);
-  border-radius: 16px;
+  border-radius: var(--mc-radius);
   background: var(--mc-float-surface);
 }
 
@@ -3245,7 +3249,7 @@ button {
 .mc-mini-sheet {
   width: min(420px, calc(100vw - 36px));
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 18px;
+  border-radius: var(--mc-radius-lg);
   background:
     linear-gradient(180deg, rgba(110, 178, 235, 0.18), rgba(60, 116, 161, 0.08)),
     linear-gradient(180deg, rgba(18, 29, 40, 0.992), rgba(9, 17, 25, 0.998));
@@ -3259,7 +3263,7 @@ button {
   width: min(1180px, calc(100vw - 36px));
   height: min(82vh, calc(100dvh - 36px));
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 22px;
+  border-radius: var(--mc-radius-lg);
   background: var(--mc-float-surface-strong);
   box-shadow: var(--shadow);
   overflow: hidden;
@@ -3269,7 +3273,7 @@ button {
   width: min(460px, calc(100vw - 36px));
   padding: 20px 22px;
   border: 1px solid rgba(95, 176, 246, 0.18);
-  border-radius: 18px;
+  border-radius: var(--mc-radius-lg);
   background:
     radial-gradient(circle at top right, rgba(51, 144, 236, 0.16), transparent 40%),
     var(--mc-float-surface-strong);
@@ -3427,7 +3431,7 @@ button {
   gap: 4px;
   padding: 8px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 14px;
+  border-radius: var(--mc-radius);
   background: color-mix(in srgb, var(--accent) 18%, #13202c 82%);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.32);
   backdrop-filter: blur(18px);
@@ -3438,7 +3442,7 @@ button {
   padding: 0 12px;
   color: var(--text);
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--mc-radius-sm);
   background: transparent;
   text-align: left;
 }
@@ -3476,7 +3480,7 @@ button {
 .mc-contacts-card,
 .mc-contacts-placeholder-card {
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 16px;
+  border-radius: var(--mc-radius);
   background: rgba(255, 255, 255, 0.035);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
 }
@@ -3626,7 +3630,7 @@ button {
   padding: 0;
   color: var(--text);
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   background: color-mix(in srgb, var(--accent) 18%, rgba(255, 255, 255, 0.03) 82%);
 }
 
@@ -3677,7 +3681,7 @@ button {
   justify-content: center;
   padding: 0 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   background: rgba(255, 255, 255, 0.04);
   color: var(--text);
   font-size: 12px;
@@ -3785,7 +3789,7 @@ button {
   justify-content: space-between;
   gap: 12px;
   padding: 12px 14px;
-  border-radius: 12px;
+  border-radius: var(--mc-radius);
   background: rgba(255, 255, 255, 0.03);
 }
 
@@ -3809,7 +3813,7 @@ button {
   min-height: 44px;
   padding: 0 14px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
+  border-radius: var(--mc-radius);
   background: rgba(255, 255, 255, 0.03);
   color: var(--text);
 }
@@ -3819,7 +3823,7 @@ button {
   gap: 6px;
   padding: 12px 14px;
   border: 1px solid rgba(255, 198, 92, 0.22);
-  border-radius: 12px;
+  border-radius: var(--mc-radius);
   background: rgba(255, 198, 92, 0.08);
   color: rgba(255, 239, 194, 0.96);
   line-height: 1.5;
@@ -3857,7 +3861,7 @@ button {
   min-height: 34px;
   padding: 0 12px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   color: var(--text);
   background: rgba(255, 255, 255, 0.04);
   font-size: 12px;
@@ -3915,7 +3919,7 @@ button {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 16px;
+  border-radius: var(--mc-radius);
   background: rgba(255, 255, 255, 0.035);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
   overflow: hidden;
@@ -3954,7 +3958,7 @@ button {
   gap: 12px;
   align-items: start;
   padding: 14px;
-  border-radius: 14px;
+  border-radius: var(--mc-radius);
   background: rgba(255, 255, 255, 0.03);
 }
 
@@ -3985,7 +3989,7 @@ button {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: 22px;
+  border-radius: var(--mc-radius-lg);
   background: color-mix(in srgb, var(--mc-shell-unified-surface) 88%, rgba(10, 16, 28, 0.94) 12%);
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.38);
   overflow: hidden;
@@ -4084,7 +4088,7 @@ button {
   gap: 12px;
   align-items: start;
   padding: 14px;
-  border-radius: 14px;
+  border-radius: var(--mc-radius);
   background: rgba(255, 255, 255, 0.03);
 }
 
@@ -4103,7 +4107,7 @@ button {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 22px;
+  border-radius: var(--mc-radius-lg);
   background: var(--mc-float-surface-strong);
   box-shadow: var(--shadow);
   overflow: hidden;
@@ -4214,7 +4218,7 @@ button {
 .mc-contact-route-trace-legend-swatch {
   width: 14px;
   height: 14px;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
 }
 
@@ -4242,7 +4246,7 @@ button {
   padding: 12px 14px;
   color: var(--text);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 14px;
+  border-radius: var(--mc-radius);
   background: rgba(255, 255, 255, 0.035);
   text-align: left;
 }
@@ -4348,7 +4352,7 @@ button {
   justify-content: center;
   padding: 0 16px;
   border: 1px solid rgba(240, 113, 120, 0.28);
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   color: #ffe4e6;
   background: rgba(85, 20, 26, 0.82);
   box-shadow: 0 12px 24px rgba(0, 0, 0, 0.24);
@@ -4363,7 +4367,7 @@ button {
   padding: 0;
   color: #eaf3fc;
   border: 2px solid rgba(255, 255, 255, 0.5);
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   background: rgba(18, 29, 40, 0.9);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
 }
@@ -4388,7 +4392,7 @@ button {
 
 .mc-contacts-list-scroll--workspace {
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 16px;
+  border-radius: var(--mc-radius);
   background: rgba(255, 255, 255, 0.035);
 }
 
@@ -4508,7 +4512,7 @@ button {
   gap: 16px;
   padding: 18px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 22px;
+  border-radius: var(--mc-radius-lg);
   background:
     linear-gradient(180deg, rgba(25, 40, 55, 0.92) 0%, rgba(18, 29, 39, 0.94) 100%);
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.18);
@@ -4524,7 +4528,7 @@ button {
   display: grid;
   gap: 4px;
   padding: 14px 12px;
-  border-radius: 18px;
+  border-radius: var(--mc-radius-lg);
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.06);
 }
@@ -4550,7 +4554,7 @@ button {
   min-height: 44px;
   padding: 0 14px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 14px;
+  border-radius: var(--mc-radius);
   color: var(--text);
   background: rgba(255, 255, 255, 0.04);
   transition: background 140ms ease, transform 140ms ease, border-color 140ms ease;
@@ -4619,7 +4623,7 @@ button {
 .mc-map-legend-self-fallback {
   width: 12px;
   height: 12px;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   background: #f0c86d;
   box-shadow: 0 0 0 4px rgba(240, 200, 109, 0.18);
 }
@@ -4628,7 +4632,7 @@ button {
   width: 14px;
   height: 14px;
   justify-self: center;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   background: #4fb6ff;
   box-shadow: 0 0 0 4px rgba(79, 182, 255, 0.18);
 }
@@ -4656,7 +4660,7 @@ button {
   display: grid;
   gap: 12px;
   padding: 16px;
-  border-radius: 18px;
+  border-radius: var(--mc-radius-lg);
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.06);
 }
@@ -4677,7 +4681,7 @@ button {
 .mc-map-distance-input {
   width: 80px;
   padding: 6px 8px;
-  border-radius: 8px;
+  border-radius: var(--mc-radius-sm);
   border: 1px solid rgba(255, 255, 255, 0.15);
   background: rgba(255, 255, 255, 0.06);
   color: #e0e0e0;
@@ -4712,7 +4716,7 @@ button {
   display: grid;
   gap: 12px;
   padding: 16px;
-  border-radius: 18px;
+  border-radius: var(--mc-radius-lg);
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.06);
 }
@@ -4728,7 +4732,7 @@ button {
   padding: 0 14px;
   justify-self: start;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   color: var(--text);
   background: rgba(255, 255, 255, 0.04);
 }
@@ -4767,7 +4771,7 @@ button {
 .mc-map-trace-select select {
   min-height: 36px;
   padding: 0 10px;
-  border-radius: 12px;
+  border-radius: var(--mc-radius);
   border: 1px solid rgba(255, 255, 255, 0.08);
   color: var(--text);
   background: rgba(7, 14, 20, 0.55);
@@ -4782,7 +4786,7 @@ button {
 .mc-map-trace-input {
   min-height: 36px;
   padding: 0 10px;
-  border-radius: 12px;
+  border-radius: var(--mc-radius);
   border: 1px solid rgba(255, 255, 255, 0.08);
   color: var(--text);
   background: rgba(7, 14, 20, 0.55);
@@ -4802,7 +4806,7 @@ button {
 
 .mc-map-trace-status {
   padding: 12px 14px;
-  border-radius: 14px;
+  border-radius: var(--mc-radius);
   background: rgba(7, 14, 20, 0.4);
   border: 1px solid rgba(255, 255, 255, 0.06);
   font-size: 13px;
@@ -4827,7 +4831,7 @@ button {
   gap: 12px;
   align-items: center;
   padding: 11px 12px;
-  border-radius: 14px;
+  border-radius: var(--mc-radius);
   border: 1px solid rgba(255, 255, 255, 0.06);
   color: var(--text);
   background: rgba(255, 255, 255, 0.03);
@@ -4874,7 +4878,7 @@ button {
   display: grid;
   gap: 4px;
   padding: 11px 12px;
-  border-radius: 14px;
+  border-radius: var(--mc-radius);
   border: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(255, 255, 255, 0.03);
 }
@@ -4916,7 +4920,7 @@ button {
   display: grid;
   gap: 12px;
   padding: 16px;
-  border-radius: 20px;
+  border-radius: var(--mc-radius-lg);
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: var(--mc-float-surface-strong);
   box-shadow: 0 20px 48px rgba(0, 0, 0, 0.26);
@@ -4926,7 +4930,7 @@ button {
 .mc-map-trace-picker-search {
   min-height: 40px;
   padding: 0 12px;
-  border-radius: 12px;
+  border-radius: var(--mc-radius);
   border: 1px solid rgba(255, 255, 255, 0.08);
   color: var(--text);
   background: rgba(7, 14, 20, 0.55);
@@ -4965,7 +4969,7 @@ button {
   flex: 0 0 auto;
   min-height: 38px;
   padding: 0 14px;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -5001,7 +5005,7 @@ button {
   align-items: center;
   min-height: 34px;
   padding: 0 14px;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.04);
   font-size: 12px;
@@ -5034,7 +5038,7 @@ button {
   display: grid;
   gap: 12px;
   padding: 16px;
-  border-radius: 20px;
+  border-radius: var(--mc-radius-lg);
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: var(--mc-float-surface);
   box-shadow: 0 20px 48px rgba(0, 0, 0, 0.26);
@@ -5068,7 +5072,7 @@ button {
 .mc-map-route-close {
   width: 32px;
   height: 32px;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   border: 1px solid rgba(255, 255, 255, 0.08);
   color: var(--text);
   background: rgba(255, 255, 255, 0.04);
@@ -5091,7 +5095,7 @@ button {
   display: grid;
   gap: 4px;
   padding: 10px 12px;
-  border-radius: 14px;
+  border-radius: var(--mc-radius);
   border: 1px solid rgba(81, 184, 242, 0.22);
   background: rgba(51, 144, 236, 0.08);
 }
@@ -5211,7 +5215,7 @@ button {
   position: absolute;
   padding: 6px 10px;
   border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   color: rgba(247, 249, 252, 0.98);
   background: rgba(12, 20, 28, 0.94);
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
@@ -5233,7 +5237,7 @@ button {
   height: 18px;
   padding: 0;
   border: 2px solid rgba(0, 0, 0, 0.92);
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   background: rgba(255, 205, 84, 0.98);
   box-shadow: 0 0 0 5px rgba(255, 205, 84, 0.24);
   transform: translate(-50%, -50%);
@@ -5254,7 +5258,7 @@ button {
   display: grid;
   gap: 8px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 16px;
+  border-radius: var(--mc-radius);
   background: rgba(12, 20, 28, 0.94);
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.32);
   backdrop-filter: blur(16px);
@@ -5402,7 +5406,7 @@ button {
   max-width: 220px;
   padding: 6px 10px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 12px;
+  border-radius: var(--mc-radius);
   color: var(--text);
   background: rgba(12, 20, 28, 0.94);
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.26);
@@ -5450,14 +5454,14 @@ button {
   place-items: center;
   padding: 0;
   border: 0;
-  border-radius: 14px;
+  border-radius: var(--mc-radius);
   background: transparent;
 }
 
 .mc-map-marker-dot {
   width: 16px;
   height: 16px;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   background: #4fb6ff;
   border: 2px solid rgba(0, 0, 0, 0.92);
   box-shadow: 0 0 0 6px rgba(79, 182, 255, 0.18);
@@ -5503,7 +5507,7 @@ button {
   display: grid;
   place-items: center;
   font-size: 20px;
-  border-radius: 14px;
+  border-radius: var(--mc-radius);
   background: rgba(14, 25, 36, 0.84);
   border: 1px solid rgba(255, 255, 255, 0.12);
 }
@@ -5535,7 +5539,7 @@ button {
   min-height: 30px;
   padding: 0 10px;
   border: 1px solid rgba(81, 184, 242, 0.24);
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   color: var(--text);
   background: rgba(51, 144, 236, 0.16);
   font-size: 12px;
@@ -5543,7 +5547,7 @@ button {
 
 .mc-map-popup-shell .maplibregl-popup-content {
   padding: 12px 14px;
-  border-radius: 16px;
+  border-radius: var(--mc-radius);
   color: var(--text);
   background: rgba(13, 22, 31, 0.92);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -5582,7 +5586,7 @@ button {
   text-align: left;
   color: inherit;
   border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 16px;
+  border-radius: var(--mc-radius);
   background: rgba(255, 255, 255, 0.03);
 }
 
@@ -5627,7 +5631,7 @@ button {
   padding: 0 8px;
   display: inline-flex;
   align-items: center;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.04);
   color: var(--muted);
@@ -5642,7 +5646,7 @@ button {
   display: grid;
   gap: 16px;
   padding: 16px 18px;
-  border-radius: 18px;
+  border-radius: var(--mc-radius-lg);
   border: 1px solid rgba(255, 255, 255, 0.08);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.025)),
@@ -5699,7 +5703,7 @@ button {
   gap: 16px;
   align-items: center;
   padding: 14px 16px;
-  border-radius: 16px;
+  border-radius: var(--mc-radius);
   border: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(255, 255, 255, 0.03);
 }
@@ -5732,7 +5736,7 @@ button {
   padding: 0 12px;
   color: var(--text);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
+  border-radius: var(--mc-radius);
   background: rgba(255, 255, 255, 0.04);
 }
 
@@ -5742,7 +5746,7 @@ button {
   padding: 0 36px 0 12px;
   color: var(--text);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
+  border-radius: var(--mc-radius);
   background: color-mix(in srgb, var(--accent) 24%, #12202d 76%);
   appearance: none;
   -webkit-appearance: none;
@@ -5769,7 +5773,7 @@ button {
 .mc-settings-json-block {
   margin: 12px 0 0;
   padding: 12px 14px;
-  border-radius: 14px;
+  border-radius: var(--mc-radius);
   border: 1px solid rgba(148, 163, 184, 0.18);
   background: rgba(6, 12, 16, 0.48);
   color: rgba(232, 240, 235, 0.92);
@@ -5848,7 +5852,7 @@ button {
   gap: 12px;
   padding: 14px 16px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 16px;
+  border-radius: var(--mc-radius);
   background: rgba(255, 255, 255, 0.03);
 }
 
@@ -5889,7 +5893,7 @@ button {
   display: grid;
   gap: 10px;
   padding: 14px 16px;
-  border-radius: 16px;
+  border-radius: var(--mc-radius);
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.03);
 }
@@ -5940,7 +5944,7 @@ button {
   place-items: center;
   padding: 0;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
+  border-radius: var(--mc-radius);
   background: rgba(51, 144, 236, 0.12);
   transition: filter 140ms ease, background 140ms ease, border-color 140ms ease;
 }
@@ -5984,7 +5988,7 @@ button {
   width: 42px;
   height: 24px;
   margin: 0;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.1);
   position: relative;
@@ -6000,7 +6004,7 @@ button {
   left: 2px;
   width: 18px;
   height: 18px;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   background: #f5f8fc;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.28);
   transition: transform 160ms ease;
@@ -6068,7 +6072,7 @@ button {
   min-height: 34px;
   padding: 0 12px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   color: var(--text);
   background: rgba(255, 255, 255, 0.04);
   font-size: 12px;
@@ -6126,7 +6130,7 @@ button {
   display: flex;
   height: 14px;
   overflow: hidden;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.04);
 }
@@ -6175,7 +6179,7 @@ button {
 .mc-settings-contacts-legend-dot {
   width: 10px;
   height: 10px;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   display: inline-block;
 }
 
@@ -6206,7 +6210,7 @@ button {
   display: grid;
   gap: 6px;
   padding: 14px 16px;
-  border-radius: 16px;
+  border-radius: var(--mc-radius);
   border: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(255, 255, 255, 0.03);
 }
@@ -6229,7 +6233,7 @@ button {
   min-height: 220px;
   overflow: auto;
   padding: 16px 18px;
-  border-radius: 16px;
+  border-radius: var(--mc-radius);
   border: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(9, 15, 22, 0.72);
   color: #dce6f0;
@@ -6282,7 +6286,7 @@ button {
   width: 100%;
   min-height: 42px;
   padding: 0 14px;
-  border-radius: 14px;
+  border-radius: var(--mc-radius);
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.05);
   color: var(--text);
@@ -6341,7 +6345,7 @@ button {
 .mc-settings-battery-range-chip {
   min-height: 34px;
   padding: 0 12px;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.04);
   color: var(--text);
@@ -6373,7 +6377,7 @@ button {
   align-items: center;
   gap: 10px;
   padding: 0 12px;
-  border-radius: 14px;
+  border-radius: var(--mc-radius);
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.04);
   color: var(--text);
@@ -6403,7 +6407,7 @@ button {
   min-height: 300px;
   overflow: hidden;
   padding: 6px 0 0;
-  border-radius: 22px;
+  border-radius: var(--mc-radius-lg);
   background:
     radial-gradient(circle at top, rgba(114, 219, 126, 0.08), transparent 40%),
     linear-gradient(180deg, rgba(18, 33, 24, 0.82), rgba(10, 18, 13, 0.94));
@@ -6422,7 +6426,7 @@ button {
   display: grid;
   gap: 14px;
   padding: 16px;
-  border-radius: 16px;
+  border-radius: var(--mc-radius);
   border: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(255, 255, 255, 0.03);
 }
@@ -6432,7 +6436,7 @@ button {
   display: grid;
   place-items: center;
   padding: 16px;
-  border-radius: 16px;
+  border-radius: var(--mc-radius);
   border: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(9, 15, 22, 0.42);
 }
@@ -6513,7 +6517,7 @@ button {
   width: 42px;
   height: 24px;
   margin: 0;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.1);
   position: relative;
@@ -6528,7 +6532,7 @@ button {
   left: 2px;
   width: 18px;
   height: 18px;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   background: #f5f8fc;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.28);
   transition: transform 160ms ease;
@@ -6599,7 +6603,7 @@ button {
   text-align: center;
   color: var(--muted);
   font-size: 14px;
-  border-radius: 16px;
+  border-radius: var(--mc-radius);
   border: 1px dashed rgba(255, 255, 255, 0.08);
   background: rgba(9, 15, 22, 0.36);
 }
@@ -6615,7 +6619,7 @@ button {
   padding: 0 8px;
   display: inline-flex;
   align-items: center;
-  border-radius: 10px;
+  border-radius: var(--mc-radius-sm);
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.04);
   color: var(--text);
@@ -6639,7 +6643,7 @@ button {
   display: grid;
   gap: 14px;
   padding: 16px 18px;
-  border-radius: 18px;
+  border-radius: var(--mc-radius-lg);
   border: 1px solid rgba(255, 255, 255, 0.08);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.025)),
@@ -6697,7 +6701,7 @@ button {
   height: 52px;
   display: grid;
   place-items: center;
-  border-radius: 16px;
+  border-radius: var(--mc-radius);
   border: 1px solid rgba(95, 176, 246, 0.18);
   color: rgba(110, 185, 255, 0.96);
   background: rgba(51, 144, 236, 0.12);
@@ -6726,7 +6730,7 @@ button {
   padding: 0 10px;
   display: inline-flex;
   align-items: center;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   border: 1px solid rgba(255, 255, 255, 0.09);
   background: rgba(255, 255, 255, 0.04);
   color: var(--text);
@@ -6812,7 +6816,7 @@ button {
   align-items: center;
   min-height: 24px;
   padding: 0 10px;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   border: 1px solid rgba(255, 255, 255, 0.09);
   background: rgba(255, 255, 255, 0.05);
   color: rgba(169, 213, 255, 0.94);
@@ -6829,7 +6833,7 @@ button {
   display: grid;
   gap: 8px;
   align-self: stretch;
-  border-radius: 16px;
+  border-radius: var(--mc-radius);
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(7, 14, 22, 0.34);
 }
@@ -6861,7 +6865,7 @@ button {
   padding: 4px;
   margin: 0;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--mc-radius-sm);
   background: transparent;
   color: var(--muted);
   cursor: pointer;
@@ -6883,7 +6887,7 @@ button {
 /* Update panel */
 .mc-settings-update-panel {
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 16px;
+  border-radius: var(--mc-radius);
   background: rgba(7, 14, 22, 0.34);
 }
 
@@ -6929,7 +6933,7 @@ button {
 .mc-settings-update-btn {
   padding: 10px 18px;
   border: none;
-  border-radius: 12px;
+  border-radius: var(--mc-radius);
   font-size: 26px;
   font-weight: 700;
   letter-spacing: -0.03em;
@@ -7014,7 +7018,7 @@ button {
   display: grid;
   gap: 14px;
   padding: 14px 16px;
-  border-radius: 16px;
+  border-radius: var(--mc-radius);
   border: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(255, 255, 255, 0.03);
 }
@@ -7050,7 +7054,7 @@ button {
   display: grid;
   gap: 6px;
   padding: 12px 14px;
-  border-radius: 14px;
+  border-radius: var(--mc-radius);
   border: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(255, 255, 255, 0.03);
 }
@@ -7099,7 +7103,7 @@ button {
   .mc-shell {
     width: calc(100vw - var(--safe-left) - var(--safe-right));
     height: calc(100dvh - var(--safe-top) - var(--safe-bottom));
-    border-radius: 18px;
+    border-radius: var(--mc-radius-lg);
     grid-template-columns: 64px 320px minmax(0, 1fr);
   }
 
@@ -7162,7 +7166,7 @@ button {
   .mc-shell {
     grid-template-columns: 64px minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr);
-    border-radius: 16px;
+    border-radius: var(--mc-radius);
   }
 
   .mc-sidebar {
@@ -7218,7 +7222,7 @@ button {
   .mc-contact-route-sheet {
     width: min(100vw - 20px, 1240px);
     height: min(90vh, calc(100dvh - 20px));
-    border-radius: 18px;
+    border-radius: var(--mc-radius-lg);
   }
 
   .mc-contact-route-head,
@@ -7272,7 +7276,7 @@ button {
 
   .mc-map-panel {
     padding: 14px;
-    border-radius: 18px;
+    border-radius: var(--mc-radius-lg);
   }
 
   .mc-map-summary,
@@ -7295,7 +7299,7 @@ button {
   .mc-message-route-sheet {
     width: min(100vw - 20px, 1180px);
     height: min(88vh, calc(100dvh - 20px));
-    border-radius: 18px;
+    border-radius: var(--mc-radius-lg);
   }
 
   .mc-map-route-panel--sheet {
@@ -7306,7 +7310,7 @@ button {
 
   .mc-map-viewport {
     min-height: 340px;
-    border-radius: 20px;
+    border-radius: var(--mc-radius-lg);
   }
 
   .mc-map-location-actions {
@@ -7453,7 +7457,7 @@ button {
     width: 18px;
     height: 18px;
     object-fit: contain;
-    border-radius: 3px;
+    border-radius: var(--mc-radius-sm);
   }
 
   .mc-maps-mobile-nodebar .mc-node-led {
@@ -7565,7 +7569,7 @@ button {
 
   .mc-channel-editor-card {
     padding: 16px;
-    border-radius: 18px;
+    border-radius: var(--mc-radius-lg);
   }
 
   .mc-channel-editor-grid {
@@ -7589,7 +7593,7 @@ button {
     height: 46px;
     min-width: 46px;
     padding: 0;
-    border-radius: 12px;
+    border-radius: var(--mc-radius);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -7756,7 +7760,7 @@ button {
     width: min(100%, 620px);
     height: 100%;
     max-height: 100%;
-    border-radius: 18px;
+    border-radius: var(--mc-radius-lg);
   }
 
   .mc-overlay--notifications .mc-notifications-header {
@@ -7975,7 +7979,7 @@ button {
   min-height: 36px;
   padding: 0 12px;
   border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   background: rgba(255,255,255,0.04);
   color: var(--text);
   font: inherit;
@@ -8013,7 +8017,7 @@ button {
   min-height: 42px;
   padding: 0 12px;
   border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 12px;
+  border-radius: var(--mc-radius);
   background: rgba(255,255,255,0.04);
   color: var(--text);
   font: inherit;
@@ -8041,7 +8045,7 @@ button {
   min-height: 36px;
   padding: 0 12px;
   border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   background: rgba(255,255,255,0.035);
   color: var(--text);
   font: inherit;
@@ -8111,7 +8115,7 @@ button {
   width: 40px;
   height: 40px;
   border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   background: rgba(255,255,255,0.04);
   color: var(--text);
   cursor: pointer;
@@ -8213,7 +8217,7 @@ button {
   .mc-settings-nav-item {
     min-height: 58px;
     padding: 12px;
-    border-radius: 14px;
+    border-radius: var(--mc-radius);
   }
 
   .mc-settings-nav-copy {
@@ -8315,7 +8319,7 @@ button {
   .mc-settings-panel {
     gap: 12px;
     padding: 14px;
-    border-radius: 16px;
+    border-radius: var(--mc-radius);
   }
 
   .mc-settings-rows {
@@ -8327,7 +8331,7 @@ button {
     align-items: start;
     gap: 10px;
     padding: 12px;
-    border-radius: 14px;
+    border-radius: var(--mc-radius);
   }
 
   .mc-settings-row-control {
