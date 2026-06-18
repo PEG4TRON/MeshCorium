@@ -4583,7 +4583,7 @@ async function scrollToNewestMessage() {
   
   try {
     const conv = currentConversation.value
-    let url = `/messages/channel?channel_idx=${conv.channelIdx}&limit=${HISTORY_PAGE_SIZE}&latest=true`
+    let url = `/api/messages/channel?channel_idx=${conv.channelIdx}&limit=${HISTORY_PAGE_SIZE}&latest=true`
     if (conv.channelIdentity) url += `&channel_identity=${encodeURIComponent(conv.channelIdentity)}`
     
     const keyBefore = currentConversationKey.value
