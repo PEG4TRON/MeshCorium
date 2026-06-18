@@ -6253,6 +6253,24 @@ def _build_channel_unread_payload_for_port(port: str | None, mention_name: str) 
 
     with DB_LOCK, sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
+        # Diagnostic: detect ghost messages with empty channel_identity
+        conn.execute(
+            f"""SELECT channel_idx, COUNT(*) as cnt, GROUP_CONCAT(id) as message_ids
+               FROM messages
+               WHERE {owner_where}
+                 AND message_kind = 'channel'
+                 AND from_self = 0
+                 AND COALESCE(is_read, 0) = 0
+                 AND channel_identity = ''
+               GROUP BY channel_idx""",
+            owner_params,
+        )
+        ghost_rows = conn.fetchall()
+        for ghost in ghost_rows:
+            logging.warning(
+                "ghost_channel: channel_idx=%s has %s unread messages with empty channel_identity — excluded from unread summary. Message IDs: %s",
+                ghost[0], ghost[1], ghost[2]
+            )
         unread_rows = conn.execute(
             f"""
             SELECT
@@ -6267,6 +6285,7 @@ def _build_channel_unread_payload_for_port(port: str | None, mention_name: str) 
               AND message_kind = 'channel'
               AND from_self = 0
               AND COALESCE(is_read, 0) = 0
+              AND channel_identity != ''
               {"" if not needle else "AND lower(text) NOT LIKE ?"}
             GROUP BY owner_id, channel_idx, channel_identity
             ORDER BY owner_id ASC, channel_idx ASC, channel_identity ASC
