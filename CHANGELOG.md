@@ -1,5 +1,57 @@
 # Changelog
 
+## v0.8.3 — Go Serial Transport & Python Reorganization (2026-06-19)
+
+### Go Serial Transport
+- **Go library**: New `go_serial_transport/` module — idiomatic Go serial transport library supporting nRF52, ESP32-S3, and ESP32+CP2102/CH340 devices with frame-level read/write.
+- **CLI tool**: Standalone Go CLI for direct serial operations (read, write, DTR toggle, device listing).
+- **Python adapter**: `go_serial_adapter.py` — seamless integration between Go serial transport and the meshcorium Python backend via subprocess communication.
+- **DTR toggle**: Added DTR/RTS toggle support for hardware reset of connected devices, controllable from Python adapter.
+- **Deadlock fix**: Fixed a deadlock in concurrent read/write operations — separated read and write goroutine synchronization.
+- **WriteFrame flush**: Guaranteed flush after every `WriteFrame` call — prevents partial writes on buffered serial ports.
+- **ReadExact loop**: Rewrote `ReadExact` with a retry loop — ensures full-frame reads even when the OS delivers fragmented chunks.
+- **readPrefixedByte hex preview**: Added hex-encoded byte preview in `readPrefixedByte` debug output — simplifies diagnosing framing issues during development.
+
+### Python Package Reorganization
+- **Package extraction**: Reorganized the Python backend into a proper `meshcorium/` package — 16 `.py` files extracted from the monolithic root layout.
+- **login.html extraction**: Extracted `login.html` template from `meshcorium_web.py` into a standalone file — cleaner separation of Python logic and HTML templates.
+
+### Node Compatibility
+- **T114 contact limit fix**: Corrected `max_contacts_div_2` calculation for T114 nodes — contact capacity raised from old formula to 350 contacts matching the actual hardware limit.
+
+### GitHub & Maintenance
+- **Issues cleanup**: Closed 29 GitHub issues (19 outdated/no longer relevant + 10 completed in this release cycle) — 20 active issues remain.
+- **Settings → About links**: Added direct GitHub repository links to the Settings → About page for user-facing transparency.
+- **Skills update**: Updated `meshcorium` and `meshcorium-golang` skills to reflect the new Go transport architecture and package layout.
+
+---
+
+## v0.8.3 — Go Serial Transport & реорганизация Python (2026-06-19) [RU]
+
+### Go Serial Transport
+- **Go-библиотека**: Новый модуль `go_serial_transport/` — идиоматическая Go-библиотека для serial-транспорта с поддержкой nRF52, ESP32-S3 и ESP32+CP2102/CH340, включая кадровое чтение/запись.
+- **CLI-утилита**: Отдельный Go CLI для прямых serial-операций (чтение, запись, DTR toggle, список устройств).
+- **Python-адаптер**: `go_serial_adapter.py` — бесшовная интеграция между Go serial-транспортом и Python-бэкендом meshcorium через subprocess-коммуникацию.
+- **DTR toggle**: Добавлена поддержка переключения DTR/RTS для аппаратного сброса подключённых устройств, управляемая из Python-адаптера.
+- **Исправление deadlock**: Устранён deadlock при конкурентных операциях чтения/записи — синхронизация горутин чтения и записи разделена.
+- **WriteFrame flush**: Гарантированный flush после каждого вызова `WriteFrame` — предотвращает частичную запись на буферизованных serial-портах.
+- **ReadExact loop**: Переписан `ReadExact` с циклом повторных попыток — обеспечивает полное чтение кадра даже при фрагментированной доставке от ОС.
+- **readPrefixedByte hex preview**: Добавлен hex-encoded предпросмотр байтов в отладочном выводе `readPrefixedByte` — упрощает диагностику проблем кадрирования при разработке.
+
+### Реорганизация Python-пакета
+- **Выделение пакета**: Python-бэкенд реорганизован в пакет `meshcorium/` — 16 `.py` файлов вынесены из монолитного корневого каталога.
+- **Вынос login.html**: Шаблон `login.html` выделен из `meshcorium_web.py` в отдельный файл — чистое разделение Python-логики и HTML-шаблонов.
+
+### Совместимость с нодами
+- **Исправление лимита контактов T114**: Скорректирован расчёт `max_contacts_div_2` для нод T114 — ёмкость контактов увеличена до 350, что соответствует реальному аппаратному лимиту.
+
+### GitHub и обслуживание
+- **Чистка issues**: Закрыто 29 GitHub issues (19 устаревших/неактуальных + 10 выполненных в этом цикле) — осталось 20 активных.
+- **Ссылки в Settings → About**: Добавлены прямые ссылки на GitHub-репозиторий на страницу Settings → About.
+- **Обновление скилов**: Обновлены скилы `meshcorium` и `meshcorium-golang` под новую архитектуру Go-транспорта и структуру пакетов.
+
+---
+
 ## v0.8.2 — Auto-Update Fix (2026-06-18)
 
 ### Service & Deployment
