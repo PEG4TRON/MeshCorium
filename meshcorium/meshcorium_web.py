@@ -8362,6 +8362,73 @@ def list_channel_messages(
     return [dict(row) for row in rows]
 
 
+def search_messages(
+    conversation_kind: str,
+    query: str,
+    limit: int = 50,
+    offset: int = 0,
+    viewport_center_id = None,
+    sender_display_name: str = None,
+    sender_pubkey_prefix: str = None,
+    *,
+    channel_idx: int = 0,
+    channel_identity: str = "",
+    public_key: str = "",
+):
+    safe_limit = max(1, min(int(limit), 500))
+    safe_offset = max(0, int(offset))
+    normalized_kind = str(conversation_kind or "").strip().lower()
+    if normalized_kind not in ("channel", "contact"):
+        raise ValueError("conversation_kind must be channel or contact")
+    if not query and not sender_display_name:
+        raise ValueError("query or sender_display_name is required")
+    search_term = f"%{query}%" if query else None
+    with DB_LOCK, sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        if normalized_kind == "channel":
+            identity = str(channel_identity or "").strip()
+            if identity:
+                where_sql = "message_kind = 'channel' AND channel_identity = ?"
+                where_params = (identity,)
+            else:
+                where_sql = "message_kind = 'channel' AND channel_idx = ?"
+                where_params = (int(channel_idx),)
+            if search_term:
+                where_sql += " AND lower(text) LIKE lower(?)"
+                where_params = where_params + (search_term,)
+            if sender_display_name:
+                where_sql += " AND lower(text) LIKE lower(?)"
+                where_params = where_params + (sender_display_name + '%:%',)
+            table_name = "messages"
+            id_col = "id"
+        else:
+            prefix = str(public_key).lower()[:12]
+            where_sql = "pubkey_prefix = ?"
+            where_params = (prefix,)
+            if search_term:
+                where_sql += " AND lower(text) LIKE lower(?)"
+                where_params = where_params + (search_term,)
+            if sender_display_name:
+                sender_prefix = str(sender_pubkey_prefix or "").lower()[:12]
+                where_sql += " AND pubkey_prefix = ?"
+                where_params = where_params + (sender_prefix,)
+            table_name = "contact_messages"
+            id_col = "id"
+        total = _count_rows(conn, table_name, where_sql, where_params)
+        if viewport_center_id is not None:
+            order = f"ORDER BY ABS({id_col} - ?) ASC"
+            order_params = (int(viewport_center_id),)
+        else:
+            order = f"ORDER BY {id_col} DESC"
+            order_params = ()
+        cursor = conn.execute(
+            f"SELECT * FROM {table_name} WHERE {where_sql} {order} LIMIT ? OFFSET ?",
+            where_params + order_params + (safe_limit, safe_offset),
+        )
+        rows = cursor.fetchall()
+    return [dict(row) for row in rows], total
+
+
 def get_channel_message_count(channel_idx: int, *, owner_id: str | None = None, access_all: bool | None = None) -> int:
     owner_where, owner_params = _message_owner_clause(owner_id, access_all)
     channel_identity = _get_scoped_channel_identity()
@@ -11864,6 +11931,46 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                     "messages": list_channel_messages(channel_idx, limit, anchor_message_id=anchor_message_id, before_message_id=before_message_id, after_message_id=after_message_id, latest=latest),
                     "total_count": get_channel_message_count(channel_idx),
                     "sent_history": get_channel_unique_outgoing_texts(channel_idx, 20),
+                })
+            return
+        if parsed.path == "/api/messages/search":
+            params = parse_qs(parsed.query)
+            conversation_kind = params.get("conversation_kind", [""])[0]
+            if conversation_kind not in ("channel", "contact"):
+                self._send_json({"error": "conversation_kind must be channel or contact"}, status=HTTPStatus.BAD_REQUEST)
+                return
+            query = params.get("query", [""])[0] or ""
+            sender_display_name = params.get("sender_display_name", [""])[0] or None
+            sender_pubkey_prefix = params.get("sender_pubkey_prefix", [""])[0] or None
+            if not query and not sender_display_name:
+                self._send_json({"error": "query or sender_display_name is required"}, status=HTTPStatus.BAD_REQUEST)
+                return
+            limit = int(params.get("limit", ["50"])[0])
+            offset = int(params.get("offset", ["0"])[0])
+            port = params.get("port", [""])[0]
+            channel_idx = int(params.get("channel_idx", ["0"])[0])
+            channel_identity = str(params.get("channel_identity", [""])[0] or "").strip()
+            public_key = params.get("public_key", [""])[0]
+            raw_center = params.get("viewport_center_id", [""])[0]
+            viewport_center_id = None if raw_center in ("", None) else int(raw_center)
+            with _messages_owner_scope(port=port, channel_identity=channel_identity):
+                results, total = search_messages(
+                    conversation_kind=conversation_kind,
+                    query=query,
+                    limit=limit,
+                    offset=offset,
+                    viewport_center_id=viewport_center_id,
+                    sender_display_name=sender_display_name,
+                    sender_pubkey_prefix=sender_pubkey_prefix,
+                    channel_idx=channel_idx,
+                    channel_identity=channel_identity,
+                    public_key=public_key,
+                )
+                self._send_json({
+                    "results": results,
+                    "total_count": total,
+                    "query": query,
+                    "viewport_center_id": viewport_center_id,
                 })
             return
         if parsed.path == "/api/messages/conversations":

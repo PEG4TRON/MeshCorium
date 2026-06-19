@@ -810,6 +810,7 @@ export default {
       unmuteAll: 'Unmute messages and mentions',
       muteIndicatorRegular: 'All messages muted, mentions still visible',
       muteIndicatorAll: 'All messages and mentions muted',
+      search: 'Search messages',
     },
     status: {
       cleared: 'Local message history cleared.',

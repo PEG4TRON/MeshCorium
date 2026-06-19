@@ -810,6 +810,7 @@ export default {
       unmuteAll: 'Снять mute всех сообщений и упоминаний',
       muteIndicatorRegular: 'Mute всех сообщений, упоминания оставлены',
       muteIndicatorAll: 'Mute всех сообщений и упоминаний',
+      search: 'Поиск сообщений',
     },
     status: {
       cleared: 'Локальная история сообщений очищена.',

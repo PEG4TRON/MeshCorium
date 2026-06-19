@@ -47,6 +47,18 @@ defineProps({
     type: Function,
     required: true,
   },
+  searchHighlight: {
+    type: Boolean,
+    default: false,
+  },
+  searchQuery: {
+    type: String,
+    default: '',
+  },
+  searchHighlightedMessageId: {
+    type: [Number, String],
+    default: null,
+  },
 })
 
 const emit = defineEmits(['scroll', 'scroll-to-bottom', 'message-context-menu', 'open-contact'])
@@ -67,6 +79,8 @@ const { t } = useI18n()
           :rendered-message="renderedMessage"
           :gif-cdn-url="gifCdnUrl"
           :bind-message-card-element="bindMessageCardElement"
+          :search-highlighted-message-id="searchHighlightedMessageId"
+          :search-query="searchQuery"
           @open-context-menu="emit('message-context-menu', $event)"
           @open-contact="emit('open-contact', $event)"
         />

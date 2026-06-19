@@ -1,4 +1,5 @@
 <script setup>
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useIsMobile } from '../../composables/useIsMobile'
 
@@ -17,11 +18,29 @@ const props = defineProps({
     type: Function,
     required: true,
   },
+  searchHighlightedMessageId: { type: [Number, String], default: null },
+  searchQuery: { type: String, default: '' },
 })
 
 const emit = defineEmits(['open-context-menu', 'open-contact'])
 
 const { t } = useI18n()
+
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+const highlightedTextHtml = computed(() => {
+  if (!props.searchQuery) return props.renderedMessage.textHtml
+  const escaped = escapeRegex(props.searchQuery)
+  const regex = new RegExp(`(${escaped})`, 'gi')
+  return (props.renderedMessage.textHtml || '').replace(regex, '<mark class="mc-search-match-highlight">$1</mark>')
+})
+const highlightedTextPlain = computed(() => {
+  if (!props.searchQuery) return props.renderedMessage.text
+  const escaped = escapeRegex(props.searchQuery)
+  const regex = new RegExp(`(${escaped})`, 'gi')
+  return (props.renderedMessage.text || '').replace(regex, '<mark class="mc-search-match-highlight">$1</mark>')
+})
 
 function setCardElement(element) {
   props.bindMessageCardElement(props.renderedMessage.messageId, props.renderedMessage.key, element)
@@ -47,6 +66,7 @@ function openMessageContact(contact) {
 <template>
   <div
     class="mc-message-card-frame"
+    :data-message-id="renderedMessage.messageId"
     :class="{
       'is-own': renderedMessage.source?.from_self,
       'has-notification-highlight': Boolean(renderedMessage.highlightTone),
@@ -64,6 +84,11 @@ function openMessageContact(contact) {
         'is-direct': renderedMessage.highlightTone === 'direct',
         'is-mention': renderedMessage.highlightTone === 'mention',
       }"
+      aria-hidden="true"
+    ></span>
+    <span
+      v-if="renderedMessage.isSearchHighlighted"
+      class="mc-message-highlight-ring is-search"
       aria-hidden="true"
     ></span>
     <article
@@ -125,8 +150,8 @@ function openMessageContact(contact) {
           loading="lazy"
         />
       </div>
-      <div v-else-if="renderedMessage.textHasLinks" class="mc-message-text" v-html="renderedMessage.textHtml"></div>
-      <div v-else class="mc-message-text">{{ renderedMessage.text }}</div>
+      <div v-else-if="renderedMessage.textHasLinks" class="mc-message-text" v-html="highlightedTextHtml"></div>
+      <div v-else class="mc-message-text"><span v-html="highlightedTextPlain"></span></div>
       <footer class="mc-message-meta">
         <div class="mc-message-meta-row">
           <div class="mc-message-meta-group mc-message-meta-group--primary">

@@ -1,5 +1,39 @@
 # Changelog
 
+## Dev / Unreleased (2026-06-19)
+
+### Message Search in Dialogs (desktop) — GitHub issues #112-118
+
+- **Backend (#112)**: New `GET /api/messages/search` endpoint — full-text search (`lower(text) LIKE`) with optional `@sender` filter (`text LIKE 'partialname%:%'`). Sorting by proximity to viewport center: `ORDER BY ABS(id - viewport_center_id) ASC`. Supports both channel and contact conversations. Files: `meshcorium_web.py` (+88 lines).
+- **Frontend — search panel (#113)**: New `MessagesSearchPanel.vue` — draggable float panel with Pointer Events grip (left edge), text input, ↑↓ navigation, ✕ close. Files: `MessagesSearchPanel.vue` (new, 105 lines).
+- **Frontend — menu entry (#114)**: «Search» item in ⋮ menu (MessagesWorkspaceHeader.vue) + i18n in all 4 locale files. Files: `MessagesWorkspaceHeader.vue`, `en.js`, `ru.js`.
+- **Frontend — search logic (#115)**: `performSearch()` with `@name` parsing + API call, `loadSearchContext(messageId)` — REPLACE messages via `anchor_message_id` (25 before + 25 after), ↑↓ navigation, `closeSearchPanel()` without auto-restore. Files: `MessagesView.vue` (+150 lines).
+- **Frontend — search highlight (#116)**: Green ring via ring-span pattern (`.mc-message-highlight-ring.is-search`) + yellow text highlight via `<mark class="mc-search-match-highlight">`. `searchHighlightedMessageId` (Number|null) propagated through 3-component chain: MessagesView → MessagesChatHistoryPane → MessagesMessageBubble. Added `isSearchHighlighted` to `v-memo` array for render invalidation. Files: `MessagesMessageBubble.vue`, `MessagesChatHistoryPane.vue`.
+- **CSS (#117)**: `.mc-search-panel`, `.mc-search-grip`, `.mc-search-input`, `.mc-search-nav-btn`, `.has-search-highlight`, `.mc-search-match-highlight` — search panel and highlight styles. `.is-search` overrides base `.mc-message-highlight-ring` opacity and animation for persistent display. Files: `styles.css` (+109 lines).
+
+### Power Icon for Node Disconnect
+
+- Replaced `disconnect-icon.svg` (plug icon) with Feather Icons power.svg — `<line>` for vertical bar + `<path>` with `a9 9 0 1 1` for circle arc, solid `#12B8F4` color. 15+ iterations confirmed: hand-crafted SVG arcs are unreliable; pre-built library paths are recommended. Files: `icons/disconnect-icon.svg`, `ConnectedShellLayout.vue` (cache-buster `?v=19`).
+
+**Files changed this session (11):** `meshcorium_web.py`, `MessagesSearchPanel.vue` (new), `MessagesWorkspaceHeader.vue`, `MessagesView.vue`, `MessagesMessageBubble.vue`, `MessagesChatHistoryPane.vue`, `styles.css`, `en.js`, `ru.js`, `disconnect-icon.svg`, `ConnectedShellLayout.vue`.
+
+---
+
+### Поиск сообщений в диалоге (desktop) — GitHub issues #112-118
+
+- **Бэкенд (#112)**: Новый endpoint `GET /api/messages/search` — полнотекстовый поиск (`lower(text) LIKE`) с опциональным фильтром `@отправитель` (`text LIKE 'частичное_имя%:%'`). Сортировка по близости к центру viewport: `ORDER BY ABS(id - viewport_center_id) ASC`. Поддержка каналов и контактов. Файлы: `meshcorium_web.py` (+88 строк).
+- **Фронтенд — панель поиска (#113)**: Новый `MessagesSearchPanel.vue` — перетаскиваемая float-панель с Pointer Events grip (левый край), поле ввода, навигация ↑↓, закрытие ✕. Файлы: `MessagesSearchPanel.vue` (новый, 105 строк).
+- **Фронтенд — пункт меню (#114)**: Пункт «Поиск» в меню ⋮ (MessagesWorkspaceHeader.vue) + i18n во всех 4 файлах локализации. Файлы: `MessagesWorkspaceHeader.vue`, `en.js`, `ru.js`.
+- **Фронтенд — логика поиска (#115)**: `performSearch()` с парсингом `@имя` + API-запрос, `loadSearchContext(messageId)` — REPLACE сообщений через `anchor_message_id` (25 до + 25 после), навигация ↑↓, `closeSearchPanel()` без автовосстановления истории. Файлы: `MessagesView.vue` (+150 строк).
+- **Фронтенд — подсветка (#116)**: Зелёное кольцо через ring-span паттерн (`.mc-message-highlight-ring.is-search`) + жёлтая подсветка текста через `<mark class="mc-search-match-highlight">`. `searchHighlightedMessageId` (Number|null) проброшен через цепочку из 3 компонентов: MessagesView → MessagesChatHistoryPane → MessagesMessageBubble. Поле `isSearchHighlighted` добавлено в массив `v-memo` для инвалидации рендера. Файлы: `MessagesMessageBubble.vue`, `MessagesChatHistoryPane.vue`.
+- **CSS (#117)**: `.mc-search-panel`, `.mc-search-grip`, `.mc-search-input`, `.mc-search-nav-btn`, `.has-search-highlight`, `.mc-search-match-highlight` — стили панели и подсветки. `.is-search` переопределяет opacity и animation базового `.mc-message-highlight-ring` для постоянного отображения. Файлы: `styles.css` (+109 строк).
+
+### Иконка power ⏻ для отключения от ноды
+
+- Замена `disconnect-icon.svg` (иконка штекера) на Feather Icons power.svg — `<line>` для вертикальной черты + `<path>` с `a9 9 0 1 1` для дуги окружности, цвет solid `#12B8F4`. 15+ итераций подтвердили: самописные SVG-дуги ненадёжны; рекомендуется использовать готовые библиотечные path. Файлы: `icons/disconnect-icon.svg`, `ConnectedShellLayout.vue` (cache-buster `?v=19`).
+
+**Файлы, изменённые в сессии (11):** `meshcorium_web.py`, `MessagesSearchPanel.vue` (новый), `MessagesWorkspaceHeader.vue`, `MessagesView.vue`, `MessagesMessageBubble.vue`, `MessagesChatHistoryPane.vue`, `styles.css`, `en.js`, `ru.js`, `disconnect-icon.svg`, `ConnectedShellLayout.vue`.
+
 ## v0.8.3 — Go Serial Transport & Python Reorganization (2026-06-19)
 
 ### Go Serial Transport

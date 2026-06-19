@@ -16,6 +16,7 @@ const emit = defineEmits([
   'open-clear-dialog',
   'toggle-regular-mute',
   'toggle-all-mute',
+  'open-search',
 ])
 </script>
 
@@ -78,6 +79,13 @@ const emit = defineEmits([
               @click="emit('toggle-all-mute')"
             >
               {{ model.allMuteLabel }}
+            </button>
+            <button
+              class="mc-button mc-button--ghost mc-chat-actions-button"
+              type="button"
+              @click="emit('open-search')"
+            >
+              {{ model.chatMenuSearchLabel }}
             </button>
           </div>
         </template>

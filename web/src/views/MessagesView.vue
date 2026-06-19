@@ -10,6 +10,7 @@ import { useMessagesReadTracking } from '../composables/useMessagesReadTracking'
 import { useMessagesVirtualChat } from '../composables/useMessagesVirtualChat'
 import { useUpdateCheck } from '../composables/useUpdateCheck'
 import MessagesChatHistoryPane from '../components/messages/MessagesChatHistoryPane.vue'
+import MessagesSearchPanel from '../components/MessagesSearchPanel.vue'
 import MessagesComposerBar from '../components/messages/MessagesComposerBar.vue'
 import MessagesConfirmSheet from '../components/messages/MessagesConfirmSheet.vue'
 import MessagesConversationSidebar from '../components/messages/MessagesConversationSidebar.vue'
@@ -93,6 +94,14 @@ const selectedConversationKind = ref('channel')
 const selectedChannelIdx = ref(null)
 const selectedChannelIdentity = ref('')
 const selectedContactKey = ref('')
+const searchPanelVisible = ref(false)
+const searchQuery = ref('')
+const searchResults = ref([])
+const searchCurrentIndex = ref(0)
+const searchTotalCount = ref(0)
+const searchViewportCenterId = ref(null)
+const searchLoading = ref(false)
+const searchHighlightedMessageId = ref(null)
 const messages = ref([])
 const messageConversationDirectory = ref({
   channels: [],
@@ -1619,6 +1628,7 @@ const workspaceHeaderModel = computed(() => {
     regularMuteLabel: t(muteMode === 'regular' ? 'messages.chatMenu.unmuteRegular' : 'messages.chatMenu.muteRegular'),
     allMuteActive: muteMode === 'all',
     allMuteLabel: t(muteMode === 'all' ? 'messages.chatMenu.unmuteAll' : 'messages.chatMenu.muteAll'),
+    chatMenuSearchLabel: t('messages.chatMenu.search'),
   }
 })
 
@@ -1628,6 +1638,14 @@ const workspaceEmptyModel = computed(() => {
     subtitle: session.connected ? t('messages.workspace.selectChannelSubtitle') : t('messages.empty.connectToSeeChannels'),
   }
 })
+
+const searchPanelModel = computed(() => ({
+  visible: searchPanelVisible.value,
+  currentIndex: searchCurrentIndex.value,
+  totalResults: searchTotalCount.value,
+  hasPrev: searchCurrentIndex.value > 0,
+  hasNext: searchCurrentIndex.value < Math.max(0, searchTotalCount.value - 1),
+}))
 
 function releaseResolvedChatWallpaperUrl() {
   if (typeof releaseChatWallpaperUrl === 'function') {
@@ -2330,6 +2348,15 @@ function findContactByDisplayName(displayName) {
   return session.contacts.find((contact) => contactDisplayName(contact).trim().toLowerCase() === normalized) || null
 }
 
+function findContactsByDisplayNamePartial(partial) {
+  const normalized = String(partial || '').trim().toLowerCase()
+  if (!normalized) return []
+  return session.contacts.filter((contact) => {
+    const name = contactDisplayName(contact).trim().toLowerCase()
+    return name.includes(normalized)
+  })
+}
+
 function findContactByPublicKeyOrPrefix(value) {
   const normalized = normalizePublicKey(value)
   if (!normalized) {
@@ -2623,6 +2650,7 @@ function buildRenderedMessage(message, isLastVisible = false) {
   const highlightTone = messageId > 0 && messageId === Number(notificationHighlightState.value.messageId || 0)
     ? String(notificationHighlightState.value.tone || '').trim().toLowerCase()
     : ''
+  const isSearchHighlighted = messageId > 0 && messageId === Number(searchHighlightedMessageId.value || 0)
   const author = authorContact ? contactDisplayName(authorContact) : structuredMessage.author
   const replyTarget = replyTargetContact ? contactDisplayName(replyTargetContact) : structuredMessage.replyTarget
   return {
@@ -2647,6 +2675,7 @@ function buildRenderedMessage(message, isLastVisible = false) {
     routeMeta,
     deliveryText,
     highlightTone,
+    isSearchHighlighted,
     bottomGap: isLastVisible ? 0 : MESSAGE_VIRTUAL_GAP,
     memo: [
       key,
@@ -2670,6 +2699,7 @@ function buildRenderedMessage(message, isLastVisible = false) {
       routeMeta || '',
       deliveryText,
       highlightTone,
+      isSearchHighlighted,
       isLastVisible,
     ],
   }
@@ -3801,6 +3831,135 @@ function goBackFromChat() {
   selectedChannelIdentity.value = ''
   selectedContactKey.value = ''
   workspaceMode.value = 'empty'
+}
+
+async function performSearch(query) {
+  if (!query || !query.trim()) return
+  const rawQuery = query.trim()
+  searchQuery.value = rawQuery
+  searchLoading.value = true
+  try {
+    let senderDisplayName = ''
+    let senderPubkeyPrefix = ''
+    let textQuery = rawQuery
+    const atMatch = rawQuery.match(/@(\S+)/)
+    if (atMatch) {
+      const partialName = atMatch[1]
+      const contacts = findContactsByDisplayNamePartial(partialName)
+      senderDisplayName = partialName
+      if (contacts.length > 0 && contacts[0]?.public_key) {
+        senderPubkeyPrefix = String(contacts[0].public_key).toLowerCase().substring(0, 12)
+      }
+      textQuery = rawQuery.replace(/@\S+/, '').trim()
+    }
+    if (!textQuery && !senderDisplayName) return
+    const params = new URLSearchParams({ limit: '50', offset: '0' })
+    if (textQuery) params.set('query', textQuery)
+    if (selectedConversationKind.value === 'channel') {
+      params.set('conversation_kind', 'channel')
+      params.set('channel_idx', String(selectedChannelIdx.value ?? 0))
+      if (selectedChannelIdentity.value) params.set('channel_identity', String(selectedChannelIdentity.value))
+      if (getOwnerPort()) params.set('port', getOwnerPort())
+    } else if (selectedConversationKind.value === 'contact') {
+      params.set('conversation_kind', 'contact')
+      params.set('public_key', String(selectedContactKey.value))
+      if (getOwnerPort()) params.set('port', getOwnerPort())
+    } else { return }
+    if (searchViewportCenterId.value != null) params.set('viewport_center_id', String(searchViewportCenterId.value))
+    if (senderDisplayName) {
+      params.set('sender_display_name', senderDisplayName)
+      if (senderPubkeyPrefix) params.set('sender_pubkey_prefix', senderPubkeyPrefix)
+    }
+    const data = await session.api(`/api/messages/search?${params.toString()}`)
+    if (!data || !Array.isArray(data.results) || data.results.length === 0) {
+      searchResults.value = []
+      searchCurrentIndex.value = 0
+      searchTotalCount.value = 0
+      return
+    }
+    searchResults.value = data.results
+    searchTotalCount.value = data.total_count || data.results.length
+    searchCurrentIndex.value = 0
+    await loadSearchContext(searchResults.value[0].id)
+  } finally { searchLoading.value = false }
+}
+
+async function loadSearchContext(messageId) {
+  if (!messageId) return
+  const targetConversationKey = currentConversationKey.value
+  try {
+    let data = null
+    if (selectedConversationKind.value === 'channel' && (selectedChannelIdx.value != null || selectedChannelIdentity.value)) {
+      const params = new URLSearchParams({
+        channel_idx: String(selectedChannelIdx.value ?? 0),
+        anchor_message_id: String(messageId), limit: '51', context_before: '25',
+      })
+      if (selectedChannelIdentity.value) params.set('channel_identity', String(selectedChannelIdentity.value))
+      if (getOwnerPort()) params.set('port', getOwnerPort())
+      data = await session.api(`/api/messages/channel?${params.toString()}`)
+    } else if (selectedConversationKind.value === 'contact' && selectedContactKey.value) {
+      const params = new URLSearchParams({
+        public_key: String(selectedContactKey.value),
+        anchor_message_id: String(messageId), limit: '51', context_before: '25',
+      })
+      if (getOwnerPort()) params.set('port', getOwnerPort())
+      data = await session.api(`/api/messages/contact?${params.toString()}`)
+    }
+    if (!data || currentConversationKey.value !== targetConversationKey) return
+    messages.value = sanitizeMessageList(data?.messages)
+    activeConversationTotalMessages.value = Number(data?.total_count || 0)
+    await nextTick()
+    await scrollMessageIntoView(messageId, 'center')
+    applySearchMessageHighlight(messageId)
+  } catch (_) {}
+}
+
+function applySearchMessageHighlight(messageId) {
+  searchHighlightedMessageId.value = messageId
+}
+function clearSearchMessageHighlight() {
+  searchHighlightedMessageId.value = null
+}
+
+function navigateSearchPrev() {
+  if (searchResults.value.length === 0) return
+  if (searchCurrentIndex.value > 0) {
+    searchCurrentIndex.value--
+    loadSearchContext(searchResults.value[searchCurrentIndex.value].id)
+  }
+}
+function navigateSearchNext() {
+  if (searchResults.value.length === 0) return
+  if (searchCurrentIndex.value < searchResults.value.length - 1) {
+    searchCurrentIndex.value++
+    loadSearchContext(searchResults.value[searchCurrentIndex.value].id)
+  }
+}
+
+function closeSearchPanel() {
+  searchPanelVisible.value = false
+  searchQuery.value = ''
+  searchResults.value = []
+  searchCurrentIndex.value = 0
+  clearSearchMessageHighlight()
+}
+
+function openSearchPanel() {
+  const list = visibleConversationListWindow.value
+  if (list && list.length > 0) {
+    const centerIdx = Math.floor(list.length / 2)
+    searchViewportCenterId.value = list[centerIdx]?.id ?? null
+  } else if (messages.value.length > 0) {
+    const centerIdx = Math.floor(messages.value.length / 2)
+    searchViewportCenterId.value = messages.value[centerIdx]?.id ?? null
+  } else {
+    searchViewportCenterId.value = null
+  }
+  searchPanelVisible.value = true
+  searchQuery.value = ''
+  searchResults.value = []
+  searchCurrentIndex.value = 0
+  searchTotalCount.value = 0
 }
 
 async function selectChannel(channelOrIdx, options = {}) {
@@ -5531,6 +5690,7 @@ onBeforeUnmount(() => {
           @open-clear-dialog="openClearMessagesDialogFromMenu"
           @toggle-regular-mute="toggleCurrentConversationMuteMode('regular')"
           @toggle-all-mute="toggleCurrentConversationMuteMode('all')"
+          @open-search="openSearchPanel"
         />
       </div>
     </div>
@@ -5562,6 +5722,8 @@ onBeforeUnmount(() => {
           :gif-cdn-url="gifCdnUrl"
           :bind-scroller-ref="setMessageScroller"
           :bind-message-card-element="bindMessageCardElement"
+          :search-highlighted-message-id="searchHighlightedMessageId"
+          :search-query="searchQuery"
           @scroll="handleMessageScroll"
           @scroll-to-bottom="scrollToNewestMessage"
           @message-context-menu="openMessageContextMenu"
@@ -5572,7 +5734,7 @@ onBeforeUnmount(() => {
           :model="composerModel"
           :emoji-picker-open="emojiPickerOpen"
           :draft-text="draftText"
-          :gif-cdn-url="gifCdnUrl"
+
           :bind-textarea-ref="setComposerTextarea"
           :on-textarea-keydown="handleComposerTextareaKeydown"
           @open-gif-picker="openGifPicker"
@@ -5654,6 +5816,7 @@ onBeforeUnmount(() => {
           @open-clear-dialog="openClearMessagesDialogFromMenu"
           @toggle-regular-mute="toggleCurrentConversationMuteMode('regular')"
           @toggle-all-mute="toggleCurrentConversationMuteMode('all')"
+          @open-search="openSearchPanel"
         />
       </template>
 
@@ -5687,18 +5850,19 @@ onBeforeUnmount(() => {
             :gif-cdn-url="gifCdnUrl"
             :bind-scroller-ref="setMessageScroller"
             :bind-message-card-element="bindMessageCardElement"
+            :search-highlighted-message-id="searchHighlightedMessageId"
+            :search-query="searchQuery"
             @scroll="handleMessageScroll"
             @scroll-to-bottom="scrollToNewestMessage"
             @message-context-menu="openMessageContextMenu"
             @open-contact="openContactFromMessage"
-          />
-
-          <MessagesComposerBar
+            />
+            <MessagesComposerBar
             v-if="workspaceMode === 'chat'"
             :model="composerModel"
             :emoji-picker-open="emojiPickerOpen"
             :draft-text="draftText"
-            :gif-cdn-url="gifCdnUrl"
+
             :bind-textarea-ref="setComposerTextarea"
             :on-textarea-keydown="handleComposerTextareaKeydown"
             @open-gif-picker="openGifPicker"
@@ -5745,4 +5909,13 @@ onBeforeUnmount(() => {
       @copy="copyMessageFromContextMenu"
     />
   </div>
+
+    <MessagesSearchPanel
+      v-if="!isMobile"
+      :model="searchPanelModel"
+      @search="performSearch"
+      @prev="navigateSearchPrev"
+      @next="navigateSearchNext"
+      @close="closeSearchPanel"
+    />
 </template>

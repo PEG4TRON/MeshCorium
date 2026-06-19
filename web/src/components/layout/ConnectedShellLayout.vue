@@ -33,7 +33,7 @@ const advertIconUrl = '/icons/mesh_broadcast_icon.svg'
 const contactsIconUrl = '/icons/contacts-icon.svg'
 const mapIconUrl = '/icons/map-icon.svg'
 const settingsIconUrl = '/icons/settings-icon.svg'
-const disconnectIconUrl = '/icons/disconnect-icon.svg'
+const disconnectIconUrl = '/icons/disconnect-icon.svg?v=19'
 const consoleIconUrl = '/icons/console-icon.svg'
 const bootstrapped = ref(false)
 const refreshing = ref(false)
