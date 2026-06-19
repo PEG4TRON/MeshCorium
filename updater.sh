@@ -86,6 +86,18 @@ for item in "${extract_dir}"/*; do
     cp -a "${item}" "${SCRIPT_DIR}/${name}"
 done
 
+# 5b. Cleanup orphaned flat .py files from pre-package versions (≤0.8.2 → 0.9+)
+echo "removing legacy flat .py files if present..."
+for old_py in meshcorium_web.py meshcorium_client.py meshcorium_transport.py \
+    meshcorium_ble_transport.py meshcorium_wifi_transport.py \
+    meshcorium_serial_transport.py meshcorium_serial_legacy.py \
+    meshcorium_data_transfer.py mobile_push.py \
+    contact_backend.py contact_service.py contact_admin.py \
+    contact_groups.py contact_store.py \
+    known_nodes.py download_meshcore_node_svgs.py; do
+    rm -f "${SCRIPT_DIR:?}/${old_py}"
+done
+
 # 6. Restore data/logs/other backup
 echo "restoring data..."
 if [[ -d "${BACKUP_DIR}/data" ]]; then
@@ -108,13 +120,13 @@ fi
 # keys on the next settings save through the web UI.
 _merge_client_settings() {
     local old_json="${DATA_DIR}/client_settings.json"
-    local web_py="${SCRIPT_DIR}/meshcorium_web.py"
+    local web_py="${SCRIPT_DIR}/meshcorium/meshcorium_web.py"
     if [[ ! -f "${old_json}" ]] || [[ ! -f "${web_py}" ]]; then
         return 0
     fi
     python3 -c "
 import json, sys
-sys.path.insert(0, '${SCRIPT_DIR}')
+sys.path.insert(0, '${SCRIPT_DIR}/meshcorium')
 old = {}
 with open('${old_json}') as f: old = json.load(f)
 try:

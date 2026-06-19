@@ -23,7 +23,7 @@ if [ ! -f "${CONFIG_PATH}" ]; then
     fi
 fi
 
-exec "${APP_ROOT}/.venv/bin/python3" "${APP_ROOT}/meshcorium_web.py" \
+exec "${APP_ROOT}/.venv/bin/python3" "${APP_ROOT}/meshcorium/meshcorium_web.py" \
     --host "${MESHCORIUM_HOST:-0.0.0.0}" \
     --port "${MESHCORIUM_PORT:-8080}" \
     "$@"

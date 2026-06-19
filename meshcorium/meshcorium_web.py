@@ -91,7 +91,7 @@ def _path_from_env(name: str, default: Path) -> Path:
     return Path(raw_value).expanduser()
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = _path_from_env("MESHCORIUM_DATA_DIR", PROJECT_ROOT / "data")
 CONFIG_DIR = _path_from_env("MESHCORIUM_CONFIG_DIR", DATA_DIR)
 LOG_DIR = _path_from_env("MESHCORIUM_LOG_DIR", PROJECT_ROOT / "logs")
@@ -1905,7 +1905,11 @@ def _normalize_login_next_path(next_path: str = "/") -> str:
     return next_value
 
 
+_LOGIN_TEMPLATE: str | None = None
+
+
 def _build_login_html(next_path: str = "/", error_message: str = "", username: str = "") -> str:
+    global _LOGIN_TEMPLATE
     next_value = _normalize_login_next_path(next_path)
     error_block = ""
     if error_message:
@@ -1915,231 +1919,11 @@ def _build_login_html(next_path: str = "/", error_message: str = "", username: s
         error_block = '<div id="login-error" class="login-error collapsed"></div>'
     safe_username = json.dumps(str(username or ""))
     safe_next = json.dumps(next_value)
-    return f"""<!doctype html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Meshcorium Login</title>
-  <style>
-    :root {{
-      color-scheme: dark;
-      --login-bg: #2d2a37;
-      --login-panel: #433f51;
-      --login-panel-edge: rgba(255,255,255,0.08);
-      --login-input: #26232f;
-      --login-input-edge: rgba(255,255,255,0.12);
-      --login-accent: #1fc4ee;
-      --login-accent-hover: #39cff5;
-      --login-text: #f2f4fb;
-      --login-muted: rgba(242,244,251,0.78);
-      --login-error-bg: rgba(214, 71, 71, 0.15);
-      --login-error-edge: rgba(214, 71, 71, 0.45);
-      --login-cancel: rgba(255,255,255,0.12);
-    }}
-    * {{ box-sizing: border-box; }}
-    body {{
-      margin: 0;
-      min-height: 100vh;
-      display: grid;
-      place-items: center;
-      font-family: "Segoe UI", system-ui, sans-serif;
-      background:
-        radial-gradient(circle at top left, rgba(31,196,238,0.12), transparent 32%),
-        linear-gradient(180deg, #24212c 0%, #312d3a 100%);
-      color: var(--login-text);
-      padding: 20px;
-    }}
-    .login-shell {{
-      width: min(100%, 360px);
-      background: var(--login-panel);
-      border: 1px solid var(--login-panel-edge);
-      border-radius: 16px;
-      padding: 18px 16px 16px;
-      box-shadow: 0 28px 80px rgba(0,0,0,0.34);
-    }}
-    .login-host {{
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      color: var(--login-text);
-      font-size: 15px;
-      margin-bottom: 18px;
-    }}
-    .login-host-dot {{
-      width: 14px;
-      height: 14px;
-      border: 1.5px solid rgba(255,255,255,0.82);
-      border-radius: 50%;
-      position: relative;
-    }}
-    .login-host-dot::before,
-    .login-host-dot::after {{
-      content: "";
-      position: absolute;
-      inset: 2px;
-      border-radius: 50%;
-      border-top: 1px solid rgba(255,255,255,0.72);
-      border-bottom: 1px solid rgba(255,255,255,0.72);
-    }}
-    .login-copy {{
-      margin: 0 0 14px;
-      color: var(--login-muted);
-      font-size: 15px;
-      line-height: 1.45;
-    }}
-    .login-form {{
-      display: grid;
-      gap: 14px;
-    }}
-    .login-field {{
-      display: grid;
-      gap: 8px;
-    }}
-    .login-label {{
-      color: var(--login-text);
-      font-size: 14px;
-    }}
-    .login-input-wrap {{
-      position: relative;
-    }}
-    .login-input {{
-      width: 100%;
-      height: 46px;
-      border-radius: 10px;
-      border: 1px solid var(--login-input-edge);
-      background: var(--login-input);
-      color: var(--login-text);
-      padding: 0 14px;
-      font-size: 16px;
-      outline: none;
-      transition: border-color .18s ease, box-shadow .18s ease;
-    }}
-    .login-input:focus {{
-      border-color: var(--login-accent);
-      box-shadow: 0 0 0 3px rgba(31,196,238,0.16);
-    }}
-    .login-password-toggle {{
-      position: absolute;
-      right: 10px;
-      top: 50%;
-      transform: translateY(-50%);
-      border: 0;
-      background: transparent;
-      color: rgba(255,255,255,0.8);
-      cursor: pointer;
-      font-size: 17px;
-      padding: 4px 6px;
-    }}
-    .login-password-toggle:hover {{ color: #fff; }}
-    .login-actions {{
-      display: flex;
-      justify-content: flex-end;
-      gap: 10px;
-      margin-top: 2px;
-    }}
-    .login-button {{
-      min-width: 92px;
-      height: 42px;
-      border-radius: 10px;
-      border: 0;
-      font-size: 15px;
-      font-weight: 600;
-      cursor: pointer;
-    }}
-    .login-button-primary {{
-      background: var(--login-accent);
-      color: #072531;
-    }}
-    .login-button-primary:hover {{ background: var(--login-accent-hover); }}
-    .login-button-secondary {{
-      background: var(--login-cancel);
-      color: var(--login-text);
-    }}
-    .login-error {{
-      border-radius: 10px;
-      border: 1px solid var(--login-error-edge);
-      background: var(--login-error-bg);
-      color: #ffd9d9;
-      padding: 10px 12px;
-      font-size: 14px;
-      line-height: 1.4;
-    }}
-    .collapsed {{ display: none !important; }}
-  </style>
-</head>
-<body>
-  <main class="login-shell">
-    <div class="login-host">
-      <span class="login-host-dot" aria-hidden="true"></span>
-      <span id="login-hostname"></span>
-    </div>
-    <p class="login-copy">Этот сайт просит вас войти.</p>
-    {error_block}
-    <form id="login-form" class="login-form">
-      <div class="login-field">
-        <label class="login-label" for="login-username">Имя пользователя</label>
-        <div class="login-input-wrap">
-          <input id="login-username" class="login-input" type="text" autocomplete="username" spellcheck="false">
-        </div>
-      </div>
-      <div class="login-field">
-        <label class="login-label" for="login-password">Пароль</label>
-        <div class="login-input-wrap">
-          <input id="login-password" class="login-input" type="password" autocomplete="current-password">
-          <button id="login-password-toggle" class="login-password-toggle" type="button" aria-label="Показать пароль">◉</button>
-        </div>
-      </div>
-      <div class="login-actions">
-        <button class="login-button login-button-primary" type="submit">Войти</button>
-        <button id="login-cancel" class="login-button login-button-secondary" type="button">Отмена</button>
-      </div>
-    </form>
-  </main>
-  <script>
-    const nextPath = {safe_next};
-    const initialUsername = {safe_username};
-    const hostNode = document.getElementById('login-hostname');
-    const userNode = document.getElementById('login-username');
-    const passwordNode = document.getElementById('login-password');
-    const errorNode = document.getElementById('login-error');
-    const toggleNode = document.getElementById('login-password-toggle');
-    hostNode.textContent = window.location.host || 'Meshcorium';
-    userNode.value = initialUsername;
-    document.getElementById('login-cancel').addEventListener('click', () => {{
-      window.location.href = 'about:blank';
-    }});
-    toggleNode.addEventListener('click', () => {{
-      const nextType = passwordNode.type === 'password' ? 'text' : 'password';
-      passwordNode.type = nextType;
-      toggleNode.setAttribute('aria-label', nextType === 'password' ? 'Показать пароль' : 'Скрыть пароль');
-    }});
-    document.getElementById('login-form').addEventListener('submit', async (event) => {{
-      event.preventDefault();
-      errorNode.classList.add('collapsed');
-      errorNode.textContent = '';
-      try {{
-        const response = await fetch('/api/auth/login', {{
-          method: 'POST',
-          headers: {{ 'Content-Type': 'application/json' }},
-          body: JSON.stringify({{
-            username: userNode.value,
-            password: passwordNode.value,
-          }}),
-        }});
-        const data = await response.json();
-        if (!response.ok) {{
-          throw new Error(data.error || `HTTP ${{response.status}}`);
-        }}
-        window.location.href = nextPath || '/';
-      }} catch (error) {{
-        errorNode.textContent = error.message || 'Не удалось войти.';
-        errorNode.classList.remove('collapsed');
-      }}
-    }});
-  </script>
-</body>
-</html>"""
+    if _LOGIN_TEMPLATE is None:
+        template_path = PROJECT_ROOT / "web" / "login.html"
+        with open(template_path, "r", encoding="utf-8") as f:
+            _LOGIN_TEMPLATE = f.read()
+    return _LOGIN_TEMPLATE.format(error_block=error_block, safe_next=safe_next, safe_username=safe_username)
 
 
 def _build_contact_debug_payload(port: str | None = None, public_key: str | None = None) -> dict:
@@ -6806,7 +6590,7 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                     "app-start",
                     port=port,
                     baudrate=baudrate,
-                    max_contacts=int(getattr(device, "max_contacts", 0) or 0),
+                    max_contacts=int((getattr(device, "max_contacts_div_2", 0) or 0) * 2),
                     max_channels=int(getattr(device, "max_channels", 0) or 0),
                 )
                 self_info = client.app_start(app_name, app_version)
@@ -6882,17 +6666,21 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                         baudrate=baudrate,
                     )
                     refreshed_contacts = {"next_since": 0, "live_contacts": [], "contacts": []}
-                    with _contact_owner_scope(port=port, owner_id=owner_id, access_all=False):
-                        refreshed_contacts = CONTACT_BACKEND.refresh_with_client(client, since=None)
-                    contacts_dict = list(refreshed_contacts.get("live_contacts") or [])
-                    with _contact_owner_scope(port=port, owner_id=owner_id, access_all=False):
-                        contacts_dict = CONTACT_BACKEND.rebuild_live_contacts_from_policy(
-                            client,
-                            max_contacts=_get_effective_node_contact_limit(contacts_dict),
-                            live_contacts=contacts_dict,
-                        )
-                    with _contact_owner_scope(port=port, owner_id=owner_id, access_all=False):
-                        refreshed_contacts = CONTACT_BACKEND.build_live_contacts_result(contacts_dict)
+                    max_contacts_device = int((getattr(device, "max_contacts_div_2", 0) or 0) * 2)
+                    if max_contacts_device == 0:
+                        contacts_dict = []
+                    else:
+                        with _contact_owner_scope(port=port, owner_id=owner_id, access_all=False):
+                            refreshed_contacts = CONTACT_BACKEND.refresh_with_client(client, since=None)
+                        contacts_dict = list(refreshed_contacts.get("live_contacts") or [])
+                        with _contact_owner_scope(port=port, owner_id=owner_id, access_all=False):
+                            contacts_dict = CONTACT_BACKEND.rebuild_live_contacts_from_policy(
+                                client,
+                                max_contacts=_get_effective_node_contact_limit(contacts_dict),
+                                live_contacts=contacts_dict,
+                            )
+                        with _contact_owner_scope(port=port, owner_id=owner_id, access_all=False):
+                            refreshed_contacts = CONTACT_BACKEND.build_live_contacts_result(contacts_dict)
                 except (MeshCoreError, SerialException, ValueError):
                     _set_background_bootstrap_stage(
                         session,
@@ -7934,7 +7722,7 @@ _UPDATE_CHECK_CACHE_TTL: float = 300.0
 
 
 def _read_current_version() -> str:
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), MESHCORIUM_VERSION_FILE)
+    path = os.path.join(str(PROJECT_ROOT), MESHCORIUM_VERSION_FILE)
     try:
         with open(path) as fh:
             return fh.read().strip()
@@ -7943,7 +7731,7 @@ def _read_current_version() -> str:
 
 
 def _read_flag_json(filename: str) -> dict:
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
+    path = os.path.join(str(PROJECT_ROOT), filename)
     try:
         with open(path) as fh:
             return json.loads(fh.read())
@@ -7952,7 +7740,7 @@ def _read_flag_json(filename: str) -> dict:
 
 
 def _read_flag_text(filename: str) -> str:
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
+    path = os.path.join(str(PROJECT_ROOT), filename)
     try:
         with open(path) as fh:
             return fh.read().strip()
@@ -7985,7 +7773,7 @@ def _build_update_check_payload() -> dict:
 
 
 def _write_pending_update(version: str) -> None:
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), MESHCORIUM_PENDING_UPDATE_FILE)
+    path = os.path.join(str(PROJECT_ROOT), MESHCORIUM_PENDING_UPDATE_FILE)
     with open(path, "w") as fh:
         fh.write(version)
 

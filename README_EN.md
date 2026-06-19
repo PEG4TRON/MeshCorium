@@ -90,11 +90,11 @@ BLE is implemented through a dedicated transport adapter and is available in the
 
 ## Architecture In Short
 
-- `meshcorium_web.py` — backend, HTTP API, SSE, session orchestration, local SQLite DBs, and universal transport orchestration
-- `meshcorium_client.py` — MeshCore companion protocol layer
-- `meshcorium_serial_transport.py` — USB serial transport adapter
-- `meshcorium_ble_transport.py` — BLE transport adapter for Linux / BlueZ
-- `known_nodes.py` — local known-node and saved BLE PIN DB
+- `meshcorium/meshcorium_web.py` — backend, HTTP API, SSE, session orchestration, local SQLite DBs, and universal transport orchestration
+- `meshcorium/meshcorium_client.py` — MeshCore companion protocol layer
+- `meshcorium/meshcorium_serial_transport.py` — USB serial transport adapter
+- `meshcorium/meshcorium_ble_transport.py` — BLE transport adapter for Linux / BlueZ
+- `meshcorium/known_nodes.py` — local known-node and saved BLE PIN DB
 - `web/` — Vue frontend
 - `meshcorium-launcher.sh` — bootstrap, dependency setup, startup, and systemd installation
 

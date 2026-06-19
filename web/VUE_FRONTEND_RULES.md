@@ -141,7 +141,7 @@ Project decision:
 
 After meaningful Vue/frontend changes, run at least:
 - `npm run build` in `web/`
-- `python3 -m py_compile meshcorium_web.py meshcorium_client.py`
+- `python3 -m py_compile meshcorium/meshcorium_web.py meshcorium/meshcorium_client.py`
 
 For UI-affecting work, also prefer:
 - Chromium screenshot or smoke-check of the relevant route

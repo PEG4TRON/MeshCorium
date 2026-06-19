@@ -380,8 +380,8 @@ supervise_loop() {
 
         # Start child if not running
         if [[ "${child_pid}" -le 0 ]] || ! kill -0 "${child_pid}" 2>/dev/null; then
-            echo "supervisor: starting meshcorium_web.py..."
-            "${VENV_PYTHON}" "${SCRIPT_DIR}/meshcorium_web.py" --host "${WEB_HOST}" --port "${WEB_PORT}" &
+            echo "supervisor: starting meshcorium/meshcorium_web.py..."
+            "${VENV_PYTHON}" "${SCRIPT_DIR}/meshcorium/meshcorium_web.py" --host "${WEB_HOST}" --port "${WEB_PORT}" &
             child_pid=$!
             echo "supervisor: child pid=${child_pid}"
         fi
@@ -465,7 +465,7 @@ perform_supervised_update() {
             > "${UPDATE_AVAILABLE_FILE}"
         echo "idle" > "${UPDATE_STATE_FILE}"
         echo "supervisor: starting new version..."
-        "${VENV_PYTHON}" "${SCRIPT_DIR}/meshcorium_web.py" --host "${WEB_HOST}" --port "${WEB_PORT}" &
+        "${VENV_PYTHON}" "${SCRIPT_DIR}/meshcorium/meshcorium_web.py" --host "${WEB_HOST}" --port "${WEB_PORT}" &
         child_pid=$!
 
         # 5. Wait for readiness
@@ -544,7 +544,7 @@ print_launcher_help() {
     echo "      rebuilds frontend, and restarts"
     echo
     echo "default mode is equivalent to --run"
-    echo "all other arguments are passed through to meshcorium_web.py"
+    echo "all other arguments are passed through to meshcorium/meshcorium_web.py"
 }
 
 detect_system_package_manager() {
@@ -1023,7 +1023,7 @@ stop_existing_meshcorium_listener() {
         [[ -n "${pid}" ]] || continue
         args="$(ps -p "${pid}" -o args= 2>/dev/null || true)"
         [[ -n "${args}" ]] || continue
-        if [[ "${args}" == *"${SCRIPT_DIR}/meshcorium_web.py"* ]]; then
+        if [[ "${args}" == *"${SCRIPT_DIR}/meshcorium/meshcorium_web.py"* ]]; then
             found=1
             echo "stopping existing Meshcorium server on port ${port} (pid ${pid})"
             kill "${pid}" 2>/dev/null || true
@@ -1137,4 +1137,4 @@ fi
 
 stop_existing_meshcorium_listener "${WEB_PORT}"
 
-exec "${VENV_PYTHON}" "${SCRIPT_DIR}/meshcorium_web.py" --host "${WEB_HOST}" --port "${WEB_PORT}" "${PASSTHROUGH_ARGS[@]}"
+exec "${VENV_PYTHON}" "${SCRIPT_DIR}/meshcorium/meshcorium_web.py" --host "${WEB_HOST}" --port "${WEB_PORT}" "${PASSTHROUGH_ARGS[@]}"

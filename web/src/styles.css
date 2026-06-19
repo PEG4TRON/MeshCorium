@@ -6896,6 +6896,28 @@ button {
   cursor: not-allowed;
 }
 
+.mc-settings-about-links {
+  display: flex;
+  justify-content: flex-start;
+  gap: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.mc-settings-about-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted);
+  text-decoration: none;
+  transition: color 0.15s;
+}
+
+.mc-settings-about-link:hover {
+  color: var(--text);
+}
+
 /* Update panel */
 .mc-settings-update-panel {
   border: 1px solid rgba(255, 255, 255, 0.08);

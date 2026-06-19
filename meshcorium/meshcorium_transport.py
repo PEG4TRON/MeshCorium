@@ -15,6 +15,7 @@ from meshcorium_ble_transport import (
     discover_ble_devices,
 )
 from meshcorium_serial_transport import discover_serial_ports, open_serial_runtime
+from go_transport import GoTransportAdapter
 from meshcorium_wifi_transport import (
     WIFI_TRANSPORT_TYPE,
     discover_wifi_devices,
@@ -298,7 +299,7 @@ class ConnectionRouter:
         ble_adapter: BleTransportAdapter | None = None,
         wifi_adapter: WifiTransportAdapter | None = None,
     ):
-        self._serial_adapter = serial_adapter or SerialTransportAdapter()
+        self._serial_adapter = serial_adapter or GoTransportAdapter()
         self._ble_adapter = ble_adapter or BleTransportAdapter()
         self._wifi_adapter = wifi_adapter or WifiTransportAdapter()
 

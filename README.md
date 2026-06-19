@@ -32,7 +32,7 @@ What the script does:
 - Runs `systemd-analyze verify` to validate
 - Reloads and restarts the service
 
-**Docker users**: The Docker entrypoint runs `meshcorium_web.py` directly (no launcher). To fix, copy the script into the running container:
+**Docker users**: The Docker entrypoint runs `meshcorium/meshcorium_web.py` directly (no launcher). To fix, copy the script into the running container:
 
 ```bash
 docker cp fix-autoupdate.sh meshcorium:/tmp/

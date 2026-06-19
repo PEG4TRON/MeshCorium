@@ -30,9 +30,7 @@ RUN python3 -m venv /opt/meshcorium/.venv \
  && /opt/meshcorium/.venv/bin/pip install --no-cache-dir -r /opt/meshcorium/requirements.txt
 
 COPY CHANGELOG.md LICENSE README.md README_EN.md README_RU.md .meshcorium_version /opt/meshcorium/
-COPY contact_admin.py contact_backend.py contact_groups.py contact_service.py contact_store.py mobile_push.py /opt/meshcorium/
-COPY download_meshcore_node_svgs.py known_nodes.py meshcorium_data_transfer.py /opt/meshcorium/
-COPY meshcorium_ble_transport.py meshcorium_client.py meshcorium_serial_legacy.py meshcorium_serial_transport.py meshcorium_transport.py meshcorium_web.py meshcorium_wifi_transport.py /opt/meshcorium/
+COPY meshcorium/ /opt/meshcorium/meshcorium/
 COPY icons /opt/meshcorium/icons
 COPY sounds /opt/meshcorium/sounds
 COPY vendor /opt/meshcorium/vendor
