@@ -3961,7 +3961,9 @@ def _update_background_channel_message_preview(
             if int((channel or {}).get("idx") or -1) != resolved_idx:
                 continue
             channel["last_message_preview"] = str(text or "")
-            channel["last_message_ts"] = int(sender_timestamp or 0)
+            sts = int(sender_timestamp or 0)
+            now_ts_bg = int(time.time())
+            channel["last_message_ts"] = sts if abs(sts - now_ts_bg) <= 3600 else now_ts_bg
             channel["last_message_from_self"] = bool(from_self)
             break
 
@@ -7722,7 +7724,11 @@ _UPDATE_CHECK_CACHE_TTL: float = 300.0
 
 
 def _read_current_version() -> str:
+<<<<<<< HEAD:meshcorium/meshcorium_web.py
     path = os.path.join(str(PROJECT_ROOT), MESHCORIUM_VERSION_FILE)
+=======
+    path = str(PROJECT_ROOT / MESHCORIUM_VERSION_FILE)
+>>>>>>> 2b311bb (fix: future timestamp fallback, PROJECT_ROOT parent.parent, connect-app index fallback, os.path.dirname→PROJECT_ROOT):meshcorium_web.py
     try:
         with open(path) as fh:
             return fh.read().strip()
@@ -7731,7 +7737,11 @@ def _read_current_version() -> str:
 
 
 def _read_flag_json(filename: str) -> dict:
+<<<<<<< HEAD:meshcorium/meshcorium_web.py
     path = os.path.join(str(PROJECT_ROOT), filename)
+=======
+    path = str(PROJECT_ROOT / filename)
+>>>>>>> 2b311bb (fix: future timestamp fallback, PROJECT_ROOT parent.parent, connect-app index fallback, os.path.dirname→PROJECT_ROOT):meshcorium_web.py
     try:
         with open(path) as fh:
             return json.loads(fh.read())
@@ -7740,7 +7750,11 @@ def _read_flag_json(filename: str) -> dict:
 
 
 def _read_flag_text(filename: str) -> str:
+<<<<<<< HEAD:meshcorium/meshcorium_web.py
     path = os.path.join(str(PROJECT_ROOT), filename)
+=======
+    path = str(PROJECT_ROOT / filename)
+>>>>>>> 2b311bb (fix: future timestamp fallback, PROJECT_ROOT parent.parent, connect-app index fallback, os.path.dirname→PROJECT_ROOT):meshcorium_web.py
     try:
         with open(path) as fh:
             return fh.read().strip()
@@ -7773,7 +7787,11 @@ def _build_update_check_payload() -> dict:
 
 
 def _write_pending_update(version: str) -> None:
+<<<<<<< HEAD:meshcorium/meshcorium_web.py
     path = os.path.join(str(PROJECT_ROOT), MESHCORIUM_PENDING_UPDATE_FILE)
+=======
+    path = str(PROJECT_ROOT / MESHCORIUM_PENDING_UPDATE_FILE)
+>>>>>>> 2b311bb (fix: future timestamp fallback, PROJECT_ROOT parent.parent, connect-app index fallback, os.path.dirname→PROJECT_ROOT):meshcorium_web.py
     with open(path, "w") as fh:
         fh.write(version)
 
@@ -8508,7 +8526,8 @@ def get_channel_message_previews(*, owner_id: str | None = None, access_all: boo
                 {preview_key_sql.replace("channel_identity", "m.channel_identity").replace("channel_idx", "m.channel_idx")} AS preview_key,
                 m.text,
                 m.from_self,
-                m.sender_timestamp
+                m.sender_timestamp,
+                m.received_at
             FROM messages m
             INNER JOIN (
                 SELECT
@@ -8527,14 +8546,16 @@ def get_channel_message_previews(*, owner_id: str | None = None, access_all: boo
             latest_owner_params + owner_params,
         ).fetchall()
     previews: dict[str, dict[str, object]] = {}
+    now_ts = int(time.time())
     for row in rows:
         preview_key = str(row["preview_key"] or "").strip()
         if preview_key in previews:
             continue
+        sender_ts = int(row["sender_timestamp"] or 0)
         previews[preview_key] = {
             "text": str(row["text"] or ""),
             "from_self": bool(row["from_self"]),
-            "sender_timestamp": int(row["sender_timestamp"] or 0),
+            "sender_timestamp": sender_ts if abs(sender_ts - now_ts) <= 3600 else int(row["received_at"] or 0),
         }
     return previews
 
@@ -11752,7 +11773,7 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
             self._send_html(_build_login_html(next_path, username=str(settings.get("auth_username") or "")))
             return
         if parsed.path.startswith("/connect-app/"):
-            self._send_connect_app_file(parsed.path.removeprefix("/connect-app/"))
+            rel_path = parsed.path.removeprefix("/connect-app/"); self._send_connect_app_file(rel_path or "index.html")
             return
         if parsed.path.startswith("/icons/"):
             self._send_icon_file(parsed.path.removeprefix("/icons/"))
