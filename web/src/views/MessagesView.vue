@@ -3402,11 +3402,14 @@ async function saveChannelEditor() {
         channel_idx: channelEditorForm.value.channelIdx,
         channel_name: resolvedName,
         channel_secret_hex: channelEditorForm.value.type === 'private' ? normalizedPsk : null,
+        expected_channel_identity: channelEditorForm.value.channelIdentity || null,
       }),
     })
     const nextChannels = Array.isArray(data?.channels) ? data.channels : session.channels
     applyChannelsSnapshot(nextChannels)
-    const savedChannel = nextChannels.find((channel) => Number(channel?.idx ?? -1) === Number(data?.channel?.idx ?? -1)) || data?.channel || null
+    const savedChannel = nextChannels.find((channel) => String(channel?.channel_identity || '').trim() === String(data?.channel?.channel_identity || '').trim() && data?.channel?.channel_identity)
+      || nextChannels.find((channel) => Number(channel?.idx ?? -1) === Number(data?.channel?.idx ?? -1))
+      || data?.channel || null
     if (savedChannel) {
       selectedConversationKind.value = 'channel'
       selectedChannelIdx.value = Number(savedChannel.idx)
@@ -3422,7 +3425,15 @@ async function saveChannelEditor() {
       { name: data?.channel?.name || resolvedName },
     ))
   } catch (error) {
-    session.setStatus(error instanceof Error ? error.message : String(error || t('messages.editor.status.saveFailed')), true)
+    const status = error?.status ?? error?.response?.status ?? 0
+    const code = error?.code ?? ''
+    if (status === 409 || code === 'channel_conflict') {
+      await loadChannels()
+      await loadConversationDirectory()
+      session.setStatus(t('messages.editor.status.channelConflict', { name: resolvedName }), true)
+    } else {
+      session.setStatus(error instanceof Error ? error.message : String(error || t('messages.editor.status.saveFailed')), true)
+    }
   } finally {
     channelEditorBusy.value = false
   }

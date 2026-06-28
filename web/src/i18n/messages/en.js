@@ -728,6 +728,7 @@ export default {
         pskInvalid: 'PSK must contain exactly 32 hex characters.',
         publicReadOnly: 'The official MeshCore public channel `#public` uses a fixed PSK and cannot be edited.',
         saveFailed: 'Failed to save the channel.',
+        channelConflict: 'Channel was modified elsewhere. Reloading...',
       },
       confirm: {
         deleteTitle: 'Delete channel',

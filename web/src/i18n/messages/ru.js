@@ -728,6 +728,7 @@ export default {
         pskInvalid: 'PSK должен содержать ровно 32 hex-символа.',
         publicReadOnly: 'Официальный MeshCore public channel `#public` использует фиксированный PSK и не редактируется.',
         saveFailed: 'Не удалось сохранить канал.',
+        channelConflict: 'Канал изменён в другом месте. Перезагружаем...',
       },
       confirm: {
         deleteTitle: 'Удалить канал',
