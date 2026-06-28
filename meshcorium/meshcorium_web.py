@@ -14227,7 +14227,6 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                 return
         except ChannelConflictError as exc:
             conn = self._session_log_fields(locals().get("body"))
-            import logging
             logging.warning(
                 "api channel conflict path=%s port=%s baudrate=%s error=%s",
                 parsed.path, conn["port"], conn["baudrate"], exc,
