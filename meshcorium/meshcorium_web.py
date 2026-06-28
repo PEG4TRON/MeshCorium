@@ -6072,6 +6072,10 @@ def _persist_node_channel_slots(owner_id: str | None, channels: list[dict]) -> N
                     """,
                     (next_idx, normalized_owner_id, previous_idx),
                 )
+        conn.execute(
+            "DELETE FROM node_channel_slots WHERE owner_id = ?",
+            (normalized_owner_id,),
+        )
         conn.executemany(
             """
             INSERT INTO node_channel_slots (
