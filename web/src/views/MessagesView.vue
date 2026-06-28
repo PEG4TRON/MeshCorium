@@ -3966,6 +3966,7 @@ function openSearchPanel() {
   } else {
     searchViewportCenterId.value = null
   }
+  chatActionsMenuOpen.value = false
   searchPanelVisible.value = true
   searchQuery.value = ''
   searchResults.value = []
@@ -5922,7 +5923,6 @@ onBeforeUnmount(() => {
   </div>
 
     <MessagesSearchPanel
-      v-if="!isMobile"
       :model="searchPanelModel"
       @search="performSearch"
       @prev="navigateSearchPrev"
