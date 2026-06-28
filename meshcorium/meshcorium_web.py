@@ -5314,6 +5314,10 @@ def _broadcast_contacts_snapshot(
 ) -> None:
     resolved_owner_id = _resolve_owner_id_for_port(port)
     session = _get_background_session(port)
+    device = {}
+    if session is not None:
+        with session.snapshot_lock:
+            device = dict(session.device or {})
     with _contact_owner_scope(port=port, owner_id=resolved_owner_id):
         contacts_payload = _compact_contacts_for_client(
             contacts_snapshot if contacts_snapshot is not None else CONTACT_BACKEND.compose_snapshot(live_contacts)
@@ -5324,7 +5328,7 @@ def _broadcast_contacts_snapshot(
             "event": "contacts-sync",
             "reason": str(reason or "auto"),
             "contacts": contacts_payload,
-            "contact_summary": _build_contact_count_summary(contacts_snapshot if contacts_snapshot is not None else CONTACT_BACKEND.compose_snapshot(live_contacts)),
+            "contact_summary": _build_contact_count_summary(contacts_snapshot if contacts_snapshot is not None else CONTACT_BACKEND.compose_snapshot(live_contacts), device),
             "recent_repeaters_count": _get_recent_repeater_count(session) if session else 0,
         },
     )
@@ -7724,11 +7728,7 @@ _UPDATE_CHECK_CACHE_TTL: float = 300.0
 
 
 def _read_current_version() -> str:
-<<<<<<< HEAD:meshcorium/meshcorium_web.py
-    path = os.path.join(str(PROJECT_ROOT), MESHCORIUM_VERSION_FILE)
-=======
     path = str(PROJECT_ROOT / MESHCORIUM_VERSION_FILE)
->>>>>>> 2b311bb (fix: future timestamp fallback, PROJECT_ROOT parent.parent, connect-app index fallback, os.path.dirname→PROJECT_ROOT):meshcorium_web.py
     try:
         with open(path) as fh:
             return fh.read().strip()
@@ -7737,11 +7737,7 @@ def _read_current_version() -> str:
 
 
 def _read_flag_json(filename: str) -> dict:
-<<<<<<< HEAD:meshcorium/meshcorium_web.py
-    path = os.path.join(str(PROJECT_ROOT), filename)
-=======
     path = str(PROJECT_ROOT / filename)
->>>>>>> 2b311bb (fix: future timestamp fallback, PROJECT_ROOT parent.parent, connect-app index fallback, os.path.dirname→PROJECT_ROOT):meshcorium_web.py
     try:
         with open(path) as fh:
             return json.loads(fh.read())
@@ -7750,11 +7746,7 @@ def _read_flag_json(filename: str) -> dict:
 
 
 def _read_flag_text(filename: str) -> str:
-<<<<<<< HEAD:meshcorium/meshcorium_web.py
-    path = os.path.join(str(PROJECT_ROOT), filename)
-=======
     path = str(PROJECT_ROOT / filename)
->>>>>>> 2b311bb (fix: future timestamp fallback, PROJECT_ROOT parent.parent, connect-app index fallback, os.path.dirname→PROJECT_ROOT):meshcorium_web.py
     try:
         with open(path) as fh:
             return fh.read().strip()
@@ -7787,11 +7779,7 @@ def _build_update_check_payload() -> dict:
 
 
 def _write_pending_update(version: str) -> None:
-<<<<<<< HEAD:meshcorium/meshcorium_web.py
-    path = os.path.join(str(PROJECT_ROOT), MESHCORIUM_PENDING_UPDATE_FILE)
-=======
     path = str(PROJECT_ROOT / MESHCORIUM_PENDING_UPDATE_FILE)
->>>>>>> 2b311bb (fix: future timestamp fallback, PROJECT_ROOT parent.parent, connect-app index fallback, os.path.dirname→PROJECT_ROOT):meshcorium_web.py
     with open(path, "w") as fh:
         fh.write(version)
 

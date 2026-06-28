@@ -526,7 +526,7 @@ const contactCountSummary = computed(() => {
   const summary = session.sessionSnapshot?.contact_summary || {}
   return {
     nodeResident: Math.max(0, Number(summary?.node_resident || 0)),
-    nodeLimit: Math.max(0, Number(summary?.node_limit || 0)),
+    nodeLimit: Math.max(0, Number(summary?.node_limit || session.device?.max_contacts_base || session.device?.max_contacts || 0)),
     dbTotal: Math.max(0, Number(summary?.db_total || 0)),
   }
 })
@@ -1138,7 +1138,7 @@ const contactsAdminSummary = computed(() => {
   if (summary && typeof summary === 'object' && !Array.isArray(summary)) {
     return {
       nodeResident: Math.max(0, Number(summary.node_resident || 0)),
-      nodeLimit: Math.max(0, Number(summary.node_limit || 0)),
+      nodeLimit: Math.max(0, Number(summary.node_limit || session.device?.max_contacts_base || session.device?.max_contacts || 0)),
       policyNonFavoriteLimit: Math.max(0, Number(summary.policy_non_favorite_limit || 0)),
       dbTotal: Math.max(0, Number(summary.db_total || 0)),
       dbOnly: Math.max(0, Number(summary.db_only || 0)),
