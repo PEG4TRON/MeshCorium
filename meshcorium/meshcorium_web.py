@@ -3958,7 +3958,7 @@ def _update_background_channel_message_preview(
         return
     with session.snapshot_lock:
         for channel in list(session.channels or []):
-            if int((channel or {}).get("idx") or -1) != resolved_idx:
+            if _channel_idx_value(channel) != resolved_idx:
                 continue
             channel["last_message_preview"] = str(text or "")
             sts = int(sender_timestamp or 0)
@@ -5403,7 +5403,7 @@ def _resolve_channel_runtime_dict(
             channels = list(session.channels or [])
         for channel in channels:
             try:
-                if int((channel or {}).get("idx") or -1) == int(channel_idx):
+                if _channel_idx_value(channel) == int(channel_idx):
                     return dict(channel or {})
             except (TypeError, ValueError, AttributeError):
                 continue
@@ -5743,7 +5743,7 @@ def _verify_channel_precondition(
 ) -> None:
     try:
         current_channel = client.get_channel(channel_idx)
-    except Exception as exc:
+    except (MeshCoreError, SerialException, ValueError) as exc:
         raise ChannelConflictError(
             f"cannot verify channel idx={channel_idx}: {exc}"
         ) from exc
@@ -6020,7 +6020,7 @@ def _persist_node_channel_slots(owner_id: str | None, channels: list[dict]) -> N
     records: list[dict] = []
     now_epoch = utc_now_epoch()
     for channel in list(channels or []):
-        channel_idx = int((channel or {}).get("idx") or -1)
+        channel_idx = _channel_idx_value(channel)
         channel_name = _normalize_channel_name((channel or {}).get("name"))
         channel_secret_hex = _normalize_channel_secret_hex((channel or {}).get("secret_hex"))
         if channel_idx < 0 or not channel_name:
@@ -6235,7 +6235,7 @@ def _resolve_channel_name_for_port(port: str | None, channel_idx: int) -> str:
         channels = list(session.channels or [])
     for channel in channels:
         try:
-            if int((channel or {}).get("idx") or -1) == int(channel_idx):
+            if _channel_idx_value(channel) == int(channel_idx):
                 return _normalize_channel_name((channel or {}).get("name"))
         except (TypeError, ValueError, AttributeError):
             continue
@@ -9701,7 +9701,7 @@ def list_unread_mentions(
         seen_channel_ids: set[int] = set()
         for channel in channels:
             try:
-                channel_idx = int((channel or {}).get("idx") or -1)
+                channel_idx = _channel_idx_value(channel)
             except (TypeError, ValueError, AttributeError):
                 continue
             if channel_idx < 0:
@@ -11457,12 +11457,7 @@ def _save_channel_and_reload_with_standalone_client(
             if max_channels > 0
             else []
         )
-        channels_dict = _channels_to_dict(
-            channels,
-            _device_info_to_dict(device),
-            owner_id=owner_id,
-            access_all=False,
-        )
+        channels_dict = channels
         channel_dict = next(
             (
                 dict(item)
@@ -11510,12 +11505,7 @@ def _save_channel_and_reload_with_standalone_client(
         if max_channels > 0
         else []
     )
-    channels_dict = _channels_to_dict(
-        channels,
-        _device_info_to_dict(device),
-        owner_id=owner_id,
-        access_all=False,
-    )
+    channels_dict = channels
 
     channel_dict = next(
         (
@@ -11657,12 +11647,7 @@ def _delete_channel_and_reload_with_standalone_client(
     client.delete_channel(channel_idx)
     channels = _load_channels_in_session(client, int(device.max_channels), owner_id=owner_id)
     _delete_channel_local_records(owner_id, channel_idx, channel_identity, global_by_identity=False)
-    return _channels_to_dict(
-        channels,
-        _device_info_to_dict(device),
-        owner_id=owner_id,
-        access_all=False,
-    )
+    return channels
 
 
 def _delete_channel_and_reload_with_client(
@@ -11717,14 +11702,7 @@ def _delete_channel_and_reload_with_client(
         channel_identity,
         global_by_identity=False,
     )
-    return _channels_to_dict(
-        channels,
-        _device_info_to_dict(
-            type("DeviceInfo", (), {"max_contacts_div_2": 0, "max_channels": max_channels})()
-        ),
-        owner_id=owner_id,
-        access_all=False,
-    )
+    return channels
 
 
 def _delete_channel_and_reload(session_kwargs: dict, channel_idx: int) -> list[dict]:
@@ -12682,7 +12660,13 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                     conn["baudrate"],
                 )
                 session = _get_background_session(session_kwargs["port"])
-                if session and session.thread and session.thread.is_alive() and not session.stop_event.is_set():
+                active_session = bool(
+                    session
+                    and session.thread
+                    and session.thread.is_alive()
+                    and not session.stop_event.is_set()
+                )
+                if active_session:
                     response = _run_command_via_background_session(
                         session_kwargs["port"],
                         {
@@ -12734,7 +12718,13 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                     group,
                 )
                 session = _get_background_session(session_kwargs["port"])
-                if session and session.thread and session.thread.is_alive() and not session.stop_event.is_set():
+                active_session = bool(
+                    session
+                    and session.thread
+                    and session.thread.is_alive()
+                    and not session.stop_event.is_set()
+                )
+                if active_session:
                     response = _run_command_via_background_session(
                         session_kwargs["port"],
                         {
@@ -13087,7 +13077,13 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                     channel_name,
                 )
                 session = _get_background_session(session_kwargs["port"])
-                if session and session.thread and session.thread.is_alive() and not session.stop_event.is_set():
+                active_session = bool(
+                    session
+                    and session.thread
+                    and session.thread.is_alive()
+                    and not session.stop_event.is_set()
+                )
+                if active_session:
                     response = _run_command_via_background_session(
                         conn["port"],
                         {
@@ -13103,6 +13099,7 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                     )
                     channel_dict = dict(response.get("channel") or {})
                     channels_dict = list(response.get("channels") or [])
+                    save_meta = dict(response.get("save_meta") or {})
                 else:
                     with _paused_background_session(session_kwargs["port"]):
                         (
@@ -13133,7 +13130,13 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                     channel_idx,
                 )
                 session = _get_background_session(session_kwargs["port"])
-                if session and session.thread and session.thread.is_alive() and not session.stop_event.is_set():
+                active_session = bool(
+                    session
+                    and session.thread
+                    and session.thread.is_alive()
+                    and not session.stop_event.is_set()
+                )
+                if active_session:
                     response = _run_command_via_background_session(
                         conn["port"],
                         {
@@ -13170,7 +13173,13 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                     mark_access_all_messages,
                 )
                 session = _get_background_session(session_kwargs["port"])
-                if session and session.thread and session.thread.is_alive() and not session.stop_event.is_set():
+                active_session = bool(
+                    session
+                    and session.thread
+                    and session.thread.is_alive()
+                    and not session.stop_event.is_set()
+                )
+                if active_session:
                     response = _run_command_via_background_session(
                         conn["port"],
                         {
