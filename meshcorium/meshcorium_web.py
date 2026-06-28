@@ -7024,7 +7024,6 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                         channels_dict
                     )
                     for duplicate in duplicates:
-                        import logging
                         _logger = logging.getLogger("meshcorium")
                         _logger.warning(
                             "duplicate channel identity on node "
@@ -10923,7 +10922,6 @@ def _safe_device_update(
             if int(old_device.get(field) or 0) > 0:
                 merged[field] = int(old_device[field])
         session.device = merged
-        import logging
         _logger = logging.getLogger("meshcorium")
         _logger.warning(
             "Suspicious device snapshot in %s: "
