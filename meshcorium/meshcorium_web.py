@@ -5746,7 +5746,7 @@ def _verify_channel_precondition(
     except (MeshCoreError, SerialException):
         raise
     except ValueError as exc:
-        raise ChannelConflictError(
+        raise MeshCoreError(
             f"cannot verify channel idx={channel_idx}: {exc}"
         ) from exc
 
@@ -11467,8 +11467,12 @@ def _save_channel_and_reload_with_standalone_client(
                 for item in channels_dict
                 if _channel_runtime_identity(item) == requested_identity
             ),
-            {},
+            None,
         )
+        if channel_dict is None:
+            raise ChannelConflictError(
+                "channel identity changed during idempotent create; reload channels"
+            )
         return (
             channel_dict,
             channels_dict,
