@@ -11,6 +11,7 @@ class ClientSettingsActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        android.util.Log.d("ClientSettingsActivity", "onCreate")
         setContentView(R.layout.activity_client_settings)
 
         findViewById<MaterialToolbar>(R.id.toolbar).setNavigationOnClickListener { finish() }

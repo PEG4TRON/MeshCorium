@@ -31,11 +31,12 @@ class MainActivity : AppCompatActivity() {
 
     private var pendingNativeAction: String? = null
     private var suppressDockSelectionCallback = false
-    private var suppressNextSettingsClick = false
+    private var clientSettingsOpening = false
     private var webPageReady = false
 
     companion object {
         private const val STATE_WEBVIEW = "webview_state"
+        private const val TAG = "MeshcoriumMain"
     }
 
     private val notificationPermissionLauncher =
@@ -92,6 +93,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        clientSettingsOpening = false
         if (::binding.isInitialized) {
             PushRegistrar.registerCurrentDevice(this)
             if (binding.webView.url.isNullOrBlank()) {
@@ -299,30 +301,11 @@ class MainActivity : AppCompatActivity() {
                 return@setOnItemSelectedListener true
             }
             when (item.itemId) {
-                R.id.nav_notifications -> {
-                    dispatchNativeAction("notifications")
-                    true
-                }
-                R.id.nav_messages -> {
-                    dispatchNativeAction("messages")
-                    true
-                }
-                R.id.nav_contacts -> {
-                    dispatchNativeAction("contacts")
-                    true
-                }
-                R.id.nav_maps -> {
-                    dispatchNativeAction("maps")
-                    true
-                }
-                R.id.nav_settings -> {
-                    if (suppressNextSettingsClick) {
-                        suppressNextSettingsClick = false
-                        return@setOnItemSelectedListener true
-                    }
-                    dispatchNativeAction("settings")
-                    true
-                }
+                R.id.nav_notifications -> { dispatchNativeAction("notifications"); true }
+                R.id.nav_messages -> { dispatchNativeAction("messages"); true }
+                R.id.nav_contacts -> { dispatchNativeAction("contacts"); true }
+                R.id.nav_maps -> { dispatchNativeAction("maps"); true }
+                R.id.nav_settings -> { dispatchNativeAction("settings"); true }
                 else -> false
             }
         }
@@ -330,24 +313,34 @@ class MainActivity : AppCompatActivity() {
         binding.nativeBottomNavigation.post {
             val settingsButton = binding.nativeBottomNavigation
                 .findViewById<android.view.View>(R.id.nav_settings)
-            checkNotNull(settingsButton) {
-                "Native settings dock item was not found"
+            if (settingsButton == null) {
+                android.util.Log.e("MeshcoriumMain", "Native settings dock item was not found")
+                return@post
             }
-            settingsButton.setOnLongClickListener {
-                openClientSettings()
+            settingsButton.setOnLongClickListener { view ->
+                if (clientSettingsOpening) {
+                    return@setOnLongClickListener true
+                }
+                clientSettingsOpening = true
+                view.isPressed = false
+                view.post {
+                    if (!isFinishing && !isDestroyed) {
+                        android.util.Log.d("MeshcoriumMain", "Settings long press detected")
+                        openClientSettings()
+                    } else {
+                        clientSettingsOpening = false
+                    }
+                }
                 true
             }
         }
     }
 
     private fun openClientSettings() {
-        suppressNextSettingsClick = true
+        android.util.Log.d("MeshcoriumMain", "Launching ClientSettingsActivity")
         clientSettingsLauncher.launch(
-            Intent(this, ClientSettingsActivity::class.java),
+            android.content.Intent(this, ClientSettingsActivity::class.java),
         )
-        binding.nativeBottomNavigation.postDelayed({
-            suppressNextSettingsClick = false
-        }, 500L)
     }
 
     private fun dispatchNativeAction(action: String) {
