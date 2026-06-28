@@ -15,6 +15,8 @@
 - **frontend channel edit CAS**: expected_channel_identity passed on save+edit, 409 conflict handled with reload channels, i18n keys channelConflict (eaee9ab)
 - **contact capability reconnect fix**: new_self_info=self_dict passed on initial bootstrap and BLE PIN reconnect for correct node comparison in `_safe_device_update` (14f3756)
 - **web/dist rebuild**: after SettingsView.vue and MessagesView.vue edits (eaee9ab)
+- **audit fixes**: ChannelConflictError propagated through background queue with error_code, `_delete_channel_and_reload_with_client` created for active session, `_save_channel_and_reload_with_standalone_client` rewritten to use `_resolve_channel_write_plan`, `_save_channel_and_reload` wrapper fixed (expected_channel_identity, return tuple[dict, list[dict], dict]), `session.api()` errors now carry `status`/`code`/`payload` fields (694a1d2)
+- **web/dist rebuild**: with `session.js` status/code/payload fix (d5b5372)
 
 ---
 
@@ -26,6 +28,8 @@
 - **frontend channel edit CAS**: expected_channel_identity передаётся при save+edit, 409 conflict обрабатывается с reload channels, i18n ключи channelConflict (eaee9ab)
 - **contact capability reconnect fix**: new_self_info=self_dict передаётся при initial bootstrap и BLE PIN reconnect для корректного сравнения нод в `_safe_device_update` (14f3756)
 - **web/dist rebuild**: после правок SettingsView.vue и MessagesView.vue (eaee9ab)
+- **аудит-исправления**: ChannelConflictError передаётся через background queue с error_code, `_delete_channel_and_reload_with_client` создана для active session, `_save_channel_and_reload_with_standalone_client` переписан на `_resolve_channel_write_plan`, исправлен wrapper `_save_channel_and_reload` (expected_channel_identity, return tuple[dict, list[dict], dict]), ошибки `session.api()` теперь несут поля `status`/`code`/`payload` (694a1d2)
+- **web/dist rebuild**: с исправлением `session.js` status/code/payload (d5b5372)
 
 ---
 
