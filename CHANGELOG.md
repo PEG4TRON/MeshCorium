@@ -30,6 +30,8 @@
 - **web/dist rebuild**: после правок SettingsView.vue и MessagesView.vue (eaee9ab)
 - **аудит-исправления**: ChannelConflictError передаётся через background queue с error_code, `_delete_channel_and_reload_with_client` создана для active session, `_save_channel_and_reload_with_standalone_client` переписан на `_resolve_channel_write_plan`, исправлен wrapper `_save_channel_and_reload` (expected_channel_identity, return tuple[dict, list[dict], dict]), ошибки `session.api()` теперь несут поля `status`/`code`/`payload` (694a1d2)
 - **web/dist rebuild**: с исправлением `session.js` status/code/payload (d5b5372)
+- **P0 fix**: save_meta UnboundLocalError в active save, двойная сериализация list[dict] через _channels_to_dict в standalone save/delete удалена, active_session bool flag, preflight except narrowed (8ddb7d0)
+- **P0 fix**: save_meta UnboundLocalError в active save, двойная сериализация list[dict] через _channels_to_dict в standalone save/delete удалена, active_session bool flag, preflight except narrowed (8ddb7d0)
 
 ---
 
