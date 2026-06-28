@@ -5528,6 +5528,271 @@ def _channel_runtime_idx(channel: object) -> int:
     return int(getattr(channel, "channel_idx", -1) or -1)
 
 
+class ChannelConflictError(ValueError):
+    """Channel slot changed or requested identity conflicts with another slot."""
+
+
+def _channel_idx_value(channel: object, default: int = -1) -> int:
+    """Safely extract channel_idx from dict or object, preserving 0."""
+    if isinstance(channel, dict):
+        raw_value = channel.get("idx", default)
+    else:
+        raw_value = getattr(channel, "channel_idx", default)
+
+    if raw_value in (None, ""):
+        return int(default)
+
+    try:
+        return int(raw_value)
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def _normalize_channel_identity(value: object) -> str:
+    """Normalize channel_identity to a comparable string."""
+    return str(value or "").strip()
+
+
+def _find_channel_by_idx(
+    channels: list,
+    channel_idx: int,
+) -> object | None:
+    target_idx = int(channel_idx)
+    return next(
+        (
+            channel
+            for channel in list(channels or [])
+            if _channel_idx_value(channel) == target_idx
+        ),
+        None,
+    )
+
+
+def _find_channel_by_identity(
+    channels: list,
+    channel_identity: str,
+) -> object | None:
+    expected = _normalize_channel_identity(channel_identity)
+    if not expected:
+        return None
+
+    return next(
+        (
+            channel
+            for channel in list(channels or [])
+            if _channel_runtime_identity(channel) == expected
+        ),
+        None,
+    )
+
+
+def _validate_channel_idx(
+    channel_idx: int,
+    max_channels: int,
+    *,
+    channel_name: str,
+) -> int:
+    target_idx = int(channel_idx)
+    normalized_max_channels = max(0, int(max_channels or 0))
+
+    if normalized_max_channels <= 0:
+        raise ValueError("node does not expose channel slots")
+
+    if target_idx < 0 or target_idx >= normalized_max_channels:
+        raise ValueError(
+            "channel_idx must be in range "
+            f"0..{normalized_max_channels - 1}"
+        )
+
+    if (
+        target_idx == 0
+        and not _is_meshcore_public_channel_name(channel_name)
+    ):
+        raise ValueError(
+            "channel idx=0 is reserved for "
+            "the official MeshCore #public channel"
+        )
+
+    return target_idx
+
+
+def _resolve_channel_write_plan(
+    *,
+    requested_channel_idx: int | None,
+    expected_channel_identity: str,
+    channel_name: str,
+    channel_secret_hex: object,
+    existing_channels: list,
+    max_channels: int,
+) -> dict:
+    normalized_name = _normalize_meshcore_channel_name(channel_name)
+    resolved_secret_hex = _resolve_channel_secret_hex_for_save(
+        normalized_name,
+        channel_secret_hex,
+    )
+    requested_identity = _build_channel_identity(
+        normalized_name,
+        resolved_secret_hex,
+    )
+    expected_identity = _normalize_channel_identity(
+        expected_channel_identity
+    )
+    normalized_max_channels = max(0, int(max_channels or 0))
+
+    if normalized_max_channels <= 0:
+        raise ValueError("node does not expose channel slots")
+
+    existing_same_identity = _find_channel_by_identity(
+        existing_channels,
+        requested_identity,
+    )
+
+    if _is_meshcore_public_channel_name(normalized_name):
+        target_idx = 0
+    elif requested_channel_idx is None:
+        if existing_same_identity is not None:
+            return {
+                "target_idx": _channel_idx_value(
+                    existing_same_identity
+                ),
+                "normalized_name": normalized_name,
+                "resolved_secret_hex": resolved_secret_hex,
+                "requested_identity": requested_identity,
+                "current_channel": existing_same_identity,
+                "idempotent": True,
+                "created": False,
+            }
+
+        target_idx = _pick_first_free_channel_idx_from_dicts(
+            existing_channels,
+            normalized_max_channels,
+        )
+    else:
+        target_idx = _validate_channel_idx(
+            int(requested_channel_idx),
+            normalized_max_channels,
+            channel_name=normalized_name,
+        )
+
+    target_idx = _validate_channel_idx(
+        target_idx,
+        normalized_max_channels,
+        channel_name=normalized_name,
+    )
+
+    current_channel = _find_channel_by_idx(
+        existing_channels,
+        target_idx,
+    )
+
+    if expected_identity:
+        if current_channel is None:
+            raise ChannelConflictError(
+                f"channel idx={target_idx} no longer exists; "
+                "reload channels and retry"
+            )
+
+        current_identity = _channel_runtime_identity(
+            current_channel
+        )
+        if current_identity != expected_identity:
+            raise ChannelConflictError(
+                f"channel idx={target_idx} changed since the "
+                "editor was opened"
+            )
+
+    if existing_same_identity is not None:
+        same_identity_idx = _channel_idx_value(
+            existing_same_identity
+        )
+
+        if same_identity_idx != target_idx:
+            if requested_channel_idx is None:
+                return {
+                    "target_idx": same_identity_idx,
+                    "normalized_name": normalized_name,
+                    "resolved_secret_hex": resolved_secret_hex,
+                    "requested_identity": requested_identity,
+                    "current_channel": existing_same_identity,
+                    "idempotent": True,
+                    "created": False,
+                }
+
+            raise ChannelConflictError(
+                f"channel identity already exists at "
+                f"idx={same_identity_idx}"
+            )
+
+    return {
+        "target_idx": target_idx,
+        "normalized_name": normalized_name,
+        "resolved_secret_hex": resolved_secret_hex,
+        "requested_identity": requested_identity,
+        "current_channel": current_channel,
+        "idempotent": False,
+        "created": current_channel is None,
+    }
+
+
+def _verify_channel_precondition(
+    client,
+    *,
+    channel_idx: int,
+    expected_channel_identity: str,
+    require_empty: bool,
+) -> None:
+    try:
+        current_channel = client.get_channel(channel_idx)
+    except Exception as exc:
+        raise ChannelConflictError(
+            f"cannot verify channel idx={channel_idx}: {exc}"
+        ) from exc
+
+    current_identity = _channel_runtime_identity(
+        current_channel
+    )
+    current_name = _channel_runtime_name(
+        current_channel
+    )
+
+    if expected_channel_identity:
+        if current_identity != expected_channel_identity:
+            raise ChannelConflictError(
+                f"channel idx={channel_idx} changed "
+                "before write"
+            )
+        return
+
+    if require_empty and current_name:
+        raise ChannelConflictError(
+            f"channel idx={channel_idx} is no longer empty"
+        )
+
+
+def _find_duplicate_channel_identities(
+    channels: list,
+) -> list[dict]:
+    by_identity: dict[str, list[int]] = {}
+
+    for channel in list(channels or []):
+        identity = _channel_runtime_identity(channel)
+        idx = _channel_idx_value(channel)
+
+        if not identity or idx < 0:
+            continue
+
+        by_identity.setdefault(identity, []).append(idx)
+
+    return [
+        {
+            "channel_identity": identity,
+            "indices": sorted(indices),
+        }
+        for identity, indices in by_identity.items()
+        if len(indices) > 1
+    ]
+
+
 def _channel_runtime_name(channel: object) -> str:
     if isinstance(channel, dict):
         normalized_name, _normalized_secret_hex = _normalize_runtime_channel_fields(
@@ -6752,6 +7017,20 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                     session.collections_ready = True
                     session.contacts = contacts_dict
                     session.channels = channels_dict
+
+                    duplicates = _find_duplicate_channel_identities(
+                        channels_dict
+                    )
+                    for duplicate in duplicates:
+                        import logging
+                        _logger = logging.getLogger("meshcorium")
+                        _logger.warning(
+                            "duplicate channel identity on node "
+                            "owner=%s identity=%s indices=%s",
+                            owner_id,
+                            duplicate["channel_identity"],
+                            duplicate["indices"],
+                        )
                     session.radio_stats = radio_stats
                     session.self_telemetry = self_telemetry
                     session.battery_info = battery_info
@@ -6900,12 +7179,19 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                                 response_queue.put({"ok": True})
                                 continue
                             if kind == "save_channel":
-                                channel_dict, channels_dict = _save_channel_and_reload_with_client(
+                                (
+                                    channel_dict,
+                                    channels_dict,
+                                    save_meta,
+                                ) = _save_channel_and_reload_with_client(
                                     client,
                                     session,
                                     None if command.get("channel_idx") in (None, "") else int(command.get("channel_idx")),
                                     str(command.get("channel_name") or ""),
                                     command.get("channel_secret_hex"),
+                                    expected_channel_identity=str(
+                                        command.get("expected_channel_identity") or ""
+                                    ).strip(),
                                 )
                                 with session.snapshot_lock:
                                     session.channels = channels_dict
@@ -6915,6 +7201,7 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                                         "ok": True,
                                         "channel": channel_dict,
                                         "channels": channels_dict,
+                                        "save_meta": save_meta,
                                     }
                                 )
                                 continue
@@ -11102,6 +11389,8 @@ def _save_channel_and_reload_with_standalone_client(
     app_version: int,
     app_name: str,
     channel_idx: int | None,
+    expected_channel_identity: str = "",
+
     channel_name: str,
     channel_secret_hex: object,
 ) -> tuple[dict, list[dict]]:
@@ -11380,262 +11669,145 @@ def _resolve_channel_target_idx_from_dicts(channel_idx: int | None, channel_name
 
 
 def _save_channel_and_reload_with_client(
-    client: MeshCoreSerialClient,
-    session: BackgroundCompanionSession,
+    client,
+    session,
     channel_idx: int | None,
     channel_name: str,
     channel_secret_hex: object,
-) -> tuple[dict, list[dict]]:
-    normalized_channel_name = _normalize_meshcore_channel_name(channel_name)
-    resolved_channel_secret_hex = _resolve_channel_secret_hex_for_save(normalized_channel_name, channel_secret_hex)
-    secret = _decode_channel_secret(resolved_channel_secret_hex)
-    owner_id = _normalize_owner_id((session.self_info or {}).get("public_key"))
-    max_channels = int((session.device or {}).get("max_channels") or 0)
-    existing_channels = _load_channels_in_session(client, max_channels, owner_id=owner_id) if max_channels > 0 else list(session.channels or [])
-    target_idx = _resolve_channel_target_idx_from_dicts(channel_idx, normalized_channel_name, existing_channels, max_channels)
-    existing_channel = next((item for item in existing_channels if _channel_runtime_idx(item) == target_idx), None)
-    _guard_meshcore_public_channel_edit(existing_channel, normalized_channel_name, resolved_channel_secret_hex)
-    _set_channel_with_retry(client, target_idx, normalized_channel_name, resolved_channel_secret_hex)
-    channels_dict = _load_channels_in_session(client, max_channels, owner_id=owner_id) if max_channels > 0 else list(session.channels or [])
+    *,
+    expected_channel_identity: str = "",
+):
+    import hashlib
+
+    owner_id = _normalize_owner_id(
+        (session.self_info or {}).get("public_key")
+    )
+    max_channels = int(
+        (session.device or {}).get("max_channels") or 0
+    )
+
+    existing_channels = (
+        _load_channels_in_session(
+            client,
+            max_channels,
+            owner_id=owner_id,
+        )
+        if max_channels > 0
+        else list(session.channels or [])
+    )
+
+    plan = _resolve_channel_write_plan(
+        requested_channel_idx=channel_idx,
+        expected_channel_identity=expected_channel_identity,
+        channel_name=channel_name,
+        channel_secret_hex=channel_secret_hex,
+        existing_channels=existing_channels,
+        max_channels=max_channels,
+    )
+
+    target_idx = int(plan["target_idx"])
+    normalized_name = str(plan["normalized_name"])
+    resolved_secret_hex = str(plan["resolved_secret_hex"])
+
+    if plan["idempotent"]:
+        channels_dict = (
+            _load_channels_in_session(
+                client,
+                max_channels,
+                owner_id=owner_id,
+            )
+            if max_channels > 0
+            else list(session.channels or [])
+        )
+        channel_dict = next(
+            (
+                dict(item)
+                for item in channels_dict
+                if _channel_idx_value(item) == target_idx
+            ),
+            dict(plan["current_channel"] or {}),
+        )
+
+        return (
+            channel_dict,
+            channels_dict,
+            {
+                "created": False,
+                "updated": False,
+                "idempotent": True,
+            },
+        )
+
+    _verify_channel_precondition(
+        client,
+        channel_idx=target_idx,
+        expected_channel_identity=expected_channel_identity,
+        require_empty=bool(plan["created"]),
+    )
+
+    _guard_meshcore_public_channel_edit(
+        plan["current_channel"],
+        normalized_name,
+        resolved_secret_hex,
+    )
+
+    _, write_meta = _set_channel_with_retry(
+        client,
+        target_idx,
+        normalized_name,
+        resolved_secret_hex,
+    )
+
+    channels_dict = (
+        _load_channels_in_session(
+            client,
+            max_channels,
+            owner_id=owner_id,
+        )
+        if max_channels > 0
+        else list(session.channels or [])
+    )
+
     channel_dict = next(
         (
             dict(item)
             for item in channels_dict
-            if int(item.get("idx") or -1) == target_idx
+            if _channel_idx_value(item) == target_idx
         ),
         {
             "idx": target_idx,
-            "name": normalized_channel_name,
-            "description": "Channel configuration read from the node.",
-            "secret_hex": resolved_channel_secret_hex,
-            "hash": hashlib.sha256(bytes(secret or b"")).hexdigest()[:2] if secret else "",
+            "name": normalized_name,
+            "description": (
+                "Channel configuration read from the node."
+            ),
+            "secret_hex": resolved_secret_hex,
+            "hash": hashlib.sha256(
+                bytes.fromhex(resolved_secret_hex)
+            ).hexdigest()[:2],
+            "channel_identity": _build_channel_identity(
+                normalized_name,
+                resolved_secret_hex,
+            ),
+            "is_public": _is_meshcore_public_channel_name(
+                normalized_name
+            ),
             "kind": "configured",
             "last_message_preview": "",
             "last_message_from_self": False,
             "last_message_ts": 0,
         },
     )
-    return channel_dict, channels_dict
 
-
-def _delete_channel_and_reload_with_client(
-    client: MeshCoreSerialClient,
-    session: BackgroundCompanionSession,
-    channel_idx: int,
-) -> list[dict]:
-    owner_id = _normalize_owner_id((session.self_info or {}).get("public_key"))
-    max_channels = int((session.device or {}).get("max_channels") or 0)
-    existing_channels = _load_channels_in_session(client, max_channels, owner_id=owner_id) if max_channels > 0 else list(session.channels or [])
-    existing_channel = next((item for item in existing_channels if _channel_runtime_idx(item) == int(channel_idx)), None)
-    if existing_channel is None:
-        raise ValueError(f"channel idx={channel_idx} not found")
-    channel_identity = _build_channel_identity(
-        _channel_runtime_name(existing_channel),
-        _channel_runtime_secret_hex(existing_channel),
+    return (
+        channel_dict,
+        channels_dict,
+        {
+            "created": bool(plan["created"]),
+            "updated": not bool(plan["created"]),
+            "idempotent": False,
+            **dict(write_meta or {}),
+        },
     )
-    client.delete_channel(channel_idx)
-    channels_dict = _load_channels_in_session(client, max_channels, owner_id=owner_id) if max_channels > 0 else []
-    _delete_channel_local_records(owner_id, channel_idx, channel_identity, global_by_identity=True)
-    return channels_dict
-
-
-def _sync_meshcorium_channels_to_node_runtime(
-    client: MeshCoreSerialClient,
-    *,
-    owner_id: str,
-    max_channels: int,
-    existing_channels: list[dict],
-    mark_access_all_messages: bool = False,
-    progress_callback=None,
-) -> tuple[list[dict], dict]:
-    if max_channels <= 1:
-        raise ValueError("node does not expose free channel slots")
-    db_candidates, duplicate_sources = _list_meshcorium_channel_library()
-    used_idx = {
-        _channel_runtime_idx(channel)
-        for channel in list(existing_channels or [])
-        if _channel_runtime_idx(channel) >= 0 and _channel_runtime_name(channel)
-    }
-    existing_by_identity = {
-        _channel_runtime_identity(channel): channel
-        for channel in list(existing_channels or [])
-        if _channel_runtime_name(channel) and _channel_runtime_identity(channel)
-    }
-    added = 0
-    already_present = 0
-    remapped = 0
-    no_free_slots = 0
-    failed = 0
-    retry_count = 0
-    verified_after_empty_response = 0
-    warnings: list[str] = []
-    applied_entries: list[dict] = []
-    already_present_entries: list[dict] = []
-    failed_entries: list[dict] = []
-    processed = 0
-    total_candidates = len(db_candidates)
-    if progress_callback is not None:
-        progress_callback({
-            "operation": "enable",
-            "status": "started",
-            "phase": "prepare",
-            "current": 0,
-            "total": total_candidates,
-        })
-    for candidate in db_candidates:
-        identity = str(candidate.get("channel_identity") or "").strip()
-        if not identity:
-            continue
-        channel_name = _normalize_meshcore_channel_name(candidate.get("channel_name"))
-        if not channel_name:
-            continue
-        processed += 1
-        desired_idx = 0 if _is_meshcore_public_channel_name(channel_name) else int(candidate.get("channel_idx") or -1)
-        existing_channel = existing_by_identity.get(identity)
-        if existing_channel is not None:
-            already_present += 1
-            current_idx = _channel_runtime_idx(existing_channel)
-            already_present_entries.append({
-                "idx": current_idx,
-                "desired_idx": desired_idx,
-                "name": _channel_runtime_name(existing_channel) or channel_name,
-                "channel_identity": identity,
-                "source_owner_id": _normalize_owner_id(candidate.get("owner_id")),
-                "remapped": bool(desired_idx != current_idx),
-            })
-            if progress_callback is not None:
-                progress_callback({
-                    "operation": "enable",
-                    "status": "already-present",
-                    "phase": "skip",
-                    "current": processed,
-                    "total": total_candidates,
-                    "channel_idx": current_idx,
-                    "channel_name": _channel_runtime_name(existing_channel) or channel_name,
-                })
-            continue
-        if _is_meshcore_public_channel_name(channel_name) and max_channels > 0:
-            assigned_idx = 0
-        else:
-            assigned_idx = (
-                desired_idx
-                if 1 <= desired_idx < max_channels and desired_idx not in used_idx
-                else None
-            )
-        if assigned_idx is None:
-            free_idx = None
-            for idx in range(1, max_channels):
-                if idx not in used_idx:
-                    free_idx = idx
-                    break
-            if free_idx is None:
-                no_free_slots += 1
-                warnings.append(
-                    f"{candidate.get('channel_name') or identity}: no free channel slots left on the node."
-                )
-                if progress_callback is not None:
-                    progress_callback({
-                        "operation": "enable",
-                        "status": "no-free-slot",
-                        "phase": "skip",
-                        "current": processed,
-                        "total": total_candidates,
-                        "channel_idx": desired_idx,
-                        "channel_name": channel_name,
-                    })
-                continue
-            assigned_idx = free_idx
-        channel_secret_hex = _resolve_channel_secret_hex_for_save(channel_name, candidate.get("channel_secret_hex"))
-        try:
-            written_channel, write_meta = _set_channel_with_retry(
-                client,
-                assigned_idx,
-                channel_name,
-                channel_secret_hex,
-                progress_callback=progress_callback,
-                progress_base={
-                    "operation": "enable",
-                    "current": processed,
-                    "total": total_candidates,
-                },
-            )
-        except (MeshCoreError, SerialException, ValueError) as exc:
-            failed += 1
-            message = str(exc)
-            failed_entries.append({
-                "idx": assigned_idx,
-                "desired_idx": desired_idx,
-                "name": channel_name,
-                "channel_identity": identity,
-                "error": message,
-            })
-            warnings.append(f"{channel_name or identity}: {message}")
-            logging.warning(
-                "channel sync failed idx=%s name=%s identity=%s error=%s",
-                assigned_idx,
-                channel_name,
-                identity,
-                message,
-            )
-            if progress_callback is not None:
-                progress_callback({
-                    "operation": "enable",
-                    "status": "failed",
-                    "phase": "set-channel",
-                    "current": processed,
-                    "total": total_candidates,
-                    "channel_idx": assigned_idx,
-                    "channel_name": channel_name,
-                    "message": message,
-                })
-            continue
-        used_idx.add(assigned_idx)
-        existing_by_identity[identity] = written_channel
-        added += 1
-        if desired_idx != assigned_idx:
-            remapped += 1
-        attempts = int(write_meta.get("attempts") or 1)
-        retry_count += max(0, attempts - 1)
-        if bool(write_meta.get("verified_after_empty_response")):
-            verified_after_empty_response += 1
-        applied_entries.append({
-            "idx": assigned_idx,
-            "desired_idx": desired_idx,
-            "name": channel_name,
-            "channel_identity": identity,
-            "source_owner_id": _normalize_owner_id(candidate.get("owner_id")),
-            "remapped": bool(desired_idx != assigned_idx),
-        })
-    channels_dict = _load_channels_in_session(client, max_channels, owner_id=owner_id) if max_channels > 0 else []
-    marked_entries = already_present_entries + applied_entries
-    if mark_access_all_messages:
-        _mark_access_all_message_channel_slots(owner_id, marked_entries)
-    if progress_callback is not None:
-        progress_callback({
-            "operation": "enable",
-            "status": "completed",
-            "phase": "completed",
-            "current": total_candidates,
-            "total": total_candidates,
-            "message": f"added={added} already_present={already_present} failed={failed}",
-        })
-    return channels_dict, {
-        "db_candidates": len(db_candidates),
-        "db_duplicate_sources": int(duplicate_sources),
-        "already_present": int(already_present),
-        "added": int(added),
-        "remapped": int(remapped),
-        "no_free_slots": int(no_free_slots),
-        "failed": int(failed),
-        "retry_count": int(retry_count),
-        "verified_after_empty_response": int(verified_after_empty_response),
-        "marked": len(marked_entries) if mark_access_all_messages else 0,
-        "applied": applied_entries,
-        "already_present_entries": already_present_entries,
-        "failed_entries": failed_entries,
-        "warnings": warnings[:50],
-    }
-
 
 def _sync_meshcorium_channels_to_node_with_client(
     client: MeshCoreSerialClient,
@@ -12733,6 +12905,7 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                 raw_channel_idx = body.get("channel_idx")
                 channel_idx = None if raw_channel_idx in (None, "") else int(raw_channel_idx)
                 channel_name = str(body.get("channel_name") or "").strip()
+                expected_channel_identity = str(body.get("expected_channel_identity") or "").strip()
                 if not channel_name:
                     raise ValueError("channel_name is required")
                 logging.info(
@@ -12751,6 +12924,9 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                             "channel_idx": channel_idx,
                             "channel_name": channel_name,
                             "channel_secret_hex": body.get("channel_secret_hex"),
+                            "expected_channel_identity": str(
+                                body.get("expected_channel_identity") or ""
+                            ).strip(),
                         },
                         timeout_secs=20.0,
                     )
@@ -12758,13 +12934,21 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                     channels_dict = list(response.get("channels") or [])
                 else:
                     with _paused_background_session(session_kwargs["port"]):
-                        channel_dict, channels_dict = _save_channel_and_reload(
+                        (
+                            channel_dict,
+                            channels_dict,
+                            save_meta,
+                        ) = _save_channel_and_reload(
                             session_kwargs,
                             channel_idx,
                             channel_name,
                             body.get("channel_secret_hex"),
+                            expected_channel_identity=str(
+                                body.get("expected_channel_identity") or ""
+                            ).strip(),
                         )
-                self._send_json({"channel": channel_dict, "channels": channels_dict})
+                save_meta = dict(response.get("save_meta") or {}) if session and session.thread and session.thread.is_alive() and not session.stop_event.is_set() else save_meta
+                self._send_json({"channel": channel_dict, "channels": channels_dict, "save_meta": save_meta})
                 return
             if parsed.path == "/api/channels/delete":
                 session_kwargs = self._session_kwargs(body)
@@ -13846,6 +14030,19 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                         "contact": CONTACT_BACKEND.get_cached_contact(public_key),
                     })
                 return
+        except ChannelConflictError as exc:
+            conn = self._session_log_fields(locals().get("body"))
+            import logging
+            logging.warning(
+                "api channel conflict path=%s port=%s baudrate=%s error=%s",
+                parsed.path, conn["port"], conn["baudrate"], exc,
+            )
+            self._send_json(
+                {"error": str(exc), "error_code": "channel_conflict", "reload_required": True},
+                status=HTTPStatus.CONFLICT,
+            )
+            return
+
         except (MeshCoreError, SerialException, sqlite3.Error, ValueError) as exc:
             conn = self._session_log_fields(locals().get("body"))
             if isinstance(exc, BleTransportUnavailable):
