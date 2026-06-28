@@ -14,6 +14,6 @@
     <style name="Widget.Meshcorium.NavigationBar" parent="Widget.MaterialComponents.BottomNavigationView">
         <item name="itemIconTint">@color/native_nav_item_color</item>
         <item name="itemTextColor">@color/native_nav_item_color</item>
-        <item name="android:background">@color/surface</item>
+        <item name="android:background">#16212D</item>
     </style>
 </resources>

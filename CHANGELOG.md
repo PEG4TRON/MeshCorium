@@ -28,6 +28,9 @@
 - Version 0.1.0, SDK 35, minSdk 26
 - Bilingual README (EN/RU)
 - .gitignore: 16 rules (Firebase secrets, build artifacts excluded)
+- Native dock colors matched to web dock: background #16212D, border-top 1px rgba(255,255,255,0.06)
+- Fixed spacer gap on non-chat pages in native-shell mode (removed leftover padding-bottom)
+- Bumped versionCode to 3
 
 ---
 
@@ -54,6 +57,9 @@
 - Версия 0.1.0, SDK 35, minSdk 26
 - Двуязычный README (EN/RU)
 - .gitignore: 16 правил (секреты Firebase, артефакты сборки исключены)
+- Цвета нативного дока приведены к web-доку: фон #16212D, верхняя граница 1px rgba(255,255,255,0.06)
+- Исправлен зазор на страницах карты/настроек/контактов в native-shell режиме (убран padding-bottom)
+- Обновлён versionCode до 3
 
 ---
 

@@ -8722,7 +8722,10 @@ button {
   padding: 0 1px;
 }
 
-html.mc-native-shell .mc-global-mobile-dock,
 html.mc-native-shell .mc-mobile-dock {
   display: none !important;
+}
+
+html.mc-native-shell .mc-page--global-mobile-dock .mc-shell {
+  padding-bottom: env(safe-area-inset-bottom, 0px) !important;
 }

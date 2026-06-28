@@ -23,7 +23,16 @@
         android:fadeScrollbars="true"
         android:scrollbarSize="4dp"
         app:layout_constraintTop_toBottomOf="@id/progressIndicator"
-        app:layout_constraintBottom_toTopOf="@id/nativeBottomNavigation"
+        app:layout_constraintBottom_toTopOf="@id/dockBorder"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <View
+        android:id="@+id/dockBorder"
+        android:layout_width="0dp"
+        android:layout_height="1dp"
+        android:background="#1AFFFFFF"
+        app:layout_constraintTop_toBottomOf="@id/webView"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
@@ -31,11 +40,12 @@
         android:id="@+id/nativeBottomNavigation"
         android:layout_width="0dp"
         android:layout_height="64dp"
-        android:background="@color/surface"
+        android:background="#16212D"
         app:itemIconSize="22dp"
         app:itemHorizontalTranslationEnabled="false"
         app:labelVisibilityMode="labeled"
         app:menu="@menu/native_bottom_navigation"
+        app:layout_constraintTop_toBottomOf="@id/dockBorder"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
