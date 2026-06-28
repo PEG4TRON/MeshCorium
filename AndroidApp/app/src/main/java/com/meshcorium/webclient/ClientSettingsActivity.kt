@@ -1,14 +1,11 @@
-package com.meshcorium.webclient
+package com.peg4tron.meshcorium
 
-import com.peg4tron.meshcorium.R
 import android.content.Intent
 import android.os.Bundle
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.appbar.MaterialToolbar
-import com.peg4tron.meshcorium.AppPrefs
-import com.peg4tron.meshcorium.UrlEntryActivity
 
 class ClientSettingsActivity : AppCompatActivity() {
 
@@ -41,13 +38,8 @@ class ClientSettingsActivity : AppCompatActivity() {
                 val updatedUrl = result.data
                     ?.getStringExtra(UrlEntryActivity.EXTRA_UPDATED_URL)
                     .orEmpty()
-
-                updateConnectionSummary()
-
-                setResult(
-                    RESULT_OK,
-                    Intent().putExtra(UrlEntryActivity.EXTRA_UPDATED_URL, updatedUrl),
-                )
+                setResult(RESULT_OK, Intent().putExtra(UrlEntryActivity.EXTRA_UPDATED_URL, updatedUrl))
+                finish()
             }
         }
 

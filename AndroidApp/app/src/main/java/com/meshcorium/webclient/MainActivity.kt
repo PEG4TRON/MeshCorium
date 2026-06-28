@@ -45,6 +45,20 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+    private val clientSettingsLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode != RESULT_OK) {
+                return@registerForActivityResult
+            }
+            val updatedUrl = result.data
+                ?.getStringExtra(UrlEntryActivity.EXTRA_UPDATED_URL)
+                .orEmpty()
+                .trim()
+            if (updatedUrl.isNotBlank()) {
+                handleServerConnectionChanged(updatedUrl)
+            }
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val baseUrl = AppPrefs.getBaseUrl(this)
@@ -314,21 +328,26 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.nativeBottomNavigation.post {
-            binding.nativeBottomNavigation
+            val settingsButton = binding.nativeBottomNavigation
                 .findViewById<android.view.View>(R.id.nav_settings)
-                ?.setOnLongClickListener {
-                    openClientSettings()
-                    true
-                }
+            checkNotNull(settingsButton) {
+                "Native settings dock item was not found"
+            }
+            settingsButton.setOnLongClickListener {
+                openClientSettings()
+                true
+            }
         }
     }
 
     private fun openClientSettings() {
         suppressNextSettingsClick = true
+        clientSettingsLauncher.launch(
+            Intent(this, ClientSettingsActivity::class.java),
+        )
         binding.nativeBottomNavigation.postDelayed({
             suppressNextSettingsClick = false
         }, 500L)
-        // TODO: open ClientSettingsActivity (Этап 7)
     }
 
     private fun dispatchNativeAction(action: String) {
