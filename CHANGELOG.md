@@ -22,6 +22,13 @@
 - **standalone idempotent race fix**: both active and standalone paths now raise ChannelConflictError when identity disappears during idempotent create (af35fa1)
 - **docs**: CHANGELOG updated for full session (0d73e8c)
 
+### Android Client
+- Added Android WebView client (Kotlin/Gradle) — AndroidApp/
+- WebView wrapper for Meshcorium web interface + FCM push notifications
+- Version 0.1.0, SDK 35, minSdk 26
+- Bilingual README (EN/RU)
+- .gitignore: 16 rules (Firebase secrets, build artifacts excluded)
+
 ---
 
 ### CAS и операции с каналами
@@ -40,6 +47,13 @@
 - **тесты**: backend 12 тестов (idx=0, range, idempotent, stale edit, duplicate identity, #public reserved); frontend 8 тестов (buildChannelSavePayload, selectSavedChannel) (60da663)
 - **standalone idempotent race fix**: обе ветки (active + standalone) теперь выбрасывают ChannelConflictError при исчезновении identity во время idempotent create (af35fa1)
 - **docs**: CHANGELOG обновлён за всю сессию (0d73e8c)
+
+### Android-клиент
+- Добавлен Android WebView клиент (Kotlin/Gradle) — AndroidApp/
+- WebView-обёртка для веб-интерфейса Meshcorium + FCM push-уведомления
+- Версия 0.1.0, SDK 35, minSdk 26
+- Двуязычный README (EN/RU)
+- .gitignore: 16 правил (секреты Firebase, артефакты сборки исключены)
 
 ---
 
