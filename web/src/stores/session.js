@@ -717,7 +717,13 @@ export const useSessionStore = defineStore('session', () => {
       throw new Error(t('common.authRequired'))
     }
     if (!response.ok) {
-      throw new Error(data?.error || `HTTP ${response.status}`)
+      const error = new Error(
+        data?.error || `HTTP ${response.status}`
+      )
+      error.status = response.status
+      error.code = String(data?.error_code || '')
+      error.payload = data
+      throw error
     }
     return data
   }

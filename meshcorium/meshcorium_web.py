@@ -5524,8 +5524,8 @@ def _normalize_runtime_channel_fields(channel_idx: object, channel_name: object,
 
 def _channel_runtime_idx(channel: object) -> int:
     if isinstance(channel, dict):
-        return int(channel.get("idx") or -1)
-    return int(getattr(channel, "channel_idx", -1) or -1)
+        return _channel_idx_value(channel)
+    return _channel_idx_value(channel)
 
 
 class ChannelConflictError(ValueError):
@@ -7538,6 +7538,19 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                                 })
                                 continue
                             raise MeshCoreError(f"unsupported background command: {kind}")
+                        except ChannelConflictError as exc:
+                            _log_delivery_debug(
+                                "bg_command_failed",
+                                port=port,
+                                kind=kind,
+                                sequence=command_sequence,
+                                duration_ms=int((time.monotonic() - command_started_at) * 1000),
+                                buffered_pushes_before=pending_pushes_before,
+                                buffered_pushes_after=client.pending_push_count(),
+                                error=str(exc),
+                            )
+                            _log_delivery_debug("bg_command_response_put", port=port, kind=kind, sequence=command_sequence, ok=False, error=str(exc))
+                            response_queue.put({"ok": False, "error": str(exc), "error_code": "channel_conflict"})
                         except Exception as exc:
                             _log_delivery_debug(
                                 "bg_command_failed",
@@ -8017,7 +8030,18 @@ def _run_command_via_background_session(port: str, command: dict, timeout_secs: 
         error=str(response.get("error") or ""),
     )
     if not response.get("ok"):
-        raise MeshCoreError(str(response.get("error") or "background command failed"))
+        error_message = str(
+            response.get("error")
+            or "background command failed"
+        )
+        error_code = str(
+            response.get("error_code") or ""
+        )
+
+        if error_code == "channel_conflict":
+            raise ChannelConflictError(error_message)
+
+        raise MeshCoreError(error_message)
     return response
 
 
@@ -11383,79 +11407,163 @@ def _pick_first_free_channel_idx(channels: list, max_channels: int) -> int:
 
 
 def _save_channel_and_reload_with_standalone_client(
-    client: MeshCoreSerialClient,
+    client,
     *,
     protocol_version: int,
     app_version: int,
     app_name: str,
     channel_idx: int | None,
-    expected_channel_identity: str = "",
-
     channel_name: str,
     channel_secret_hex: object,
-) -> tuple[dict, list[dict]]:
-    normalized_channel_name = _normalize_meshcore_channel_name(channel_name)
-    resolved_channel_secret_hex = _resolve_channel_secret_hex_for_save(normalized_channel_name, channel_secret_hex)
-    secret = _decode_channel_secret(resolved_channel_secret_hex)
+    expected_channel_identity: str = "",
+) -> tuple[dict, list[dict], dict]:
+    import hashlib
+
     device = client.query_device(protocol_version)
     self_info = client.app_start(app_name, app_version)
     owner_id = _normalize_owner_id(getattr(self_info, "public_key", ""))
-    existing_channels = _load_channels_in_session(client, int(device.max_channels), owner_id=owner_id)
-    target_idx = _resolve_channel_target_idx(channel_idx, normalized_channel_name, existing_channels, device.max_channels)
-    existing_channel = next((item for item in existing_channels if _channel_runtime_idx(item) == target_idx), None)
-    _guard_meshcore_public_channel_edit(existing_channel, normalized_channel_name, resolved_channel_secret_hex)
-    _set_channel_with_retry(client, target_idx, normalized_channel_name, resolved_channel_secret_hex)
-    channels = _load_channels_in_session(client, int(device.max_channels), owner_id=owner_id)
-    channel = next(
-        (
-            item
-            for item in channels
-            if int(item.channel_idx) == target_idx
-        ),
-        None,
+    max_channels = int(getattr(device, "max_channels", 0) or 0)
+
+    existing_channels = (
+        _load_channels_in_session(
+            client,
+            max_channels,
+            owner_id=owner_id,
+        )
+        if max_channels > 0
+        else []
     )
-    if channel is None:
-        channel = next(
-            (
-                item
-                for item in existing_channels
-                if int(item.channel_idx) == target_idx
-            ),
-            None,
-        )
-    device_dict = _device_info_to_dict(device)
-    if channel is None:
-        return (
-            {
-                "idx": target_idx,
-                "name": normalized_channel_name,
-                "description": "Channel configuration read from the node.",
-                "secret_hex": resolved_channel_secret_hex,
-                "hash": hashlib.sha256(bytes(secret or b"")).hexdigest()[:2] if secret else "",
-                "kind": "configured",
-                "last_message_preview": "",
-                "last_message_from_self": False,
-                "last_message_ts": 0,
-            },
-            _channels_to_dict(
-                channels,
-                device_dict,
+
+    plan = _resolve_channel_write_plan(
+        requested_channel_idx=channel_idx,
+        expected_channel_identity=expected_channel_identity,
+        channel_name=channel_name,
+        channel_secret_hex=channel_secret_hex,
+        existing_channels=existing_channels,
+        max_channels=max_channels,
+    )
+
+    target_idx = int(plan["target_idx"])
+    normalized_name = str(plan["normalized_name"])
+    resolved_secret_hex = str(plan["resolved_secret_hex"])
+
+    if plan["idempotent"]:
+        channels = (
+            _load_channels_in_session(
+                client,
+                max_channels,
                 owner_id=owner_id,
-                access_all=False,
-            ),
+            )
+            if max_channels > 0
+            else []
         )
-    return (
-        _channel_to_dict(channel),
-        _channels_to_dict(
+        channels_dict = _channels_to_dict(
             channels,
-            device_dict,
+            _device_info_to_dict(device),
             owner_id=owner_id,
             access_all=False,
-        ),
+        )
+        channel_dict = next(
+            (
+                dict(item)
+                for item in channels_dict
+                if _channel_idx_value(item) == target_idx
+            ),
+            {},
+        )
+        return (
+            channel_dict,
+            channels_dict,
+            {
+                "created": False,
+                "updated": False,
+                "idempotent": True,
+            },
+        )
+
+    _verify_channel_precondition(
+        client,
+        channel_idx=target_idx,
+        expected_channel_identity=expected_channel_identity,
+        require_empty=bool(plan["created"]),
     )
 
+    _guard_meshcore_public_channel_edit(
+        plan["current_channel"],
+        normalized_name,
+        resolved_secret_hex,
+    )
 
-def _save_channel_and_reload(session_kwargs: dict, channel_idx: int | None, channel_name: str, channel_secret_hex: object) -> tuple[dict, list[dict]]:
+    _, write_meta = _set_channel_with_retry(
+        client,
+        target_idx,
+        normalized_name,
+        resolved_secret_hex,
+    )
+
+    channels = (
+        _load_channels_in_session(
+            client,
+            max_channels,
+            owner_id=owner_id,
+        )
+        if max_channels > 0
+        else []
+    )
+    channels_dict = _channels_to_dict(
+        channels,
+        _device_info_to_dict(device),
+        owner_id=owner_id,
+        access_all=False,
+    )
+
+    channel_dict = next(
+        (
+            dict(item)
+            for item in channels_dict
+            if _channel_idx_value(item) == target_idx
+        ),
+        {
+            "idx": target_idx,
+            "name": normalized_name,
+            "description": "Channel configuration read from the node.",
+            "secret_hex": resolved_secret_hex,
+            "hash": hashlib.sha256(
+                bytes.fromhex(resolved_secret_hex)
+            ).hexdigest()[:2],
+            "channel_identity": _build_channel_identity(
+                normalized_name,
+                resolved_secret_hex,
+            ),
+            "is_public": _is_meshcore_public_channel_name(
+                normalized_name
+            ),
+            "kind": "configured",
+            "last_message_preview": "",
+            "last_message_from_self": False,
+            "last_message_ts": 0,
+        },
+    )
+
+    return (
+        channel_dict,
+        channels_dict,
+        {
+            "created": bool(plan["created"]),
+            "updated": not bool(plan["created"]),
+            "idempotent": False,
+            **dict(write_meta or {}),
+        },
+    )
+
+def _save_channel_and_reload(
+    session_kwargs: dict,
+    channel_idx: int | None,
+    channel_name: str,
+    channel_secret_hex: object,
+    *,
+    expected_channel_identity: str = "",
+) -> tuple[dict, list[dict], dict]:
     with _connection_access_from_kwargs(session_kwargs):
         with _open_meshcore_client(session_kwargs) as client:
             return _save_channel_and_reload_with_standalone_client(
@@ -11466,6 +11574,7 @@ def _save_channel_and_reload(session_kwargs: dict, channel_idx: int | None, chan
                 channel_idx=channel_idx,
                 channel_name=channel_name,
                 channel_secret_hex=channel_secret_hex,
+                expected_channel_identity=expected_channel_identity,
             )
 
 
@@ -11547,10 +11656,72 @@ def _delete_channel_and_reload_with_standalone_client(
     )
     client.delete_channel(channel_idx)
     channels = _load_channels_in_session(client, int(device.max_channels), owner_id=owner_id)
-    _delete_channel_local_records(owner_id, channel_idx, channel_identity, global_by_identity=True)
+    _delete_channel_local_records(owner_id, channel_idx, channel_identity, global_by_identity=False)
     return _channels_to_dict(
         channels,
         _device_info_to_dict(device),
+        owner_id=owner_id,
+        access_all=False,
+    )
+
+
+def _delete_channel_and_reload_with_client(
+    client,
+    session,
+    channel_idx: int,
+) -> list[dict]:
+    if channel_idx < 0:
+        raise ValueError("channel_idx must be non-negative")
+    owner_id = _normalize_owner_id(
+        (session.self_info or {}).get("public_key")
+    )
+    max_channels = int(
+        (session.device or {}).get("max_channels") or 0
+    )
+    existing_channels = (
+        _load_channels_in_session(
+            client,
+            max_channels,
+            owner_id=owner_id,
+        )
+        if max_channels > 0
+        else list(session.channels or [])
+    )
+    existing_channel = next(
+        (
+            item
+            for item in existing_channels
+            if _channel_runtime_idx(item) == int(channel_idx)
+        ),
+        None,
+    )
+    if existing_channel is None:
+        raise ValueError(f"channel idx={channel_idx} not found")
+    channel_identity = _build_channel_identity(
+        _channel_runtime_name(existing_channel),
+        _channel_runtime_secret_hex(existing_channel),
+    )
+    client.delete_channel(channel_idx)
+    channels = (
+        _load_channels_in_session(
+            client,
+            max_channels,
+            owner_id=owner_id,
+        )
+        if max_channels > 0
+        else list(session.channels or [])
+    )
+    _delete_channel_local_records(
+        owner_id,
+        channel_idx,
+        channel_identity,
+        global_by_identity=False,
+    )
+    return _channels_to_dict(
+        channels,
+        _device_info_to_dict(
+            type("DeviceInfo", (), {"max_contacts_div_2": 0, "max_channels": max_channels})()
+        ),
         owner_id=owner_id,
         access_all=False,
     )
@@ -11646,7 +11817,7 @@ def _remove_access_all_meshcorium_channels_from_node(session_kwargs: dict, *, pr
 
 def _pick_first_free_channel_idx_from_dicts(channels: list[dict], max_channels: int) -> int:
     used = {
-        int(channel.get("idx") or -1)
+        _channel_idx_value(channel)
         for channel in list(channels or [])
         if str(channel.get("name") or "").strip()
     }
@@ -12947,7 +13118,6 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                                 body.get("expected_channel_identity") or ""
                             ).strip(),
                         )
-                save_meta = dict(response.get("save_meta") or {}) if session and session.thread and session.thread.is_alive() and not session.stop_event.is_set() else save_meta
                 self._send_json({"channel": channel_dict, "channels": channels_dict, "save_meta": save_meta})
                 return
             if parsed.path == "/api/channels/delete":
