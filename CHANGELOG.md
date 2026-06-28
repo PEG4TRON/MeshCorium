@@ -19,6 +19,8 @@
 - **web/dist rebuild**: with `session.js` status/code/payload fix (d5b5372)
 - **idempotent create race fixes**: standalone path now mirrors active path — raises ChannelConflictError when identity disappears during idempotent create; preflight ValueError→MeshCoreError instead of false ChannelConflictError; #public delete guard in both paths (89ad868, af35fa1)
 - **tests**: backend 12 tests (idx=0, range, idempotent, stale edit, duplicate identity, #public reserved); frontend 8 tests (buildChannelSavePayload, selectSavedChannel) (60da663)
+- **standalone idempotent race fix**: both active and standalone paths now raise ChannelConflictError when identity disappears during idempotent create (af35fa1)
+- **docs**: CHANGELOG updated for full session (0d73e8c)
 
 ---
 
@@ -36,6 +38,8 @@
 - **P0 fix**: save_meta UnboundLocalError в active save, двойная сериализация list[dict] через _channels_to_dict в standalone save/delete удалена, active_session bool flag, preflight except narrowed (8ddb7d0)
 - **idempotent create race fixes**: standalone путь теперь симметричен active — ChannelConflictError при исчезновении identity; preflight ValueError→MeshCoreError вместо ложного ChannelConflictError; защита #public от удаления в обоих путях (89ad868, af35fa1)
 - **тесты**: backend 12 тестов (idx=0, range, idempotent, stale edit, duplicate identity, #public reserved); frontend 8 тестов (buildChannelSavePayload, selectSavedChannel) (60da663)
+- **standalone idempotent race fix**: обе ветки (active + standalone) теперь выбрасывают ChannelConflictError при исчезновении identity во время idempotent create (af35fa1)
+- **docs**: CHANGELOG обновлён за всю сессию (0d73e8c)
 
 ---
 
