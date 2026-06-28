@@ -25,6 +25,7 @@ import MobileMessagesShell from '../components/layout/MobileMessagesShell.vue'
 import MobileNodebar from '../components/layout/MobileNodebar.vue'
 import MobileDockBar from '../components/layout/MobileDockBar.vue'
 import { useIsMobile } from '../composables/useIsMobile'
+import { useNativeShell } from '../composables/useNativeShell'
 import {
   buildCloseShellPanelLocation,
   buildOpenShellPanelLocation,
@@ -61,6 +62,7 @@ const router = useRouter()
 const session = useSessionStore()
 const { t, locale } = useI18n()
 const { isMobile } = useIsMobile()
+const { isNativeShell } = useNativeShell()
 
 const bellIconUrl = '/icons/bell-icon.svg'
 const messagesIconUrl = '/icons/paper-plane.png'
@@ -5628,7 +5630,7 @@ onBeforeUnmount(() => {
 
 <template>
   <!-- MOBILE: Conversation list -->
-  <MobileMessagesShell v-if="isMobile && !mobileWorkspaceOpen">
+  <MobileMessagesShell v-if="isMobile && !mobileWorkspaceOpen" :show-dock="!isNativeShell">
     <template #phonebar>
       <ShellPhonebar />
     </template>
@@ -5767,7 +5769,7 @@ onBeforeUnmount(() => {
       :node-name="session.self?.name || session.selectedSavedConnection?.node_name || t('common.offline')"
       :node-preview-url="nodePreviewUrl"
     />
-    <nav class="mc-mobile-dock">
+    <nav v-if="!isNativeShell" class="mc-mobile-dock">
       <MobileDockBar
         :badge="totalUnreadCount || ''"
         @notifications="toggleNotificationsPanel"

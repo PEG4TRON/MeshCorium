@@ -1,0 +1,19 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.peg4tron.meshcorium.app-mergeDebugResources-37:/values-v18/values-v18.xml",
+            "map": [
+                {
+                    "source": "/home/code/code/meshcorium-client/.android-toolchain/gradle-user-home/caches/8.11.1/transforms/321068b3f75a00961e7d1381d3bf3593/transformed/appcompat-1.7.0/res/values-v18/values-v18.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endColumns": "48",
+                        "endOffsets": "99"
+                    }
+                }
+            ]
+        }
+    ]
+}

@@ -14,10 +14,12 @@ import com.peg4tron.meshcorium.databinding.ActivityUrlEntryBinding
 
 class UrlEntryActivity : AppCompatActivity() {
     private lateinit var binding: ActivityUrlEntryBinding
+    private var returnResult = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val forceEdit = intent.getBooleanExtra(EXTRA_FORCE_EDIT, false)
+        returnResult = intent.getBooleanExtra(EXTRA_RETURN_RESULT, false)
         val savedUrl = AppPrefs.getBaseUrl(this)
         if (!forceEdit && savedUrl.isNotBlank()) {
             openMain()
@@ -47,7 +49,15 @@ class UrlEntryActivity : AppCompatActivity() {
             PushRegistrar.unregisterCurrentDevice(this, previousUrl)
         }
         PushRegistrar.registerCurrentDevice(this, baseUrlOverride = normalized)
-        openMain()
+        if (returnResult) {
+            setResult(RESULT_OK, Intent().apply {
+                putExtra(EXTRA_PREVIOUS_URL, previousUrl)
+                putExtra(EXTRA_UPDATED_URL, normalized)
+            })
+            finish()
+        } else {
+            openMain()
+        }
     }
 
     private fun openMain() {
@@ -94,5 +104,8 @@ class UrlEntryActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_FORCE_EDIT = "force_edit"
+        const val EXTRA_RETURN_RESULT = "return_result"
+        const val EXTRA_PREVIOUS_URL = "previous_url"
+        const val EXTRA_UPDATED_URL = "updated_url"
     }
 }

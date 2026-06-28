@@ -13,6 +13,8 @@ import { describeRestorePendingStatus, buildConnectedSessionStatus, packetTypeLa
 import { useSessionStore } from '../../stores/session'
 import { useUpdateCheck } from '../../composables/useUpdateCheck'
 import { useIsMobile } from '../../composables/useIsMobile'
+import { useNativeShell } from '../../composables/useNativeShell'
+import { sendNativeDockState } from '../../lib/nativeShell'
 import {
   buildCloseShellPanelLocation,
   buildOpenShellPanelLocation,
@@ -26,6 +28,42 @@ const session = useSessionStore()
 const { t, locale } = useI18n()
 const visibility = useDocumentVisibility()
 const { isMobile } = useIsMobile()
+const { isNativeShell } = useNativeShell()
+
+const nativeActiveDockItem = computed(() => {
+  if (notificationsOpen.value) {
+    return 'notifications'
+  }
+  if (route.name === 'messages') {
+    return 'messages'
+  }
+  if (isContactsRoute.value) {
+    return 'contacts'
+  }
+  if (isMapsRoute.value) {
+    return 'maps'
+  }
+  if (route.name === 'settings') {
+    return 'settings'
+  }
+  return 'none'
+})
+
+watch(
+  () => ({
+    active: nativeActiveDockItem.value,
+    panel: activeShellPanel.value,
+    notificationBadge: mobileNotificationBadge.value,
+    connected: Boolean(session.connected),
+  }),
+  (state) => {
+    sendNativeDockState(state)
+  },
+  {
+    immediate: true,
+    deep: true,
+  },
+)
 
 const bellIconUrl = '/icons/bell-icon.svg'
 const messagesIconUrl = '/icons/paper-plane.png'
@@ -211,7 +249,12 @@ const isContactsRoute = computed(() => (
   || route.name === 'contacts-repeater-login'
   || route.name === 'contacts-repeater'
 ))
-const showGlobalMobileDock = computed(() => isMobile.value && !isMessagesRoute.value && !isContactsRoute.value)
+const showGlobalMobileDock = computed(
+  () => isMobile.value
+    && !isNativeShell.value
+    && !isMessagesRoute.value
+    && !isContactsRoute.value,
+)
 
 const activeRailKey = computed(() => {
   if (notificationsOpen.value) {

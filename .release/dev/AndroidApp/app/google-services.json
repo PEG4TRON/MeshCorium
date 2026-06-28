@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "85793668038",
+    "project_id": "meshcorium-fc024",
+    "storage_bucket": "meshcorium-fc024.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:85793668038:android:eba970f36cb20c10f790c7",
+        "android_client_info": {
+          "package_name": "com.peg4tron.meshcorium"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDXmJrK7Jv-JwDECulqsJrt5J5fe4HmM3o"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

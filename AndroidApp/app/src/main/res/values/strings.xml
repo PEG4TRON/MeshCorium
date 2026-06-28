@@ -14,4 +14,12 @@
     <string name="notification_channel_description">Push-уведомления о новых сообщениях из Meshcorium</string>
     <string name="default_notification_title">Meshcorium</string>
     <string name="default_notification_body">Новое сообщение</string>
+    <string name="nav_notifications">Уведомления</string>
+    <string name="nav_messages">Чаты</string>
+    <string name="nav_contacts">Контакты</string>
+    <string name="nav_maps">Карта</string>
+    <string name="nav_settings">Настройки</string>
+    <string name="client_settings_title">Настройки клиента</string>
+    <string name="client_connection_settings">Подключение к серверу</string>
+    <string name="client_connection_settings_summary">Изменить адрес Meshcorium backend</string>
 </resources>

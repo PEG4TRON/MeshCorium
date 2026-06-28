@@ -78,4 +78,22 @@ if (typeof window !== 'undefined') {
   })
 }
 
+import { markNativeShellDocument, installNativeActionBridge } from './lib/nativeShell'
+
+markNativeShellDocument()
+installNativeActionBridge(router)
+
+import { sendNativeDockState } from './lib/nativeShell'
+
+router.afterEach((to) => {
+  if (to.name === 'connect') {
+    sendNativeDockState({
+      active: 'none',
+      panel: '',
+      notificationBadge: '',
+      connected: false,
+    })
+  }
+})
+
 app.mount('#app')

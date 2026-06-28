@@ -1,0 +1,26 @@
+[
+    {
+        "merged": "/home/code/code/meshcorium-client/.android-toolchain/gradle-user-home/daemon/8.11.1/com.peg4tron.meshcorium.app-debug-39:/layout_activity_main.xml.flat",
+        "source": "/home/code/code/meshcorium-client/.android-toolchain/gradle-user-home/daemon/8.11.1/com.peg4tron.meshcorium.app-main-41:/layout/activity_main.xml"
+    },
+    {
+        "merged": "/home/code/code/meshcorium-client/.android-toolchain/gradle-user-home/daemon/8.11.1/com.peg4tron.meshcorium.app-debug-39:/drawable_logo.png.flat",
+        "source": "/home/code/code/meshcorium-client/.android-toolchain/gradle-user-home/daemon/8.11.1/com.peg4tron.meshcorium.app-main-41:/drawable/logo.png"
+    },
+    {
+        "merged": "com.peg4tron.meshcorium.app-debug-39:/drawable_logo.png.flat",
+        "source": "com.peg4tron.meshcorium.app-main-41:/drawable/logo.png"
+    },
+    {
+        "merged": "/home/code/code/meshcorium-client/.android-toolchain/gradle-user-home/daemon/8.11.1/com.peg4tron.meshcorium.app-debug-39:/menu_main_menu.xml.flat",
+        "source": "/home/code/code/meshcorium-client/.android-toolchain/gradle-user-home/daemon/8.11.1/com.peg4tron.meshcorium.app-main-41:/menu/main_menu.xml"
+    },
+    {
+        "merged": "/home/code/code/meshcorium-client/.android-toolchain/gradle-user-home/daemon/8.11.1/com.peg4tron.meshcorium.app-debug-39:/layout_activity_url_entry.xml.flat",
+        "source": "/home/code/code/meshcorium-client/.android-toolchain/gradle-user-home/daemon/8.11.1/com.peg4tron.meshcorium.app-main-41:/layout/activity_url_entry.xml"
+    },
+    {
+        "merged": "/home/code/code/meshcorium-client/.android-toolchain/gradle-user-home/daemon/8.11.1/com.peg4tron.meshcorium.app-debug-39:/drawable_ic_notification.xml.flat",
+        "source": "/home/code/code/meshcorium-client/.android-toolchain/gradle-user-home/daemon/8.11.1/com.peg4tron.meshcorium.app-main-41:/drawable/ic_notification.xml"
+    }
+]

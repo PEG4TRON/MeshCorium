@@ -13,6 +13,7 @@ import ShellPageFrame from '../components/layout/ShellPageFrame.vue'
 import ShellPhonebar from '../components/layout/ShellPhonebar.vue'
 import PluginDropdown from '../components/ui/PluginDropdown.vue'
 import { useIsMobile } from '../composables/useIsMobile'
+import { useNativeShell } from '../composables/useNativeShell'
 import { filterStatusTextForTransport } from '../lib/statusText'
 import { buildToggleShellPanelLocation } from '../lib/shellPanels'
 import {
@@ -49,6 +50,7 @@ const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
 const { isMobile } = useIsMobile()
+const { isNativeShell } = useNativeShell()
 
 const bellIconUrl = '/icons/bell-icon.svg'
 const messagesIconUrl = '/icons/paper-plane.png'
@@ -4024,7 +4026,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <MobileContactsShell v-if="isMobile">
+  <MobileContactsShell v-if="isMobile" :show-dock="!isNativeShell">
     <template #phonebar>
       <ShellPhonebar />
     </template>

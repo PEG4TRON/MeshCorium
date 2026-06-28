@@ -1,0 +1,14 @@
+[
+    {
+        "merged": "/home/code/code/meshcorium-client/.android-toolchain/gradle-user-home/daemon/8.11.1/com.peg4tron.meshcorium.app-mergeDebugResources-38:/layout/activity_main.xml",
+        "source": "/home/code/code/meshcorium-client/.android-toolchain/gradle-user-home/daemon/8.11.1/com.peg4tron.meshcorium.app-main-41:/layout/activity_main.xml"
+    },
+    {
+        "merged": "/home/code/code/meshcorium-client/.android-toolchain/gradle-user-home/daemon/8.11.1/com.peg4tron.meshcorium.app-mergeDebugResources-38:/layout/activity_url_entry.xml",
+        "source": "/home/code/code/meshcorium-client/.android-toolchain/gradle-user-home/daemon/8.11.1/com.peg4tron.meshcorium.app-main-41:/layout/activity_url_entry.xml"
+    },
+    {
+        "merged": "com.peg4tron.meshcorium.app-mergeDebugResources-38:/layout/activity_main.xml",
+        "source": "com.peg4tron.meshcorium.app-main-41:/layout/activity_main.xml"
+    }
+]

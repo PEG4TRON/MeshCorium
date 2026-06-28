@@ -1,0 +1,20 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.peg4tron.meshcorium.app-mergeDebugResources-37:/values-hdpi-v4/values-hdpi-v4.xml",
+            "map": [
+                {
+                    "source": "/home/code/code/meshcorium-client/.android-toolchain/gradle-user-home/caches/8.11.1/transforms/321068b3f75a00961e7d1381d3bf3593/transformed/appcompat-1.7.0/res/values-hdpi-v4/values-hdpi-v4.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endLines": "6",
+                        "endColumns": "13",
+                        "endOffsets": "327"
+                    }
+                }
+            ]
+        }
+    ]
+}

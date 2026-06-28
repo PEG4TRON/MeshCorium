@@ -1,3 +1,12 @@
+<script setup>
+defineProps({
+  showDock: {
+    type: Boolean,
+    default: true,
+  },
+})
+</script>
+
 <template>
   <div class="mc-mobile-shell">
     <div class="mc-mobile-phonebar">
@@ -12,7 +21,7 @@
       <slot name="nodebar" />
     </div>
 
-    <nav class="mc-mobile-dock">
+    <nav v-if="showDock" class="mc-mobile-dock">
       <slot name="dock" />
     </nav>
   </div>
