@@ -5413,14 +5413,14 @@ def _resolve_channel_runtime_dict(
             return dict(_canonical_meshcore_public_channel_dict(int(channel_idx)))
         return None
     return {
-        "idx": int(slot.get("channel_idx") or -1),
+        "idx": _channel_idx_value({"idx": slot.get("channel_idx")}, default=-1),
         "name": _channel_runtime_name({
-            "idx": int(slot.get("channel_idx") or -1),
+            "idx": _channel_idx_value({"idx": slot.get("channel_idx")}, default=-1),
             "name": str(slot.get("channel_name") or ""),
             "secret_hex": str(slot.get("channel_secret_hex") or ""),
         }),
         "secret_hex": _channel_runtime_secret_hex({
-            "idx": int(slot.get("channel_idx") or -1),
+            "idx": _channel_idx_value({"idx": slot.get("channel_idx")}, default=-1),
             "name": str(slot.get("channel_name") or ""),
             "secret_hex": str(slot.get("channel_secret_hex") or ""),
         }),
@@ -5429,12 +5429,12 @@ def _resolve_channel_runtime_dict(
             slot.get("channel_identity")
             or _build_channel_identity(
                 _channel_runtime_name({
-                    "idx": int(slot.get("channel_idx") or -1),
+                    "idx": _channel_idx_value({"idx": slot.get("channel_idx")}, default=-1),
                     "name": str(slot.get("channel_name") or ""),
                     "secret_hex": str(slot.get("channel_secret_hex") or ""),
                 }),
                 _channel_runtime_secret_hex({
-                    "idx": int(slot.get("channel_idx") or -1),
+                    "idx": _channel_idx_value({"idx": slot.get("channel_idx")}, default=-1),
                     "name": str(slot.get("channel_name") or ""),
                     "secret_hex": str(slot.get("channel_secret_hex") or ""),
                 }),
@@ -8367,7 +8367,7 @@ def _backfill_channel_message_identities(owner_id: str | None) -> None:
         )
         for slot in slots:
             channel_identity = str(slot.get("channel_identity") or "").strip()
-            channel_idx = int(slot.get("channel_idx") or -1)
+            channel_idx = _channel_idx_value({"idx": slot.get("channel_idx")}, default=-1)
             if not channel_identity or channel_idx < 0:
                 continue
             conn.execute(
@@ -10108,7 +10108,7 @@ def _build_messages_conversation_directory(
     for slot in scoped_slots:
         _upsert_channel_entry({
             "owner_id": str(slot.get("owner_id") or ""),
-            "idx": int(slot.get("channel_idx") or -1),
+            "idx": _channel_idx_value({"idx": slot.get("channel_idx")}, default=-1),
             "name": str(slot.get("channel_name") or ""),
             "secret_hex": str(slot.get("channel_secret_hex") or ""),
             "hash": str(slot.get("channel_hash") or ""),
@@ -11202,14 +11202,14 @@ def _merge_channel_slot_metadata(owner_id: str | None, channels: list[dict]) -> 
         return channels
     slot_rows = _list_node_channel_slots(normalized_owner_id)
     slot_by_idx = {
-        int(slot.get("channel_idx") or -1): slot
+        _channel_idx_value({"idx": slot.get("channel_idx")}, default=-1): slot
         for slot in slot_rows
-        if int(slot.get("channel_idx") or -1) >= 0
+        if _channel_idx_value({"idx": slot.get("channel_idx")}, default=-1) >= 0
     }
     merged_channels: list[dict] = []
     for channel in channels:
         item = dict(channel or {})
-        slot = slot_by_idx.get(int(item.get("idx") or -1))
+        slot = slot_by_idx.get(_channel_idx_value(item))
         if slot:
             item["access_all_messages_enabled"] = bool(slot.get("access_all_messages_enabled", False))
             item["access_all_messages_enabled_at"] = int(slot.get("access_all_messages_enabled_at", 0) or 0)
@@ -11860,7 +11860,7 @@ def _remove_access_all_meshcorium_channels_from_node_runtime(
         })
     for slot in marked_slots:
         processed += 1
-        channel_idx = int(slot.get("channel_idx") or -1)
+        channel_idx = _channel_idx_value({"idx": slot.get("channel_idx")}, default=-1)
         channel_identity = str(slot.get("channel_identity") or "").strip()
         if channel_idx < 0 or not channel_identity:
             continue
