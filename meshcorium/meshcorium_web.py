@@ -5314,23 +5314,40 @@ def _broadcast_contacts_snapshot(
 ) -> None:
     resolved_owner_id = _resolve_owner_id_for_port(port)
     session = _get_background_session(port)
+
     device = {}
     if session is not None:
         with session.snapshot_lock:
             device = dict(session.device or {})
-    source_contacts = contacts_snapshot if contacts_snapshot is not None else CONTACT_BACKEND.compose_snapshot(live_contacts)
-    with _contact_owner_scope(port=port, owner_id=resolved_owner_id):
-        contacts_payload = _compact_contacts_for_client(
-            source_contacts
+
+    with _contact_owner_scope(
+        port=port,
+        owner_id=resolved_owner_id,
+        access_all=False,
+    ):
+        source_contacts = (
+            list(contacts_snapshot)
+            if contacts_snapshot is not None
+            else CONTACT_BACKEND.compose_snapshot(live_contacts)
         )
+        contacts_payload = _compact_contacts_for_client(source_contacts)
+        contact_summary = _build_contact_count_summary(
+            source_contacts,
+            device,
+        )
+
     _broadcast_event(
         port,
         {
             "event": "contacts-sync",
             "reason": str(reason or "auto"),
             "contacts": contacts_payload,
-            "contact_summary": _build_contact_count_summary(source_contacts, device),
-            "recent_repeaters_count": _get_recent_repeater_count(session) if session else 0,
+            "contact_summary": contact_summary,
+            "recent_repeaters_count": (
+                _get_recent_repeater_count(session)
+                if session
+                else 0
+            ),
         },
     )
 
@@ -6619,7 +6636,7 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                     session.next_reconnect_at = 0
                     session.reconnect_attempts = 0
                     session.last_connected_at = utc_now_epoch()
-                    _safe_device_update(session, device_dict, context="_run_background_session:initial")
+                    _safe_device_update(session, device_dict, new_self_info=self_dict, context="_run_background_session:initial")
                     session.self_info = self_dict
                     session.collections_ready = False
                     session.contacts = []
@@ -6643,7 +6660,7 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                 _record_successful_connection(session.config, self_dict, device_dict)
                 if initialized_ble_pin:
                     with session.snapshot_lock:
-                        _safe_device_update(session, dict(device_dict), context="_run_background_session:ble-pin")
+                        _safe_device_update(session, dict(device_dict), new_self_info=self_dict, context="_run_background_session:ble-pin")
                 _set_background_bootstrap_stage(
                     session,
                     "load-radio-stats",
