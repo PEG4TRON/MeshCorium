@@ -5743,7 +5743,9 @@ def _verify_channel_precondition(
 ) -> None:
     try:
         current_channel = client.get_channel(channel_idx)
-    except (MeshCoreError, SerialException, ValueError) as exc:
+    except (MeshCoreError, SerialException):
+        raise
+    except ValueError as exc:
         raise ChannelConflictError(
             f"cannot verify channel idx={channel_idx}: {exc}"
         ) from exc
@@ -11458,11 +11460,12 @@ def _save_channel_and_reload_with_standalone_client(
             else []
         )
         channels_dict = channels
+        requested_identity = str(plan["requested_identity"])
         channel_dict = next(
             (
                 dict(item)
                 for item in channels_dict
-                if _channel_idx_value(item) == target_idx
+                if _channel_runtime_identity(item) == requested_identity
             ),
             {},
         )
@@ -11633,6 +11636,8 @@ def _delete_channel_and_reload_with_standalone_client(
 ) -> list[dict]:
     if channel_idx < 0:
         raise ValueError("channel_idx must be non-negative")
+    if channel_idx == 0:
+        raise ValueError("official MeshCore #public channel cannot be deleted")
     device = client.query_device(protocol_version)
     self_info = client.app_start(app_name, app_version)
     owner_id = _normalize_owner_id(getattr(self_info, "public_key", ""))
@@ -11657,6 +11662,8 @@ def _delete_channel_and_reload_with_client(
 ) -> list[dict]:
     if channel_idx < 0:
         raise ValueError("channel_idx must be non-negative")
+    if channel_idx == 0:
+        raise ValueError("official MeshCore #public channel cannot be deleted")
     owner_id = _normalize_owner_id(
         (session.self_info or {}).get("public_key")
     )
@@ -11868,14 +11875,19 @@ def _save_channel_and_reload_with_client(
             if max_channels > 0
             else list(session.channels or [])
         )
+        requested_identity = str(plan["requested_identity"])
         channel_dict = next(
             (
                 dict(item)
                 for item in channels_dict
-                if _channel_idx_value(item) == target_idx
+                if _channel_runtime_identity(item) == requested_identity
             ),
-            dict(plan["current_channel"] or {}),
+            None,
         )
+        if channel_dict is None:
+            raise ChannelConflictError(
+                "channel identity changed during idempotent create; reload channels"
+            )
 
         return (
             channel_dict,
