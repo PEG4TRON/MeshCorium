@@ -7,6 +7,26 @@
 - **node_limit=0 в contacts-sync**: `_broadcast_contacts_snapshot()` теперь передаёт `device` в `_build_contact_count_summary()`, фронтенд `SettingsView.vue` использует `session.device.max_contacts_base` как fallback (a226401)
 - **hardening session.device перезаписи**: `_safe_device_update()` сохраняет старый `max_contacts` если та же нода сбросила лимит в 0 при повторном `query_device()`, 7 точек перезаписи защищены (c9c5195)
 
+### CAS & Channel Operations
+
+- **CAS channel writes**: `_resolve_channel_write_plan` with expected_channel_identity check, idempotent create, idx range validation, slot 0 reserved for #public, preflight GET before SET, ChannelConflictError + HTTP 409, duplicate channel_identity diagnostics (1019910)
+- **preserve idx=0**: `_channel_idx_value` replaces `int(get(idx) or -1)` in `_merge_channel_slot_metadata` for correct zero-index handling (6ee3b85)
+- **owner-scoped channel deletion**: `_delete_channel_local_records` global_by_identity defaults to False, deletion scoped to current owner (6ee3b85)
+- **frontend channel edit CAS**: expected_channel_identity passed on save+edit, 409 conflict handled with reload channels, i18n keys channelConflict (eaee9ab)
+- **contact capability reconnect fix**: new_self_info=self_dict passed on initial bootstrap and BLE PIN reconnect for correct node comparison in `_safe_device_update` (14f3756)
+- **web/dist rebuild**: after SettingsView.vue and MessagesView.vue edits (eaee9ab)
+
+---
+
+### CAS и операции с каналами
+
+- **CAS channel writes**: `_resolve_channel_write_plan` с проверкой expected_channel_identity, идемпотентный create, валидация диапазона idx, слот 0 зарезервирован для #public, preflight GET перед SET, ChannelConflictError + HTTP 409, диагностика дублей channel_identity (1019910)
+- **preserve idx=0**: `_channel_idx_value` заменяет `int(get(idx) or -1)` в `_merge_channel_slot_metadata` для корректной обработки нулевого индекса (6ee3b85)
+- **owner-scoped channel deletion**: `_delete_channel_local_records` global_by_identity default False, удаление ограничено текущим owner (6ee3b85)
+- **frontend channel edit CAS**: expected_channel_identity передаётся при save+edit, 409 conflict обрабатывается с reload channels, i18n ключи channelConflict (eaee9ab)
+- **contact capability reconnect fix**: new_self_info=self_dict передаётся при initial bootstrap и BLE PIN reconnect для корректного сравнения нод в `_safe_device_update` (14f3756)
+- **web/dist rebuild**: после правок SettingsView.vue и MessagesView.vue (eaee9ab)
+
 ---
 
 ## Dev / Unreleased (2026-06-19)
