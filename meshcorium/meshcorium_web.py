@@ -5318,9 +5318,10 @@ def _broadcast_contacts_snapshot(
     if session is not None:
         with session.snapshot_lock:
             device = dict(session.device or {})
+    source_contacts = contacts_snapshot if contacts_snapshot is not None else CONTACT_BACKEND.compose_snapshot(live_contacts)
     with _contact_owner_scope(port=port, owner_id=resolved_owner_id):
         contacts_payload = _compact_contacts_for_client(
-            contacts_snapshot if contacts_snapshot is not None else CONTACT_BACKEND.compose_snapshot(live_contacts)
+            source_contacts
         )
     _broadcast_event(
         port,
@@ -5328,7 +5329,7 @@ def _broadcast_contacts_snapshot(
             "event": "contacts-sync",
             "reason": str(reason or "auto"),
             "contacts": contacts_payload,
-            "contact_summary": _build_contact_count_summary(contacts_snapshot if contacts_snapshot is not None else CONTACT_BACKEND.compose_snapshot(live_contacts), device),
+            "contact_summary": _build_contact_count_summary(source_contacts, device),
             "recent_repeaters_count": _get_recent_repeater_count(session) if session else 0,
         },
     )
