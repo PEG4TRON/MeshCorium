@@ -1,5 +1,14 @@
 # Changelog
 
+## Dev / Unreleased (2026-06-28)
+
+### Fixes
+
+- **node_limit=0 в contacts-sync**: `_broadcast_contacts_snapshot()` теперь передаёт `device` в `_build_contact_count_summary()`, фронтенд `SettingsView.vue` использует `session.device.max_contacts_base` как fallback (a226401)
+- **hardening session.device перезаписи**: `_safe_device_update()` сохраняет старый `max_contacts` если та же нода сбросила лимит в 0 при повторном `query_device()`, 7 точек перезаписи защищены (c9c5195)
+
+---
+
 ## Dev / Unreleased (2026-06-19)
 
 ### Message Search in Dialogs (desktop) — GitHub issues #112-118
