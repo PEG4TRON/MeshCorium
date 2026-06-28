@@ -7138,7 +7138,7 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                                 self_dict = dict(snapshot.get("self") or {})
                                 owner_id = _normalize_owner_id(self_dict.get("public_key"))
                                 with session.snapshot_lock:
-                                    _safe_device_update(session, device_dict, context="set_node_location")
+                                    _safe_device_update(session, device_dict, new_self_info=dict(snapshot.get("self") or {}), context="set_node_location")
                                     session.self_info = self_dict
                                     session.radio_stats = snapshot.get("radio_stats")
                                     session.self_telemetry = snapshot.get("self_telemetry")
@@ -7186,7 +7186,7 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                                     include_channels=False,
                                 )
                                 with session.snapshot_lock:
-                                    _safe_device_update(session, dict(snapshot.get("device") or {}), context="meshcore_params_snapshot")
+                                    _safe_device_update(session, dict(snapshot.get("device") or {}), new_self_info=dict(snapshot.get("self") or {}), context="meshcore_params_snapshot")
                                     session.self_info = dict(snapshot.get("self") or {})
                                     session.radio_stats = snapshot.get("radio_stats")
                                     session.self_telemetry = snapshot.get("self_telemetry")
@@ -7212,7 +7212,7 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                                 device_dict = dict(snapshot.get("device") or {})
                                 owner_id = _normalize_owner_id(self_dict.get("public_key"))
                                 with session.snapshot_lock:
-                                    _safe_device_update(session, device_dict, context="apply_meshcore_params")
+                                    _safe_device_update(session, device_dict, new_self_info=dict(snapshot.get("self") or {}), context="apply_meshcore_params")
                                     session.self_info = self_dict
                                     session.radio_stats = snapshot.get("radio_stats")
                                     session.self_telemetry = snapshot.get("self_telemetry")
@@ -10535,13 +10535,22 @@ def _device_info_to_dict(device):
     }
 
 
-def _safe_device_update(session, new_device, context="unknown"):
+def _safe_device_update(
+    session,
+    new_device,
+    *,
+    new_self_info=None,
+    context="unknown",
+):
     """Update session.device safely: preserve max_contacts if suspicious drop detected.
+
+    Compares nodes by public_key (self_info) — not model/firmware which can match
+    across physically different nodes.
 
     Conditions for preserving old max_contacts:
     - same active session with existing device
     - old max_contacts > 0, new max_contacts == 0
-    - same node (node_id match, or model+firmware match)
+    - same node (public_key match via _normalize_owner_id)
     - logs warning about suspicious drop
     """
     if session is None or not new_device:
@@ -10550,41 +10559,51 @@ def _safe_device_update(session, new_device, context="unknown"):
         return
 
     old_device = dict(session.device or {})
-    old_max = int(old_device.get("max_contacts", 0) or old_device.get("max_contacts_base", 0) or 0)
-    new_max = int(new_device.get("max_contacts", 0) or new_device.get("max_contacts_base", 0) or 0)
+    old_self = dict(session.self_info or {})
+    incoming_self = dict(new_self_info or {})
 
-    # Same node guard: match by node_id or model+firmware
-    same_node = False
-    if old_device and new_device:
-        old_nid = old_device.get("node_id")
-        new_nid = new_device.get("node_id")
-        if old_nid and new_nid and str(old_nid) == str(new_nid):
-            same_node = True
-        elif (old_device.get("model") and new_device.get("model")
-              and old_device["model"] == new_device["model"]
-              and old_device.get("firmware_version") == new_device.get("firmware_version")):
-            same_node = True
+    old_public_key = _normalize_owner_id(old_self.get("public_key"))
+    new_public_key = _normalize_owner_id(incoming_self.get("public_key"))
 
-    if old_max > 0 and new_max == 0 and same_node:
-        # Suspicious: same node dropped max_contacts to 0 — preserve old values
-        suspicious_fields = {"max_contacts", "max_contacts_base", "max_contacts_reported"}
+    same_node = bool(
+        old_public_key
+        and new_public_key
+        and old_public_key == new_public_key
+    )
+
+    old_max = int(
+        old_device.get("max_contacts")
+        or old_device.get("max_contacts_base")
+        or 0
+    )
+    new_max = int(
+        new_device.get("max_contacts")
+        or new_device.get("max_contacts_base")
+        or 0
+    )
+
+    if same_node and old_max > 0 and new_max == 0:
         merged = dict(new_device)
-        for field in suspicious_fields:
-            old_val = old_device.get(field, 0)
-            if old_val and int(old_val) > 0:
-                merged[field] = int(old_val)
+        for field in (
+            "max_contacts",
+            "max_contacts_base",
+            "max_contacts_reported",
+        ):
+            if int(old_device.get(field) or 0) > 0:
+                merged[field] = int(old_device[field])
         session.device = merged
         import logging
         _logger = logging.getLogger("meshcorium")
         _logger.warning(
-            "Suspicious device snapshot in %s: max_contacts dropped %s->%s (node_id=%s, model=%s). "
-            "Preserving old max_contacts.",
-            context, old_max, new_max,
-            new_device.get("node_id", "?"),
-            new_device.get("model", "?")
+            "Suspicious device snapshot in %s: "
+            "max_contacts dropped %s->%s; preserving previous value",
+            context,
+            old_max,
+            new_max,
         )
-    else:
-        session.device = new_device
+        return
+
+    session.device = dict(new_device)
 
 
 def _self_info_to_dict(info):
@@ -13077,7 +13096,7 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                 session = _get_background_session(conn["port"])
                 if session:
                     with session.snapshot_lock:
-                        _safe_device_update(session, device_dict, context="ws_node_name")
+                        _safe_device_update(session, device_dict, new_self_info=dict(snapshot.get("self") or {}), context="ws_node_name")
                         session.self_info = self_dict
                         session.radio_stats = snapshot["radio_stats"]
                         session.self_telemetry = snapshot["self_telemetry"]
@@ -13176,7 +13195,7 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                 session = _get_background_session(conn["port"])
                 if session:
                     with session.snapshot_lock:
-                        _safe_device_update(session, device_dict, context="ws_other")
+                        _safe_device_update(session, device_dict, new_self_info=dict(snapshot.get("self") or {}), context="ws_other")
                         session.self_info = self_dict
                         session.radio_stats = snapshot["radio_stats"]
                         session.self_telemetry = snapshot["self_telemetry"]
