@@ -6039,6 +6039,17 @@ def _persist_node_channel_slots(owner_id: str | None, channels: list[dict]) -> N
                 "last_seen_at": now_epoch,
             }
         )
+    # Deduplicate by channel_identity — keep last occurrence
+    deduped: dict[str, dict] = {}
+    for record in records:
+        identity = str(record.get("channel_identity") or "")
+        if identity:
+            deduped[identity] = record
+        else:
+            # Records without identity are kept as-is (should not normally happen)
+            deduped[f"__no_identity_{id(record)}"] = record
+    records = list(deduped.values())
+
     if not records:
         return
     with DB_LOCK, sqlite3.connect(DB_PATH) as conn:
