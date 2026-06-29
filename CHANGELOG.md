@@ -35,8 +35,7 @@
 - Removed dead mc-page--global-mobile-dock CSS rule
 - Settings workspace and section-stack padding adjusted for native-shell
 
-### Test Server
-- Deployed and running on test stand (192.168.4.3:8080)
+
 
 ---
 
@@ -72,8 +71,7 @@
 - Убрано мёртвое CSS-правило mc-page--global-mobile-dock
 - Отступы Settings workspace и section-stack скорректированы для native-shell
 
-### Тестовый стенд
-- Развёрнут и работает на тестовом стенде (192.168.4.3:8080)
+
 
 ## Dev / Unreleased (2026-06-19)
 
