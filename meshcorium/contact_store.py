@@ -8,6 +8,7 @@ transient runtime set and should not be treated as the durable full universe.
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -238,6 +239,28 @@ def _apply_contact_store_migration(conn: sqlite3.Connection, version: int) -> No
 
 def init_contact_store_schema(conn: sqlite3.Connection) -> None:
     current_version = _get_contact_store_schema_version(conn)
+    # GUARD: if DB has contacts_cache with data but schema_version is 0,
+    # the meta table was corrupted (likely WAL not checkpointed after crash).
+    # Do NOT replay migrations — just set the correct version and continue.
+    if not _contacts_cache_exists(conn):
+        pass  # table doesn't exist — proceed with normal creation below
+    elif current_version == 0:
+        # DB has data but schema_version claims 0 — WAL corruption after crash.
+        # Check if contacts_cache actually has rows to confirm it's a real DB.
+        row_count = conn.execute(
+            "SELECT COUNT(*) FROM contacts_cache"
+        ).fetchone()[0]
+        if row_count > 0:
+            logging.warning(
+                "contacts_cache has %d rows but schema_version=0 "
+                "(likely WAL not checkpointed after crash). "
+                "Setting schema_version=%d and skipping migrations.",
+                row_count, CONTACT_STORE_SCHEMA_VERSION
+            )
+            _set_contact_store_schema_version(
+                conn, CONTACT_STORE_SCHEMA_VERSION
+            )
+            return
     if not _contacts_cache_exists(conn):
         _create_contacts_cache_current_schema(conn)
         _set_contact_store_schema_version(conn, CONTACT_STORE_SCHEMA_VERSION)

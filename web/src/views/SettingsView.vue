@@ -227,6 +227,8 @@ const updateCheck = ref({
 })
 const updateCheckLoading = ref(false)
 const updateCheckError = ref('')
+const mergeBackupsLoading = ref(false)
+const mergeBackupsResult = ref('')
 
 async function loadUpdateCheck() {
   updateCheckLoading.value = true
@@ -248,6 +250,30 @@ async function loadUpdateCheck() {
     meshcoriumDisplayVersion.value = '0.8.3'
   } finally {
     updateCheckLoading.value = false
+  }
+}
+
+async function onMergeBackups() {
+  if (mergeBackupsLoading.value) return
+  mergeBackupsLoading.value = true
+  mergeBackupsResult.value = ''
+  try {
+    const data = await session.api('/api/contacts/merge-backups', {
+      method: 'POST',
+      body: {}
+    })
+    if (data.total_imported > 0) {
+      mergeBackupsResult.value = t('settings.about.mergeResultOK', {
+        new: data.new,
+        scanned: data.scanned_dirs
+      })
+    } else {
+      mergeBackupsResult.value = t('settings.about.mergeResultEmpty')
+    }
+  } catch (e) {
+    mergeBackupsResult.value = t('settings.about.mergeResultFailed')
+  } finally {
+    mergeBackupsLoading.value = false
   }
 }
 
@@ -7068,6 +7094,23 @@ onBeforeUnmount(() => {
                 {{ installUpdateBusy ? '...' : t('settings.about.install') }}
               </button>
             </div>
+          </div>
+        </section>
+
+        <section class="mc-settings-section">
+          <div class="mc-settings-row">
+            <div>
+              <div class="mc-settings-row-label">{{ t('settings.about.mergeBackupsLabel') }}</div>
+              <div class="mc-settings-row-hint">{{ t('settings.about.mergeBackupsHint') }}</div>
+            </div>
+            <button type="button" class="mc-btn mc-btn--sm"
+              :disabled="mergeBackupsLoading"
+              @click="onMergeBackups">
+              {{ mergeBackupsLoading ? t('common.merging') : t('settings.about.mergeAction') }}
+            </button>
+          </div>
+          <div v-if="mergeBackupsResult" class="mc-settings-row-hint" style="margin-top:6px">
+            {{ mergeBackupsResult }}
           </div>
         </section>
 

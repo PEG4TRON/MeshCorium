@@ -60,7 +60,7 @@ mkdir -p "${BACKUP_DIR}"
 for path in "${KEEP_PATHS[@]}"; do
     if [[ -e "${SCRIPT_DIR}/${path}" ]]; then
         mkdir -p "$(dirname "${BACKUP_DIR}/${path}")"
-        cp -a "${SCRIPT_DIR}/${path}" "${BACKUP_DIR}/${path}"
+        cp -af "${SCRIPT_DIR}/${path}" "${BACKUP_DIR}/${path}"
     fi
 done
 
@@ -83,7 +83,7 @@ for item in "${extract_dir}"/*; do
         continue
     fi
     rm -rf "${SCRIPT_DIR:?}/${name}"
-    cp -a "${item}" "${SCRIPT_DIR}/${name}"
+    cp -af "${item}" "${SCRIPT_DIR}/${name}"
 done
 
 # 5b. Cleanup orphaned flat .py files from pre-package versions (≤0.8.2 → 0.9+)
@@ -102,15 +102,15 @@ done
 echo "restoring data..."
 if [[ -d "${BACKUP_DIR}/data" ]]; then
     mkdir -p "${DATA_DIR}"
-    cp -a "${BACKUP_DIR}/data"/* "${DATA_DIR}/" 2>/dev/null || true
+    cp -af "${BACKUP_DIR}/data"/* "${DATA_DIR}/" 2>/dev/null || true
 fi
 if [[ -d "${BACKUP_DIR}/logs" ]]; then
     mkdir -p "${LOGS_DIR}"
-    cp -a "${BACKUP_DIR}/logs"/* "${LOGS_DIR}/" 2>/dev/null || true
+    cp -af "${BACKUP_DIR}/logs"/* "${LOGS_DIR}/" 2>/dev/null || true
 fi
 if [[ -d "${BACKUP_DIR}/other" ]]; then
     mkdir -p "${SCRIPT_DIR}/other"
-    cp -a "${BACKUP_DIR}/other"/* "${SCRIPT_DIR}/other/" 2>/dev/null || true
+    cp -af "${BACKUP_DIR}/other"/* "${SCRIPT_DIR}/other/" 2>/dev/null || true
 fi
 
 # 6b. Merge client_settings.json — preserve user values, add missing keys from new release.

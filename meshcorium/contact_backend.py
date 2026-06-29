@@ -18,6 +18,10 @@ import threading
 import dataclasses
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
+import time
+import os
+import sqlite3
 
 import contact_service
 import contact_store
@@ -1182,3 +1186,66 @@ class ContactBackend:
             ensure_contact_on_node=self.ensure_contact_on_node,
             touch_cached_contact=lambda target_public_key: self.touch_cached_contact(target_public_key, interaction=True),
         )
+
+    def merge_backup_contacts(self, old_releases_dir: str | None = None) -> dict:
+        """
+        Scan old-releases/ backups from last 7 days and merge contacts
+        into the live database. Returns {ok, scanned_dirs, merged, new}.
+        """
+        if old_releases_dir is None:
+            old_releases_dir = os.path.join(os.path.dirname(self.db_path), "..", "old-releases")
+        old_releases_path = Path(old_releases_dir)
+        merged = 0
+        new = 0
+        scanned_dirs = 0
+        if not old_releases_path.is_dir():
+            return {"ok": True, "scanned_dirs": 0, "merged": 0, "new": 0,
+                    "message": "no backup directory found"}
+        cutoff = time.time() - (7 * 86400)
+        existing_keys = {
+            c["public_key"] for c in self.list_cached_contacts(limit=0)
+            if c.get("public_key")
+        }
+        for backup_dir in sorted(old_releases_path.iterdir(), reverse=True):
+            if not backup_dir.is_dir():
+                continue
+            backup_db = backup_dir / "data" / "meshcorium_contacts.sqlite3"
+            if not backup_db.is_file():
+                continue
+            try:
+                mtime = backup_db.stat().st_mtime
+            except OSError:
+                continue
+            if mtime < cutoff:
+                continue
+            scanned_dirs += 1
+            try:
+                backup_conn = sqlite3.connect(str(backup_db))
+                backup_conn.row_factory = sqlite3.Row
+                rows = backup_conn.execute(
+                    "SELECT * FROM contacts_cache"
+                ).fetchall()
+                backup_conn.close()
+            except Exception:
+                continue
+            to_persist = []
+            for row in rows:
+                d = dict(row)
+                pk = d.get("public_key")
+                if not pk:
+                    continue
+                if pk in existing_keys:
+                    merged += 1
+                else:
+                    d["live"] = 0
+                    d["_merged_from_backup"] = True
+                    to_persist.append(d)
+                    existing_keys.add(pk)
+                    new += 1
+            if to_persist:
+                try:
+                    self.persist_contacts_cache(to_persist)
+                except Exception:
+                    pass
+        return {"ok": True, "scanned_dirs": scanned_dirs,
+                "merged": merged, "new": new, "total_imported": new}

@@ -452,7 +452,7 @@ perform_supervised_update() {
     for item in "${SCRIPT_DIR}"/*; do
         name="$(basename "${item}")"
         [[ "${name}" == ".venv" || "${name}" == "node_modules" || "${name}" == "logs" || "${name}" == "old-releases" || "${name}" == ".update-backup" ]] && continue
-        cp -a "${item}" "${backup_path}/"
+        cp -af "${item}" "${backup_path}/"
     done
 
     # 3. Run updater
@@ -495,7 +495,7 @@ perform_supervised_update() {
             name="$(basename "${item}")"
             [[ "${name}" == "old-releases" ]] && continue
             rm -rf "${SCRIPT_DIR:?}/${name}"
-            cp -a "${item}" "${SCRIPT_DIR}/${name}"
+            cp -af "${item}" "${SCRIPT_DIR}/${name}"
         done
     fi
     write_current_version "${old_version}"

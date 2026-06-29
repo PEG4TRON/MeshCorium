@@ -13922,6 +13922,11 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                     )
                     self._send_json(result)
                 return
+            # Merge contacts from old-release backups (post-update recovery)
+            if parsed.path == "/api/contacts/merge-backups":
+                result = CONTACT_BACKEND.merge_backup_contacts()
+                self._send_json(result)
+                return
             if parsed.path == "/api/contacts/trace-route/start":
                 selected_public_keys = [str(item or "").strip().lower() for item in list(body.get("selected_public_keys") or []) if str(item or "").strip()]
                 route_path_hash_len = int(body.get("route_path_hash_len") or 2)
