@@ -292,7 +292,7 @@ export default {
       loginScrollerNote: 'The login step is now native to the Vue contacts route family. On desktop it opens as an overlay; on mobile it stays a dedicated screen.',
       loginTitle: 'Repeater login',
       loginMeta: 'Target {target} · {publicKey}. Enter the remote node admin password.',
-      loginMemoryNote: 'The password is kept only in the current Vue session memory and is cleared when the login / management flow is left.',
+      loginMemoryNote: 'Password is saved in contacts database for future connections.',
       savedAuthAutoLoginNote: 'Authorization data for this repeater is already saved in the companion backend DB. The password field stays hidden and login runs automatically.',
       loginRetryNotice: 'Try again. The repeater may have been busy forwarding someone else’s ping when the request arrived.',
       loginSubmit: 'Apply',

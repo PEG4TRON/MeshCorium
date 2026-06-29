@@ -292,7 +292,7 @@ export default {
       loginScrollerNote: 'Login-step теперь нативный для Vue contacts route family. На desktop он открывается как overlay, на mobile остаётся отдельным screen.',
       loginTitle: 'Repeater login',
       loginMeta: 'Target {target} · {publicKey}. Введи admin password удалённой ноды.',
-      loginMemoryNote: 'Пароль хранится только в памяти текущей Vue-сессии и очищается при выходе из login / management flow.',
+      loginMemoryNote: 'Пароль сохраняется в базе контактов и используется при следующих подключениях.',
       savedAuthAutoLoginNote: 'Для этого репитера уже сохранены данные авторизации в backend DB companion. Поле пароля скрыто, вход выполняется автоматически.',
       loginRetryNotice: 'Попробуйте снова, возможно репитер был занят пересылкой чьего то пинга во время обращения.',
       loginSubmit: 'Применить',
