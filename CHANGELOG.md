@@ -2,6 +2,18 @@
 
 ## Dev / Unreleased (2026-06-28)
 
+### Android Client
+- Fixed potential badge "0" visibility (added zero-string guard)
+- Fixed icon/label overlap: dock height 84dp, itemPaddingBottom 12dp
+- Bumped versionCode to 5
+
+---
+
+### Android-клиент
+- Исправлен потенциальный бадж "0" (добавлена защита от нулевой строки)
+- Исправлено наложение иконок на подписи: высота дока 84dp, itemPaddingBottom 12dp
+- Обновлён versionCode до 5
+
 ### Fixes
 
 - **node_limit=0 в contacts-sync**: `_broadcast_contacts_snapshot()` теперь передаёт `device` в `_build_contact_count_summary()`, фронтенд `SettingsView.vue` использует `session.device.max_contacts_base` как fallback (a226401)

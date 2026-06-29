@@ -255,7 +255,7 @@ class MainActivity : AppCompatActivity() {
         val badge = binding.nativeBottomNavigation
             .getOrCreateBadge(R.id.nav_notifications)
 
-        if (rawBadge.isBlank()) {
+        if (rawBadge.isBlank() || rawBadge == "0") {
             badge.isVisible = false
         } else {
             badge.isVisible = true

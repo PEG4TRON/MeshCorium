@@ -39,11 +39,12 @@
     <com.google.android.material.bottomnavigation.BottomNavigationView
         android:id="@+id/nativeBottomNavigation"
         android:layout_width="0dp"
-        android:layout_height="80dp"
+        android:layout_height="84dp"
         android:background="#16212D"
+
         app:itemIconSize="24dp"
         app:itemPaddingTop="8dp"
-        app:itemPaddingBottom="0dp"
+        app:itemPaddingBottom="12dp"
         app:itemHorizontalTranslationEnabled="false"
         app:labelVisibilityMode="labeled"
         app:menu="@menu/native_bottom_navigation"
