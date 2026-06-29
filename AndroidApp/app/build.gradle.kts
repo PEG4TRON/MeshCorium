@@ -12,8 +12,8 @@ android {
         applicationId = "com.peg4tron.meshcorium"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.8.2.739576f"
+        versionCode = 4
+        versionName = "0.8.2.f8a816e"
     }
 
     buildFeatures {

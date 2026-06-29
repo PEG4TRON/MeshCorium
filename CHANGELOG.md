@@ -23,6 +23,16 @@
 - **docs**: CHANGELOG updated for full session (0d73e8c)
 
 ### Android Client
+- Fixed icon/label overlap in native dock: height 80dp, icon 24dp, itemPaddingTop 8dp
+- Bumped versionCode to 4
+
+---
+
+### Android-клиент
+- Исправлено наложение иконок на подписи в нативном доке: высота 80dp, иконки 24dp, itemPaddingTop 8dp
+- Обновлён versionCode до 4
+
+### Android Client
 - Added Android WebView client (Kotlin/Gradle) — AndroidApp/
 - WebView wrapper for Meshcorium web interface + FCM push notifications
 - Version 0.1.0, SDK 35, minSdk 26
