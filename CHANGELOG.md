@@ -1,103 +1,76 @@
 # Changelog
 
-## Dev / Unreleased (2026-06-28)
+## v0.8.3 — Fixes & Mobile App (2026-06-29)
 
-### Android Client
-- Fixed potential badge "0" visibility (added zero-string guard)
-- Fixed icon/label overlap: dock height 84dp, itemPaddingBottom 12dp
-- Bumped versionCode to 5
+### Android WebView Client (NEW)
+- Native bottom dock with 5 tabs: notifications, chats, contacts, map, settings
+- WebView ↔ native navigation via JavaScript bridge (no page reloads)
+- Native dock colors and styles matched to web mobile dock
+- Long-press Settings → native client settings → editable server connection URL
+- Server URL editing reuses UrlEntryActivity in two modes (initial/edit)
+- Connection change without app restart (cookie/cache cleanup + WebView reload)
+- FCM push notification registration integrated
+- WebView same-origin enforcement for security
+- Versioned APK in git: meshcorium-android-client.0.8.3.\<hash\>.apk
 
-### Web
-- Fixed settings mobile nodebar gap in native-shell mode (mc-settings-mobile-nodebar repositioned to safe-area)
-
----
-
-### Web
-- Исправлен зазор мобильного nodebar настроек в native-shell режиме (mc-settings-mobile-nodebar прижат к safe-area)
-
----
-
-### Android-клиент
-- Исправлен потенциальный бадж "0" (добавлена защита от нулевой строки)
-- Исправлено наложение иконок на подписи: высота дока 84dp, itemPaddingBottom 12dp
-- Обновлён versionCode до 5
+### Web: Native Shell Support
+- detectNativeShell() with MeshcoriumAndroid bridge + User-Agent fallback
+- Web mobile dock hidden in native-shell mode (v-if + CSS fallback)
+- installNativeActionBridge() — Android dispatches actions to Vue Router
+- Vue → native dock state sync: active tab, notification badge, connection status
+- Fixed spacer gaps on contacts, maps and settings pages in native-shell mode
+- Settings mobile nodebar repositioned to safe-area bottom (no overlapping)
 
 ### Fixes
+- Fixed long-press Settings gesture race (deferred launch via view.post)
+- Fixed icon/label overlap in native dock (height 84dp, itemPaddingBottom 12dp)
+- Fixed potential badge "0" visibility (zero-string guard)
+- Removed singleTask launchMode from UrlEntryActivity (Activity Result API conflict)
 
-- **node_limit=0 в contacts-sync**: `_broadcast_contacts_snapshot()` теперь передаёт `device` в `_build_contact_count_summary()`, фронтенд `SettingsView.vue` использует `session.device.max_contacts_base` как fallback (a226401)
-- **hardening session.device перезаписи**: `_safe_device_update()` сохраняет старый `max_contacts` если та же нода сбросила лимит в 0 при повторном `query_device()`, 7 точек перезаписи защищены (c9c5195)
+### Web: CSS & Layout
+- mc-native-shell overrides: dock suppression, spacer removal for all pages
+- Removed dead mc-page--global-mobile-dock CSS rule
+- Settings workspace and section-stack padding adjusted for native-shell
 
-### CAS & Channel Operations
-
-- **CAS channel writes**: `_resolve_channel_write_plan` with expected_channel_identity check, idempotent create, idx range validation, slot 0 reserved for #public, preflight GET before SET, ChannelConflictError + HTTP 409, duplicate channel_identity diagnostics (1019910)
-- **preserve idx=0**: `_channel_idx_value` replaces `int(get(idx) or -1)` in `_merge_channel_slot_metadata` for correct zero-index handling (6ee3b85)
-- **owner-scoped channel deletion**: `_delete_channel_local_records` global_by_identity defaults to False, deletion scoped to current owner (6ee3b85)
-- **frontend channel edit CAS**: expected_channel_identity passed on save+edit, 409 conflict handled with reload channels, i18n keys channelConflict (eaee9ab)
-- **contact capability reconnect fix**: new_self_info=self_dict passed on initial bootstrap and BLE PIN reconnect for correct node comparison in `_safe_device_update` (14f3756)
-- **web/dist rebuild**: after SettingsView.vue and MessagesView.vue edits (eaee9ab)
-- **audit fixes**: ChannelConflictError propagated through background queue with error_code, `_delete_channel_and_reload_with_client` created for active session, `_save_channel_and_reload_with_standalone_client` rewritten to use `_resolve_channel_write_plan`, `_save_channel_and_reload` wrapper fixed (expected_channel_identity, return tuple[dict, list[dict], dict]), `session.api()` errors now carry `status`/`code`/`payload` fields (694a1d2)
-- **web/dist rebuild**: with `session.js` status/code/payload fix (d5b5372)
-- **idempotent create race fixes**: standalone path now mirrors active path — raises ChannelConflictError when identity disappears during idempotent create; preflight ValueError→MeshCoreError instead of false ChannelConflictError; #public delete guard in both paths (89ad868, af35fa1)
-- **tests**: backend 12 tests (idx=0, range, idempotent, stale edit, duplicate identity, #public reserved); frontend 8 tests (buildChannelSavePayload, selectSavedChannel) (60da663)
-- **standalone idempotent race fix**: both active and standalone paths now raise ChannelConflictError when identity disappears during idempotent create (af35fa1)
-- **docs**: CHANGELOG updated for full session (0d73e8c)
-
-### Android Client
-- Fixed icon/label overlap in native dock: height 80dp, icon 24dp, itemPaddingTop 8dp
-- Bumped versionCode to 4
-
-### Web
-- Fixed spacer gaps on settings and maps pages in native-shell mode (removed dead dock padding rule, added mc-settings-section-stack override)
+### Test Server
+- Deployed and running on test stand (192.168.4.3:8080)
 
 ---
 
-### Web
-- Исправлены зазоры на страницах настроек и карт в native-shell режиме (убрано мёртвое правило dock padding, добавлен override mc-settings-section-stack)
+## v0.8.3 — Fixes & Mobile App (2026-06-29) [RU]
 
-### Android-клиент
-- Исправлено наложение иконок на подписи в нативном доке: высота 80dp, иконки 24dp, itemPaddingTop 8dp
-- Обновлён versionCode до 4
+### Android WebView-клиент (НОВОЕ)
+- Нативный нижний dock с 5 вкладками: уведомления, чаты, контакты, карта, настройки
+- Навигация WebView ↔ native через JavaScript bridge (без перезагрузок страниц)
+- Цвета и стили нативного дока приведены к web-доку
+- Долгое нажатие Настройки → нативные настройки клиента → редактируемый URL сервера
+- Редактирование URL переиспользует UrlEntryActivity в двух режимах (первый запуск/редактирование)
+- Смена подключения без перезапуска приложения (очистка cookies/cache + перезагрузка WebView)
+- Интегрирована FCM push-регистрация
+- Ограничение WebView доверенным origin (same-origin проверка)
+- Версионированный APK в git: meshcorium-android-client.0.8.3.\<hash\>.apk
 
-### Android Client
-- Added Android WebView client (Kotlin/Gradle) — AndroidApp/
-- WebView wrapper for Meshcorium web interface + FCM push notifications
-- Version 0.1.0, SDK 35, minSdk 26
-- Bilingual README (EN/RU)
-- .gitignore: 16 rules (Firebase secrets, build artifacts excluded)
-- Native dock colors matched to web dock: background #16212D, border-top 1px rgba(255,255,255,0.06)
-- Fixed spacer gap on non-chat pages in native-shell mode (removed leftover padding-bottom)
-- Bumped versionCode to 3
+### Web: Поддержка Native Shell
+- detectNativeShell() через MeshcoriumAndroid bridge + User-Agent fallback
+- Web-док скрывается в native-shell режиме (v-if + CSS fallback)
+- installNativeActionBridge() — Android передаёт действия в Vue Router
+- Синхронизация Vue → native dock: активная вкладка, badge, статус подключения
+- Исправлены зазоры на страницах контактов, карт и настроек в native-shell режиме
+- Мобильный nodebar настроек прижат к safe-area снизу (без наложения)
 
----
+### Исправления
+- Исправлена гонка жеста долгого нажатия Настроек (отложенный запуск через view.post)
+- Исправлено наложение иконок на подписи в нативном доке (высота 84dp, itemPaddingBottom 12dp)
+- Исправлен потенциальный бадж "0" (защита от нулевой строки)
+- Убран launchMode="singleTask" у UrlEntryActivity (конфликт с Activity Result API)
 
-### CAS и операции с каналами
+### Web: CSS & Layout
+- mc-native-shell overrides: скрытие дока, устранение зазоров для всех страниц
+- Убрано мёртвое CSS-правило mc-page--global-mobile-dock
+- Отступы Settings workspace и section-stack скорректированы для native-shell
 
-- **CAS channel writes**: `_resolve_channel_write_plan` с проверкой expected_channel_identity, идемпотентный create, валидация диапазона idx, слот 0 зарезервирован для #public, preflight GET перед SET, ChannelConflictError + HTTP 409, диагностика дублей channel_identity (1019910)
-- **preserve idx=0**: `_channel_idx_value` заменяет `int(get(idx) or -1)` в `_merge_channel_slot_metadata` для корректной обработки нулевого индекса (6ee3b85)
-- **owner-scoped channel deletion**: `_delete_channel_local_records` global_by_identity default False, удаление ограничено текущим owner (6ee3b85)
-- **frontend channel edit CAS**: expected_channel_identity передаётся при save+edit, 409 conflict обрабатывается с reload channels, i18n ключи channelConflict (eaee9ab)
-- **contact capability reconnect fix**: new_self_info=self_dict передаётся при initial bootstrap и BLE PIN reconnect для корректного сравнения нод в `_safe_device_update` (14f3756)
-- **web/dist rebuild**: после правок SettingsView.vue и MessagesView.vue (eaee9ab)
-- **аудит-исправления**: ChannelConflictError передаётся через background queue с error_code, `_delete_channel_and_reload_with_client` создана для active session, `_save_channel_and_reload_with_standalone_client` переписан на `_resolve_channel_write_plan`, исправлен wrapper `_save_channel_and_reload` (expected_channel_identity, return tuple[dict, list[dict], dict]), ошибки `session.api()` теперь несут поля `status`/`code`/`payload` (694a1d2)
-- **web/dist rebuild**: с исправлением `session.js` status/code/payload (d5b5372)
-- **P0 fix**: save_meta UnboundLocalError в active save, двойная сериализация list[dict] через _channels_to_dict в standalone save/delete удалена, active_session bool flag, preflight except narrowed (8ddb7d0)
-- **P0 fix**: save_meta UnboundLocalError в active save, двойная сериализация list[dict] через _channels_to_dict в standalone save/delete удалена, active_session bool flag, preflight except narrowed (8ddb7d0)
-- **idempotent create race fixes**: standalone путь теперь симметричен active — ChannelConflictError при исчезновении identity; preflight ValueError→MeshCoreError вместо ложного ChannelConflictError; защита #public от удаления в обоих путях (89ad868, af35fa1)
-- **тесты**: backend 12 тестов (idx=0, range, idempotent, stale edit, duplicate identity, #public reserved); frontend 8 тестов (buildChannelSavePayload, selectSavedChannel) (60da663)
-- **standalone idempotent race fix**: обе ветки (active + standalone) теперь выбрасывают ChannelConflictError при исчезновении identity во время idempotent create (af35fa1)
-- **docs**: CHANGELOG обновлён за всю сессию (0d73e8c)
-
-### Android-клиент
-- Добавлен Android WebView клиент (Kotlin/Gradle) — AndroidApp/
-- WebView-обёртка для веб-интерфейса Meshcorium + FCM push-уведомления
-- Версия 0.1.0, SDK 35, minSdk 26
-- Двуязычный README (EN/RU)
-- .gitignore: 16 правил (секреты Firebase, артефакты сборки исключены)
-- Цвета нативного дока приведены к web-доку: фон #16212D, верхняя граница 1px rgba(255,255,255,0.06)
-- Исправлен зазор на страницах карты/настроек/контактов в native-shell режиме (убран padding-bottom)
-- Обновлён versionCode до 3
-
----
+### Тестовый стенд
+- Развёрнут и работает на тестовом стенде (192.168.4.3:8080)
 
 ## Dev / Unreleased (2026-06-19)
 

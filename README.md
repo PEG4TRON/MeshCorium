@@ -53,9 +53,9 @@ Current release `0.8.2--auto-update-fix` is a critical hotfix: adds missing `--s
 
 ## Release Status
 
-The latest published release is `MeshCorium v0.8.2 -- auto-update-fix`.
+The latest published release is `MeshCorium v0.8.3 -- Fixes & Mobile App`.
 
-### v0.8.2 — auto-update-fix
+### v0.8.3 — Fixes & Mobile App
 
 - **CRITICAL**: Added `--supervise` to `ExecStart` in systemd unit template. Without it, auto-update never worked — supervisor loop (GitHub polling, `.meshcorium_update_available`, install/rollback) was never started.
 - Existing installations must run `meshcorium-launcher.sh --install` after upgrading to apply the fix.

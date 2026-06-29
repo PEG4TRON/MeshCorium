@@ -5,6 +5,8 @@ import android.os.Bundle
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.appbar.MaterialToolbar
 
 class ClientSettingsActivity : AppCompatActivity() {
@@ -13,6 +15,17 @@ class ClientSettingsActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         android.util.Log.d("ClientSettingsActivity", "onCreate")
         setContentView(R.layout.activity_client_settings)
+
+        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.clientSettingsRoot)) { view, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(
+                systemBars.left,
+                systemBars.top,
+                systemBars.right,
+                0
+            )
+            insets
+        }
 
         findViewById<MaterialToolbar>(R.id.toolbar).setNavigationOnClickListener { finish() }
 

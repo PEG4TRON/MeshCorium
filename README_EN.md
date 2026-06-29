@@ -26,12 +26,12 @@ Current transports:
 - `BLE`
 - `Wi-Fi / LAN`
 
-`MeshCorium v0.8.2 -- auto-update-fix` release status:
+`MeshCorium v0.8.3 -- Fixes & Mobile App` release status:
 
 - `USB serial` — permanent and validated connection path, not being removed from the project
 - `BLE` — additional companion-node connection path through Linux / BlueZ, available alongside USB serial
 - `Wi-Fi / LAN` — manual TCP `host:port` connection path, available alongside USB serial and BLE
-- `Docker Compose` — deployment variant kept alongside the ordinary launcher/systemd flow; Docker metadata and runtime version reporting are aligned to `0.8.2`
+- `Docker Compose` — deployment variant kept alongside the ordinary launcher/systemd flow; Docker metadata and runtime version reporting are aligned to `0.8.3`
 
 BLE is implemented through a dedicated transport adapter and is available in the connection UI. It is still a new connection path whose behavior depends on the Linux host, BlueZ, and the specific BLE adapter.
 
