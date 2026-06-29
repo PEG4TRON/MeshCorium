@@ -8737,3 +8737,8 @@ html.mc-native-shell .mc-settings-section-stack {
 html.mc-native-shell .mc-maps-mobile-nodebar {
   bottom: env(safe-area-inset-bottom, 0px) !important;
 }
+
+/* Settings mobile nodebar: move to safe-area bottom without extra dock gap */
+html.mc-native-shell .mc-settings-mobile-nodebar {
+  bottom: env(safe-area-inset-bottom, 0px) !important;
+}

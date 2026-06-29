@@ -7,6 +7,14 @@
 - Fixed icon/label overlap: dock height 84dp, itemPaddingBottom 12dp
 - Bumped versionCode to 5
 
+### Web
+- Fixed settings mobile nodebar gap in native-shell mode (mc-settings-mobile-nodebar repositioned to safe-area)
+
+---
+
+### Web
+- Исправлен зазор мобильного nodebar настроек в native-shell режиме (mc-settings-mobile-nodebar прижат к safe-area)
+
 ---
 
 ### Android-клиент

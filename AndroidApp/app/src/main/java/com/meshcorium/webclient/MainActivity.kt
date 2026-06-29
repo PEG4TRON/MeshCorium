@@ -216,9 +216,12 @@ class MainActivity : AppCompatActivity() {
                 left = systemBars.left,
                 top = systemBars.top,
                 right = systemBars.right,
+                bottom = 0,  // not to root — to dock instead
+            )
+            binding.nativeBottomNavigation.updatePadding(
                 bottom = systemBars.bottom,
             )
-            windowInsets
+            WindowInsetsCompat.CONSUMED
         }
         ViewCompat.requestApplyInsets(binding.mainRoot)
     }
