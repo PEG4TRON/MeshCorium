@@ -26,7 +26,13 @@
 - Fixed icon/label overlap in native dock: height 80dp, icon 24dp, itemPaddingTop 8dp
 - Bumped versionCode to 4
 
+### Web
+- Fixed spacer gaps on settings and maps pages in native-shell mode (removed dead dock padding rule, added mc-settings-section-stack override)
+
 ---
+
+### Web
+- Исправлены зазоры на страницах настроек и карт в native-shell режиме (убрано мёртвое правило dock padding, добавлен override mc-settings-section-stack)
 
 ### Android-клиент
 - Исправлено наложение иконок на подписи в нативном доке: высота 80dp, иконки 24dp, itemPaddingTop 8dp

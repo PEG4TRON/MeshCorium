@@ -7769,11 +7769,6 @@ button {
     display: none;
   }
 
-  .mc-page--global-mobile-dock .mc-shell {
-    padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px));
-    box-sizing: border-box;
-  }
-
   .mc-global-mobile-dock {
     position: fixed;
     left: 0;
@@ -8722,10 +8717,23 @@ button {
   padding: 0 1px;
 }
 
+/* Native shell overrides — hide web dock elements and remove dock-allocated spacing */
 html.mc-native-shell .mc-mobile-dock {
   display: none !important;
 }
 
-html.mc-native-shell .mc-page--global-mobile-dock .mc-shell {
+/* Settings workspace: remove 84px dock padding on mobile (≤1024px) */
+html.mc-native-shell .mc-settings-workspace {
   padding-bottom: env(safe-area-inset-bottom, 0px) !important;
+  scroll-padding-bottom: env(safe-area-inset-bottom, 0px) !important;
+}
+
+/* Settings section stack: remove 84px dock scroll padding on mobile */
+html.mc-native-shell .mc-settings-section-stack {
+  scroll-padding-bottom: env(safe-area-inset-bottom, 0px) !important;
+}
+
+/* Maps mobile nodebar: move to safe-area bottom without extra dock gap */
+html.mc-native-shell .mc-maps-mobile-nodebar {
+  bottom: env(safe-area-inset-bottom, 0px) !important;
 }
