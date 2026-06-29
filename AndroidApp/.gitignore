@@ -5,6 +5,7 @@ app/build/
 app/google-services.json
 .kotlin/
 *.apk
+!meshcorium-android-client.*.apk
 *.aab
 *.ap_
 *.dex
