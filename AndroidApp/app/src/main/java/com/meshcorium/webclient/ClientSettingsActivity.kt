@@ -2,6 +2,7 @@ package com.peg4tron.meshcorium
 
 import android.content.Intent
 import android.os.Bundle
+import com.peg4tron.meshcorium.BuildConfig
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -33,6 +34,18 @@ class ClientSettingsActivity : AppCompatActivity() {
 
         findViewById<android.view.View>(R.id.connectionSettingsRow).setOnClickListener {
             openConnectionEditor()
+        }
+
+        // Set client version
+        val versionText = "Версия ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})"
+        findViewById<android.widget.TextView>(R.id.clientVersion).text = versionText
+
+        // GitHub link
+        findViewById<android.widget.TextView>(R.id.githubLink).setOnClickListener {
+            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                data = android.net.Uri.parse("https://github.com/PEG4TRON/MeshCorium")
+            }
+            startActivity(intent)
         }
     }
 
