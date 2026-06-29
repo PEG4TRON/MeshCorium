@@ -5640,6 +5640,10 @@ button {
   font-weight: 600;
 }
 
+.mc-settings-panel-copy h3 {
+  margin-bottom: 4px;
+}
+
 .mc-settings-nav-subtitle,
 .mc-settings-panel-copy p {
   margin: 0;
