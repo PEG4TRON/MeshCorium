@@ -295,7 +295,7 @@ export default {
       loginMemoryNote: 'Password is saved in contacts database for future connections.',
       savedAuthAutoLoginNote: 'Authorization data for this repeater is already saved in the companion backend DB. The password field stays hidden and login runs automatically.',
       loginRetryNotice: 'Try again. The repeater may have been busy forwarding someone else’s ping when the request arrived.',
-      loginSubmit: 'Apply',
+      loginSubmit: 'Connect',
       loginBusy: 'Checking...',
       retryLogin: 'Retry login',
       savedAuthConnecting: 'Connecting to repeater...',
