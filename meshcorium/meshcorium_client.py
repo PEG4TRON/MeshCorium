@@ -1579,9 +1579,11 @@ class MeshCoreClient:
             time.sleep(open_settle)
         self.clear_transport_input_buffer()
         self.clear_transport_output_buffer()
+        self._repeater_authenticated: bool = False
 
     def close(self) -> None:
         self._frame_hub.close()
+        self._repeater_authenticated = False
 
     def __enter__(self) -> MeshCoreClient:
         return self
@@ -1973,6 +1975,9 @@ class MeshCoreClient:
         *,
         wait_timeout_secs: float | None = None,
     ) -> RepeaterLoginResult:
+        if self._repeater_authenticated:
+            logging.debug("repeater: reusing existing authentication")
+            return {"ok": True, "already_authenticated": True}
         sent = self.send_repeater_login(destination_public_key, password)
         wait_timeout = max(5.0, min((sent.suggested_timeout_ms / 1000.0) * 1.2, 30.0))
         if wait_timeout_secs is not None:
@@ -1991,6 +1996,7 @@ class MeshCoreClient:
                 destination_public_key[:6],
                 grace_timeout,
             )
+        self._repeater_authenticated = True
         return RepeaterLoginResult(
             success=bool(success),
             public_key_prefix=destination_public_key[:6].hex(),

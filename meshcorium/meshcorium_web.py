@@ -14157,75 +14157,41 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                 })
                 return
             if parsed.path == "/api/repeater/login":
-                public_key = _normalize_repeater_public_key_hex(body.get("public_key"))
-                with _contact_owner_scope(port=conn["port"], access_all=False):
-                    remember_auth = bool(body.get("remember_auth"))
-                    password, password_source = _resolve_repeater_auth_password(public_key, body.get("password"))
-                    session_kwargs = self._session_kwargs(body)
-                    logging.info(
-                        "api repeater/login requested port=%s baudrate=%s target=%s password_source=%s remember_auth=%s",
-                        conn["port"],
-                        conn["baudrate"],
-                        public_key[:12],
-                        password_source,
-                        remember_auth,
-                    )
-                    with _paused_background_session(session_kwargs["port"]):
-                        with _connection_access_from_kwargs(session_kwargs):
-                            with _open_meshcore_client(session_kwargs) as client:
-                                device = client.query_device(session_kwargs["protocol_version"])
-                                client.app_start(session_kwargs["app_name"], session_kwargs["app_version"])
-                                login_payload, _current_contacts, materialized_on_node = _login_to_repeater_with_client(
-                                    client,
-                                    public_key=public_key,
-                                    password=password,
-                                    hard_device_limit=int(device.max_contacts_div_2 * 2),
-                                )
-                    if remember_auth and password_source == "provided":
-                        CONTACT_BACKEND.set_cached_repeater_auth_password(public_key, password)
-                    contact_payload = CONTACT_BACKEND.get_cached_contact(public_key)
-                self._send_json({
-                    "ok": True,
-                    "login": login_payload,
-                    "materialized_on_node": bool(materialized_on_node),
-                    "auth_saved": bool((contact_payload or {}).get("backend", {}).get("repeater_auth_saved")),
-                    "contact": contact_payload,
-                })
+                password = str(body.get("password") or "")
+                if not password:
+                    raise ValueError("password is required")
+                session = _get_background_session(conn["port"])
+                public_key = ""
+                if session and session.repeater_tracker:
+                    public_key = str(session.repeater_tracker.get("current_repeater_public_key") or "")
+                result = _run_command_via_background_session(
+                    conn["port"],
+                    {
+                        "kind": "repeater_login",
+                        "password": password,
+                        "public_key": public_key,
+                    },
+                    timeout_secs=30.0,
+                )
+                self._send_json(result)
                 return
             if parsed.path == "/api/repeater/cli":
-                public_key = _normalize_repeater_public_key_hex(body.get("public_key"))
-                with _contact_owner_scope(port=conn["port"], access_all=False):
-                    password, password_source = _resolve_repeater_auth_password(public_key, body.get("password"))
-                    commands = _normalize_repeater_cli_commands(body.get("commands", body.get("command")))
-                    command_delay_secs = max(0.0, min(float(body.get("command_delay_secs", 0.2)), 2.0))
-                    session_kwargs = self._session_kwargs(body)
-                    logging.info(
-                        "api repeater/cli requested port=%s baudrate=%s target=%s commands=%s password_source=%s",
-                        conn["port"],
-                        conn["baudrate"],
-                        public_key[:12],
-                        len(commands),
-                        password_source,
-                    )
-                    with _paused_background_session(session_kwargs["port"]):
-                        with _connection_access_from_kwargs(session_kwargs):
-                            with _open_meshcore_client(session_kwargs) as client:
-                                device = client.query_device(session_kwargs["protocol_version"])
-                                client.app_start(session_kwargs["app_name"], session_kwargs["app_version"])
-                                result = _run_repeater_cli_batch_with_client(
-                                    client,
-                                    public_key=public_key,
-                                    password=password,
-                                    commands=commands,
-                                    command_delay_secs=command_delay_secs,
-                                    hard_device_limit=int(device.max_contacts_div_2 * 2),
-                                )
-                self._send_json({
-                    "ok": True,
-                    "login": result["login"],
-                    "commands": result["commands"],
-                    "materialized_on_node": bool(result.get("materialized_on_node")),
-                })
+                password = _resolve_repeater_auth_password(conn, body)
+                if not password:
+                    raise ValueError("repeater password not configured")
+                commands = list(body.get("commands") or [])
+                if not commands:
+                    raise ValueError("commands list is required")
+                result = _run_command_via_background_session(
+                    conn["port"],
+                    {
+                        "kind": "repeater_cli_batch",
+                        "password": password,
+                        "commands": commands,
+                    },
+                    timeout_secs=30.0,
+                )
+                self._send_json(result)
                 return
             if parsed.path == "/api/repeater/auth/delete":
                 public_key = _normalize_repeater_public_key_hex(body.get("public_key"))

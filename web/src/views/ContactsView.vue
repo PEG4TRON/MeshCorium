@@ -95,6 +95,7 @@ const repeaterLoginNotice = ref({
 const repeaterLoginBusy = ref(false)
 const repeaterManagementPassword = ref('')
 const repeaterManagementBusyAction = ref('')
+const repeaterCliError = ref('')
 const repeaterManagementDrafts = ref({})
 const confirmDialog = ref({
   open: false,
@@ -3255,6 +3256,7 @@ async function runRepeaterCliBatch(commands, successMessage, busyKey) {
   if (!Array.isArray(commands) || !commands.length) {
     throw new Error(t('contactsView.status.repeaterCommandsMissing'))
   }
+  repeaterCliError.value = ''
   repeaterManagementBusyAction.value = String(busyKey || '')
   try {
     const payload = await session.api('/api/repeater/cli', {
@@ -3271,6 +3273,12 @@ async function runRepeaterCliBatch(commands, successMessage, busyKey) {
       payload?.materialized_on_node ? t('contactsView.status.materializedSuffix') : '',
     ].filter(Boolean).join(' '))
     return payload
+  } catch (e) {
+    if (e.status === 500) {
+      repeaterCliError.value = e.message || 'Repeater CLI failed — retry'
+      return
+    }
+    throw e
   } finally {
     repeaterManagementBusyAction.value = ''
   }
@@ -4524,6 +4532,9 @@ onBeforeUnmount(() => {
                             {{ action.notice }}
                           </p>
                         </template>
+                        <div v-if="repeaterCliError" class="mc-settings-row-hint" style="color:var(--danger);margin-top:6px">
+                          {{ repeaterCliError }}
+                        </div>
                       </article>
                     </section>
                   </template>
@@ -5454,6 +5465,9 @@ onBeforeUnmount(() => {
                             {{ action.notice }}
                           </p>
                         </template>
+                        <div v-if="repeaterCliError" class="mc-settings-row-hint" style="color:var(--danger);margin-top:6px">
+                          {{ repeaterCliError }}
+                        </div>
                       </article>
                     </section>
                   </template>
