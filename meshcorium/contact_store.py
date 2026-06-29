@@ -506,9 +506,12 @@ def list_cached_contacts_raw(db_lock: threading.Lock, db_path: str, limit: int |
     else:
         sql += "\nORDER BY lastmod DESC, last_advert DESC, updated_at DESC, public_key ASC"
     if limit is not None:
-        safe_limit = max(1, min(int(limit), 5000))
-        sql += "\nLIMIT ?"
-        params.append(safe_limit)
+        if limit <= 0:
+            pass  # no limit
+        else:
+            safe_limit = max(1, min(int(limit), 5000))
+            sql += "\nLIMIT ?"
+            params.append(safe_limit)
     with db_lock, sqlite3.connect(db_path) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(sql, tuple(params)).fetchall()
