@@ -7553,6 +7553,52 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                                     **snapshot,
                                 })
                                 continue
+                            if kind == "repeater_login":
+                                password = str(command.get("password") or "")
+                                public_key = str(command.get("public_key") or "")
+                                if not password:
+                                    raise MeshCoreError("repeater password is required")
+                                login_result = session.client.login_to_repeater(bytes.fromhex(public_key), password)
+                                _log_delivery_debug("bg_command_response_put", port=port, kind=kind, sequence=command_sequence, ok=True)
+                                response_queue.put({
+                                    "ok": True,
+                                    "login": _repeater_login_result_to_dict(login_result),
+                                    "public_key": public_key,
+                                })
+                                continue
+                            if kind == "repeater_cli_batch":
+                                password = str(command.get("password") or "")
+                                public_key = str(command.get("public_key") or "")
+                                commands = list(command.get("commands") or [])
+                                if not password:
+                                    raise MeshCoreError("repeater password is required")
+                                if not commands:
+                                    raise MeshCoreError("commands list is required")
+                                login_result = session.client.login_to_repeater(bytes.fromhex(public_key), password)
+                                results = []
+                                for cmd in commands:
+                                    resp = session.client.send_repeater_cli_command(bytes.fromhex(public_key), cmd)
+                                    cmd_result = {
+                                        "command": cmd,
+                                        "response": {
+                                            "route_flag": int(getattr(resp, "route_flag", 0) or 0),
+                                            "expected_ack_hex": bytes(getattr(resp, "expected_ack", b"") or b"").hex(),
+                                            "suggested_timeout_ms": int(getattr(resp, "suggested_timeout_ms", 0) or 0),
+                                        }
+                                    }
+                                    if hasattr(resp, 'ok') and not resp.ok:
+                                        cmd_result["ok"] = False
+                                        cmd_result["error"] = str(getattr(resp, 'error', 'unknown'))
+                                    else:
+                                        cmd_result["ok"] = True
+                                    results.append(cmd_result)
+                                    time.sleep(0.2)
+                                _log_delivery_debug("bg_command_response_put", port=port, kind=kind, sequence=command_sequence, ok=True)
+                                response_queue.put({
+                                    "ok": True,
+                                    "results": results,
+                                })
+                                continue
                             raise MeshCoreError(f"unsupported background command: {kind}")
                         except ChannelConflictError as exc:
                             _log_delivery_debug(
@@ -14163,7 +14209,12 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                 session = _get_background_session(conn["port"])
                 public_key = ""
                 if session and session.repeater_tracker:
-                    public_key = str(session.repeater_tracker.get("current_repeater_public_key") or "")
+                    # RepeaterRuntimeTracker is a dataclass with full_keys dict
+                    public_key = str(body.get("public_key") or "")
+                    if not public_key and hasattr(session.repeater_tracker, 'full_keys'):
+                        keys = list(session.repeater_tracker.full_keys.keys())
+                        if keys:
+                            public_key = keys[0]
                 result = _run_command_via_background_session(
                     conn["port"],
                     {
@@ -14182,12 +14233,20 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
                 commands = list(body.get("commands") or [])
                 if not commands:
                     raise ValueError("commands list is required")
+                public_key = str(body.get("public_key") or "")
+                if not public_key:
+                    session = _get_background_session(conn["port"])
+                    if session and hasattr(session, 'repeater_tracker') and hasattr(session.repeater_tracker, 'full_keys'):
+                        keys = list(session.repeater_tracker.full_keys.keys())
+                        if keys:
+                            public_key = keys[0]
                 result = _run_command_via_background_session(
                     conn["port"],
                     {
                         "kind": "repeater_cli_batch",
                         "password": password,
                         "commands": commands,
+                        "public_key": public_key,
                     },
                     timeout_secs=30.0,
                 )

@@ -97,6 +97,7 @@ const repeaterManagementPassword = ref('')
 const repeaterManagementBusyAction = ref('')
 const repeaterCliError = ref('')
 const repeaterManagementDrafts = ref({})
+const region_tokens = ref('')
 const confirmDialog = ref({
   open: false,
   title: '',
@@ -153,6 +154,7 @@ function buildRepeaterManagementInitialDraft(contact) {
     radio_temp_cr: '5',
     radio_temp_timeout: '',
     radio_adc_multiplier: '',
+    radio_rxgain: '',
     location_lat: Number.isFinite(lat) ? String(lat) : '',
     location_lon: Number.isFinite(lon) ? String(lon) : '',
     gps_state: 'unchanged',
@@ -163,7 +165,7 @@ function buildRepeaterManagementInitialDraft(contact) {
     routing_rxdelay: '',
     routing_txdelay: '',
     routing_direct_txdelay: '',
-    routing_af: '',
+    routing_dutycycle: '',
     routing_int_thresh: '',
     routing_agc_reset_interval: '',
     routing_multi_acks: 'unchanged',
@@ -178,12 +180,16 @@ function buildRepeaterManagementInitialDraft(contact) {
     bridge_secret: '',
     acl_pubkey: '',
     acl_permission: '3',
+    acl_allow_read_only: '',
     region_home: '',
     region_allow_mode: 'allowf',
     region_allow_name: '',
     region_put_name: '',
     region_put_parent: '',
     region_remove_name: '',
+    region_tokens: '',
+    action_time_epoch: '',
+    action_neighbor_remove: '',
   }
 }
 
@@ -1066,6 +1072,28 @@ const repeaterRadioCards = computed(() => ([
       },
     ],
   },
+  {
+    id: 'radio-rxgain',
+    title: t('contactsView.repeater.radioCards.rxgain.label'),
+    description: t('contactsView.repeater.radioCards.rxgain.hint'),
+    applyLabel: 'Apply',
+    buildCommands(draft) {
+      const value = repeaterRequireTrimmedValue(draft, 'radio_rxgain', 'Select rx gain mode')
+      return [`set radio.rxgain ${value}`]
+    },
+    fields: [
+      {
+        key: 'radio_rxgain',
+        label: t('contactsView.repeater.radioCards.rxgain.label'),
+        type: 'select',
+        options: [
+          { value: '', label: '- select -' },
+          { value: 'true', label: 'Enabled' },
+          { value: 'false', label: 'Disabled' },
+        ],
+      },
+    ],
+  },
 ]))
 
 const repeaterLocationCards = computed(() => ([
@@ -1309,12 +1337,12 @@ const repeaterRoutingCards = computed(() => ([
     applyLabel: t('contactsView.repeater.routingCards.airtime.apply'),
     buildCommands(draft) {
       const commands = []
-      const af = repeaterTrimmedDraftValue(draft, 'routing_af')
+      const dutycycle = repeaterTrimmedDraftValue(draft, 'routing_dutycycle')
       const intThresh = repeaterTrimmedDraftValue(draft, 'routing_int_thresh')
       const agcResetInterval = repeaterTrimmedDraftValue(draft, 'routing_agc_reset_interval')
-      if (af) {
-        parseRepeaterNumberField(draft, 'routing_af', t('contactsView.repeater.routingFields.af'), { min: 0, max: 9 })
-        commands.push(`set af ${af}`)
+      if (dutycycle) {
+        parseRepeaterNumberField(draft, 'routing_dutycycle', t('contactsView.repeater.routingFields.dutycycle'), { min: 1, max: 100 })
+        commands.push(`set dutycycle ${dutycycle}`)
       }
       if (intThresh) {
         parseRepeaterNumberField(draft, 'routing_int_thresh', t('contactsView.repeater.routingFields.interferenceThreshold'))
@@ -1331,13 +1359,12 @@ const repeaterRoutingCards = computed(() => ([
     },
     fields: [
       {
-        key: 'routing_af',
-        label: t('contactsView.repeater.routingFields.af'),
+        key: 'routing_dutycycle',
+        label: t('contactsView.repeater.routingFields.dutycycle'),
         type: 'number',
-        placeholder: '1.0',
-        min: 0,
-        max: 9,
-        step: '0.1',
+        placeholder: '50',
+        min: 1,
+        max: 100,
       },
       {
         key: 'routing_int_thresh',
@@ -1402,7 +1429,6 @@ const repeaterRoutingCards = computed(() => ([
           { value: 'off', label: 'off' },
           { value: 'minimal', label: 'minimal' },
           { value: 'moderate', label: 'moderate' },
-          { value: 'strict', label: 'strict' },
         ],
       },
       {
@@ -1600,6 +1626,29 @@ const repeaterBridgeCards = computed(() => ([
 
 const repeaterAclCards = computed(() => ([
   {
+    id: 'acl-get',
+    label: t('contactsView.repeater.aclCards.getAcl.label'),
+    hint: t('contactsView.repeater.aclCards.getAcl.hint'),
+    hasChanges() { return true },
+    buildCommands() { return ['get acl'] },
+  },
+  {
+    id: 'acl-allow-read-only',
+    label: t('contactsView.repeater.aclCards.allowReadOnly.label'),
+    hint: t('contactsView.repeater.aclCards.allowReadOnly.hint'),
+    hasChanges(draft) { return draft.acl_allow_read_only !== '' },
+    buildCommands(draft) {
+      return [`set allow.read.only ${draft.acl_allow_read_only}`]
+    },
+    fields: [
+      {
+        key: 'acl_allow_read_only',
+        type: 'select',
+        options: ['', 'on', 'off'],
+      },
+    ],
+  },
+  {
     id: 'acl-setperm',
     title: t('contactsView.repeater.aclCards.entry.title'),
     description: t('contactsView.repeater.aclCards.entry.description'),
@@ -1637,6 +1686,22 @@ const repeaterAclCards = computed(() => ([
 ]))
 
 const repeaterRegionCards = computed(() => ([
+  {
+    id: 'region-load',
+    label: t('contactsView.repeater.regionCards.load.label'),
+    hint: t('contactsView.repeater.regionCards.load.hint'),
+    hasChanges() { return true },
+    buildCommands() { return ['region load'] },
+  },
+  {
+    id: 'region-get',
+    label: t('contactsView.repeater.regionCards.get.label'),
+    hint: t('contactsView.repeater.regionCards.get.hint'),
+    hasChanges(draft) { return draft.region_name !== '' },
+    buildCommands(draft) { return [`region get ${draft.region_name}`] },
+    fields: [{ key: 'region_name', type: 'text', placeholder: t('contactsView.repeater.regionFields.name.placeholder') }],
+    onSuccess(card, draft) { draft.region_name = '' },
+  },
   {
     id: 'region-home',
     title: t('contactsView.repeater.regionCards.home.title'),
@@ -1713,6 +1778,26 @@ const repeaterRegionCards = computed(() => ([
     ],
   },
   {
+    id: 'region-default',
+    label: t('contactsView.repeater.regionCards.default.label'),
+    hint: t('contactsView.repeater.regionCards.default.hint'),
+    hasChanges(draft) { return draft.region_name !== '' },
+    buildCommands(draft) {
+      return draft.region_name ? [`region default ${draft.region_name}`] : ['region default']
+    },
+    fields: [{ key: 'region_name', type: 'text', placeholder: t('contactsView.repeater.regionFields.name.placeholder') }],
+    onSuccess(card, draft) { draft.region_name = '' },
+  },
+  {
+    id: 'region-def',
+    label: t('contactsView.repeater.regionCards.def.label'),
+    hint: t('contactsView.repeater.regionCards.def.hint'),
+    hasChanges(draft) { return draft.region_tokens !== '' },
+    buildCommands(draft) { return [`region def ${draft.region_tokens}`] },
+    fields: [{ key: 'region_tokens', type: 'text', placeholder: t('contactsView.repeater.regionFields.tokens.placeholder') }],
+    onSuccess(card, draft) { draft.region_tokens = '' },
+  },
+  {
     id: 'region-remove',
     title: t('contactsView.repeater.regionCards.remove.title'),
     description: t('contactsView.repeater.regionCards.remove.description'),
@@ -1776,6 +1861,20 @@ const repeaterActionCards = computed(() => ([
         label: t('contactsView.repeater.actionCards.operational.logErase'),
         commands: ['log erase'],
       },
+      {
+        id: 'action-clock',
+        label: t('contactsView.repeater.actionCards.operational.clock'),
+        commands: ['clock'],
+      },
+      {
+        id: 'action-set-time',
+        label: t('contactsView.repeater.actionCards.operational.setTime'),
+        commands: [],
+      },
+      { id: 'action-advert', label: t('contactsView.repeater.actionCards.operational.advert'), commands: ['advert'] },
+      { id: 'action-advert-zerohop', label: t('contactsView.repeater.actionCards.operational.advertZerohop'), commands: ['advert.zerohop'] },
+      { id: 'action-neighbors', label: t('contactsView.repeater.actionCards.operational.neighbors'), commands: ['neighbors'] },
+      { id: 'action-discover-neighbors', label: t('contactsView.repeater.actionCards.operational.discoverNeighbors'), commands: ['discover.neighbors'] },
     ],
   },
   {
@@ -1796,6 +1895,20 @@ const repeaterActionCards = computed(() => ([
         commands: ['clkreboot'],
         tone: 'danger',
         confirmMessage: t('contactsView.repeater.actionCards.danger.clkrebootConfirm'),
+      },
+      {
+        id: 'action-poweroff',
+        label: t('contactsView.repeater.actionCards.danger.poweroff'),
+        commands: ['poweroff'],
+        tone: 'danger',
+        confirmMessage: t('contactsView.repeater.actionCards.danger.poweroffConfirm'),
+      },
+      {
+        id: 'action-start-ota',
+        label: t('contactsView.repeater.actionCards.danger.startOta'),
+        commands: ['start ota'],
+        tone: 'danger',
+        confirmMessage: t('contactsView.repeater.actionCards.danger.startOtaConfirm'),
       },
     ],
   },

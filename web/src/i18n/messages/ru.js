@@ -378,7 +378,7 @@ export default {
         rxDelay: 'RX delay',
         txDelay: 'TX delay',
         directTxDelay: 'Direct TX delay',
-        af: 'AF',
+        dutycycle: 'Duty cycle',
         interferenceThreshold: 'Interference threshold',
         agcResetInterval: 'AGC reset interval, sec',
         pathHashMode: 'Path hash mode',
@@ -414,6 +414,12 @@ export default {
         regionName: 'Region name',
         parentName: 'Parent name',
         mode: 'Mode',
+        name: {
+          placeholder: '#Europe или *',
+        },
+        tokens: {
+          placeholder: 'Token1,Token2,Token3',
+        },
         homePlaceholder: '#Europe или *',
         allowPlaceholder: '#Europe или *',
         putPlaceholder: '#NorthAmerica',
@@ -472,6 +478,10 @@ export default {
           title: 'Temp radio',
           description: 'Временные radio settings до reboot/timeout.',
           apply: 'Запустить temp radio',
+        },
+        rxgain: {
+          label: 'RX Boosted Gain',
+          hint: 'Включение/выключение rx boosted gain mode (SX12xx/LR1110).',
         },
         adc: {
           title: 'ADC multiplier',
@@ -556,6 +566,14 @@ export default {
           description: 'Если выбрать `remove`, будет отправлен `setperm <pubkey>` без permissions.',
           apply: 'Применить ACL',
         },
+        getAcl: {
+          label: 'Список ACL',
+          hint: 'Получить текущий список контроля доступа.',
+        },
+        allowReadOnly: {
+          label: 'Read-Only режим',
+          hint: 'Вкл/выкл режим только для чтения.',
+        },
       },
       regionCards: {
         home: {
@@ -573,10 +591,26 @@ export default {
           description: 'Создаёт region с optional parent.',
           apply: 'Создать region',
         },
+        load: {
+          label: 'Загрузить регионы',
+          hint: 'Перезагрузить регионы с сервера (отменяет несохранённые правки).',
+        },
+        get: {
+          label: 'Получить регион',
+          hint: 'Получить информацию о регионе по имени.',
+        },
         remove: {
           title: 'Удалить region',
           description: 'Удаляет region. CLI потребует сначала убрать дочерние регионы.',
           apply: 'Удалить region',
+        },
+        default: {
+          label: 'Установить по умолчанию',
+          hint: 'Установить или сбросить регион по умолчанию.',
+        },
+        def: {
+          label: 'Определение региона',
+          hint: 'Задать токены определения региона (CLI: `region def <tokens>`).',
         },
         actions: {
           title: 'Region actions',
@@ -593,6 +627,18 @@ export default {
           logStart: 'Log start',
           logStop: 'Log stop',
           logErase: 'Log erase',
+          clock: 'Часы',
+          clockDesc: 'Показать текущее время репитера.',
+          setTime: 'Установить время',
+          setTimeDesc: 'Установить время репитера (epoch seconds).',
+          advert: 'Flood-реклама',
+          advertDesc: 'Отправить flood-рекламу.',
+          advertZerohop: 'Zero-hop реклама',
+          advertZerohopDesc: 'Отправить zero-hop рекламу.',
+          neighbors: 'Список соседей',
+          neighborsDesc: 'Показать соседние ноды.',
+          discoverNeighbors: 'Поиск соседей',
+          discoverNeighborsDesc: 'Сканировать соседние ноды.',
         },
         danger: {
           title: 'Danger zone',
@@ -601,6 +647,10 @@ export default {
           clkreboot: 'Clock reset + reboot',
           rebootConfirm: 'Перезагрузить удалённую ноду?',
           clkrebootConfirm: 'Сбросить clock и перезагрузить ноду?',
+          poweroff: 'Выключение',
+          poweroffConfirm: 'Выключить репитер? Потребуется физический доступ для включения.',
+          startOta: 'Обновление OTA',
+          startOtaConfirm: 'Запустить обновление прошивки? Репитер будет перезагружен.',
         },
         serialOnly: {
           title: 'Serial-only',

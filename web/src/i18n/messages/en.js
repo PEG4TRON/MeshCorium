@@ -378,7 +378,7 @@ export default {
         rxDelay: 'RX delay',
         txDelay: 'TX delay',
         directTxDelay: 'Direct TX delay',
-        af: 'AF',
+        dutycycle: 'Duty cycle',
         interferenceThreshold: 'Interference threshold',
         agcResetInterval: 'AGC reset interval, sec',
         pathHashMode: 'Path hash mode',
@@ -414,6 +414,12 @@ export default {
         regionName: 'Region name',
         parentName: 'Parent name',
         mode: 'Mode',
+        name: {
+          placeholder: '#Europe or *',
+        },
+        tokens: {
+          placeholder: 'Token1,Token2,Token3',
+        },
         homePlaceholder: '#Europe or *',
         allowPlaceholder: '#Europe or *',
         putPlaceholder: '#NorthAmerica',
@@ -472,6 +478,10 @@ export default {
           title: 'Temp radio',
           description: 'Temporary radio settings until reboot/timeout.',
           apply: 'Start temp radio',
+        },
+        rxgain: {
+          label: 'RX Boosted Gain',
+          hint: 'Enable/disable rx boosted gain mode (SX12xx/LR1110).',
         },
         adc: {
           title: 'ADC multiplier',
@@ -556,6 +566,14 @@ export default {
           description: 'If `remove` is selected, the command becomes `setperm <pubkey>` without a permissions argument.',
           apply: 'Apply ACL',
         },
+        getAcl: {
+          label: 'View ACL',
+          hint: 'Retrieve current access control list from repeater.',
+        },
+        allowReadOnly: {
+          label: 'Allow Read-Only',
+          hint: 'Enable/disable read-only access mode.',
+        },
       },
       regionCards: {
         home: {
@@ -573,10 +591,26 @@ export default {
           description: 'Creates a region with an optional parent.',
           apply: 'Create region',
         },
+        load: {
+          label: 'Load regions',
+          hint: 'Reload regions from the server (discards unsaved edits).',
+        },
+        get: {
+          label: 'Get region',
+          hint: 'Fetch region details by name.',
+        },
         remove: {
           title: 'Remove region',
           description: 'Removes a region. The CLI requires child regions to be removed first.',
           apply: 'Remove region',
+        },
+        default: {
+          label: 'Set as default',
+          hint: 'Set or clear the default region.',
+        },
+        def: {
+          label: 'Region definition',
+          hint: 'Set region definition tokens (CLI: `region def <tokens>`).',
         },
         actions: {
           title: 'Region actions',
@@ -593,6 +627,18 @@ export default {
           logStart: 'Log start',
           logStop: 'Log stop',
           logErase: 'Log erase',
+          clock: 'Show clock',
+          clockDesc: 'Display current repeater clock.',
+          setTime: 'Set time',
+          setTimeDesc: 'Set repeater clock to epoch seconds.',
+          advert: 'Flood advert',
+          advertDesc: 'Send flood advert.',
+          advertZerohop: 'Zero-hop advert',
+          advertZerohopDesc: 'Send zero-hop advert.',
+          neighbors: 'List neighbors',
+          neighborsDesc: 'Show neighbor nodes.',
+          discoverNeighbors: 'Discover neighbors',
+          discoverNeighborsDesc: 'Scan for neighbor nodes.',
         },
         danger: {
           title: 'Danger zone',
@@ -601,6 +647,10 @@ export default {
           clkreboot: 'Clock reset + reboot',
           rebootConfirm: 'Reboot the remote node?',
           clkrebootConfirm: 'Reset the clock and reboot the remote node?',
+          poweroff: 'Power off',
+          poweroffConfirm: 'Power off the repeater? This requires physical access to restart.',
+          startOta: 'Start OTA update',
+          startOtaConfirm: 'Start over-the-air firmware update? This will reboot the repeater.',
         },
         serialOnly: {
           title: 'Serial-only',
