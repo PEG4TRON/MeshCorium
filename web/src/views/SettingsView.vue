@@ -7137,8 +7137,7 @@ onBeforeUnmount(() => {
               :key="`${group.id}:${entry.name}`"
               class="mc-settings-about-item"
             >
-              <strong>{{ entry.name }}</strong>
-              <span> {{ entry.version }}.</span>
+              <strong>{{ entry.name }}</strong> <span>{{ entry.version }}.</span>
               <span> </span>
               <a class="mc-settings-inline-link" :href="entry.packageUrl" target="_blank" rel="noreferrer noopener">
                   {{ entry.packageLabel }}
