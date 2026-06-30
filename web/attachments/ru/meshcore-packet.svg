@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1400" height="480" viewBox="0 0 1400 480">
 <style>text{font-family:Arial,sans-serif;fill:#d0d8e0}.t{font-size:30px;font-weight:bold}.h{font-size:20px;font-weight:bold}.s{font-size:17px}.x{fill:#162840;stroke:#245e8a;stroke-width:3}.y{fill:#1a1030;stroke:#744a9a;stroke-width:3}.z{fill:#2a1a08;stroke:#a66b00;stroke-width:3}.p{fill:#0a1f0d;stroke:#397d3d;stroke-width:3}</style>
 <text x="40" y="50" class="t">MeshCore Packet Format v1</text>
-<rect x="55" y="120" width="180" height="110" class="x"/><text x="105" y="168" class="h">Header</text><text x="82" y="202" class="s">1 байт: VVPPPPRR</text>
-<rect x="235" y="120" width="260" height="110" class="y"/><text x="282" y="168" class="h">Transport Codes</text><text x="270" y="202" class="s">4 байта, опционально</text>
+<rect x="55" y="120" width="200" height="110" class="x"/><text x="105" y="168" class="h">Header</text><text x="72" y="202" class="s">1 байт: VVPPPPRR</text>
+<rect x="255" y="120" width="240" height="110" class="y"/><text x="282" y="168" class="h">Transport Codes</text><text x="270" y="202" class="s">4 байта, опционально</text>
 <rect x="495" y="120" width="200" height="110" class="z"/><text x="532" y="168" class="h">Path Length</text><text x="525" y="202" class="s">1 байт: size + count</text>
 <rect x="695" y="120" width="280" height="110" class="z"/><text x="805" y="168" class="h">Path</text><text x="735" y="202" class="s">до 64 байт, список hop</text>
 <rect x="975" y="120" width="360" height="110" class="p"/><text x="1110" y="168" class="h">Payload</text><text x="1035" y="202" class="s">до 184 байт, тип задаёт Header</text>
