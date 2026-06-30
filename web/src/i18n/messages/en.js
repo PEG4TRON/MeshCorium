@@ -2143,6 +2143,10 @@ export default {
   wiki: {
     loading: 'Loading wiki\u2026',
     selectSection: 'Select a section from the sidebar to view its content.',
+    searchPlaceholder: 'Search wiki\u2026',
+    searchNoResults: 'No results found.',
+    searchResults: 'results',
+    searchMatches: 'matches',
     openSite: 'Open meshcore.io',
     /* DEPRECATED: sections titles are now in wiki/pages_en.json */
   },

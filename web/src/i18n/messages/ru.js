@@ -2143,6 +2143,10 @@ export default {
   wiki: {
     loading: 'Загрузка Wiki\u2026',
     selectSection: 'Выберите раздел в боковой панели для просмотра содержимого.',
+    searchPlaceholder: 'Поиск по wiki\u2026',
+    searchNoResults: 'Ничего не найдено.',
+    searchResults: 'результатов',
+    searchMatches: 'совпадений',
     openSite: 'Открыть meshcore.io',
     /* DEPRECATED: sections titles are now in wiki/pages_ru.json */
   },

@@ -12273,6 +12273,9 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
         if parsed.path.startswith("/attachments/"):
             self._send_attachment_file(parsed.path.removeprefix("/attachments/"))
             return
+        if parsed.path == "/api/wiki/search":
+            self._handle_wiki_search(parsed)
+            return
         if parsed.path == "/api/ports":
             self._send_json({"ports": DEFAULT_CONNECTION_ROUTER.discover()})
             return
@@ -14414,7 +14417,11 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
             return True
         if path.startswith("/icons/") or path.startswith("/vendor/") or path.startswith("/sounds/") or path.startswith("/wallpappers/") or path.startswith("/connect-app/"):
             return True
+        # Wiki content endpoints are intentionally public: wiki/md and web/attachments
+        # must contain public documentation only. Do not store private deployment data there.
         if path == "/wiki-pages.json" or path.startswith("/wiki-md/") or path.startswith("/attachments/"):
+            return True
+        if path == "/api/wiki/search":
             return True
         if path in {"/api/mobile-push/register", "/api/mobile-push/unregister"}:
             return True
@@ -14588,6 +14595,134 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         self._send_json(json.loads(resolved.read_text(encoding="utf-8")))
+
+    def _wiki_plain_text(self, md: str) -> str:
+        text = re.sub(r'!\[[^\]]*\]\([^)]*\)', '', md)
+        text = re.sub(r'\[([^\]]+)\]\([^)]*\)', r'\1', text)
+        text = re.sub(r'`([^`]*)`', r'\1', text)
+        text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
+        text = re.sub(r'[*_~>#|]', ' ', text)
+        text = re.sub(r'\s+', ' ', text).strip()
+        return text
+
+    def _handle_wiki_search(self, parsed) -> None:
+        params = parse_qs(parsed.query)
+        raw_query = str(params.get("q", [""])[0] or "").strip()
+        if len(raw_query) > 128:
+            raw_query = raw_query[:128]
+        locale = str(params.get("locale", [""])[0] or "").strip().lower()
+        if len(raw_query) < 2:
+            self._send_json({"results": [], "total": 0, "query": raw_query})
+            return
+
+        # Determine locale-specific md directory
+        lang_dir = "ru" if locale in ("ru", "ru-RU", "ru_ru") else "en"
+        md_dir = WIKI_DIR / "md" / lang_dir
+        if not md_dir.is_dir():
+            self._send_json({"results": [], "total": 0, "query": raw_query})
+            return
+
+        # Convert query with wildcards to regex.
+        # * → \S* (part of a word, not across whitespace), ? → . (single char)
+        raw_words = re.findall(r'[^\s]+', raw_query)[:8]
+        pattern_parts = []
+        for word in raw_words:
+            escaped = re.escape(word)
+            escaped = escaped.replace(r'\*', r'\S*').replace(r'\?', '.')
+            pattern_parts.append(escaped)
+        pattern_str = '|'.join(pattern_parts) if pattern_parts else ''
+        try:
+            search_re = re.compile(pattern_str, re.IGNORECASE)
+        except re.error:
+            self._send_json({"results": [], "total": 0, "query": raw_query})
+            return
+
+        # Load pages.json to map md path -> section id/title/parent.
+        pages_path = WIKI_DIR / f"pages_{lang_dir}.json"
+        section_by_id = {}
+        section_by_md = {}
+        try:
+            pages_data = json.loads(pages_path.read_text(encoding="utf-8"))
+
+            def walk_sections(sections, parent_title=""):
+                for s in sections:
+                    info = {
+                        "id": s.get("id", ""),
+                        "title": s.get("title", ""),
+                        "parent": parent_title,
+                        "md": s.get("md", ""),
+                    }
+                    if info["id"]:
+                        section_by_id[info["id"]] = info
+                    if info["md"]:
+                        section_by_md[info["md"]] = info
+                    walk_sections(s.get("children", []), info["title"])
+
+            walk_sections(pages_data.get("sections", []))
+        except (FileNotFoundError, json.JSONDecodeError):
+            section_by_id = {}
+            section_by_md = {}
+
+        # Search all .md files
+        results = []
+        for fpath in md_dir.rglob("*.md"):
+            try:
+                rel = fpath.relative_to(md_dir)
+            except ValueError:
+                continue
+            path_str = str(rel.as_posix())
+            wiki_md_path = f"{lang_dir}/{path_str}"
+
+            content = fpath.read_text(encoding="utf-8")
+            plain_text = self._wiki_plain_text(content)
+            if not search_re.search(plain_text):
+                continue
+
+            # Extract title from first H1 as fallback when pages json has no title
+            title = ""
+            h1_match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
+            if h1_match:
+                title = h1_match.group(1).strip()
+
+            # Build snippet from plain visible-ish text, not raw markdown
+            snippet = ""
+            match = search_re.search(plain_text)
+            if match:
+                start = max(0, match.start() - 40)
+                end = min(len(plain_text), match.end() + 80)
+                snippet = plain_text[start:end]
+                if start > 0:
+                    snippet = '...' + snippet
+                if end < len(plain_text):
+                    snippet = snippet + '...'
+
+            # Count matches for relevance
+            match_count = len(search_re.findall(plain_text))
+
+            # Position in file (earlier = more relevant)
+            first_pos = match.start() if match else 0
+
+            # Section context from pages json, keyed by full locale-prefixed md path
+            info = section_by_md.get(wiki_md_path, {})
+            result_id = info.get("id") or fpath.stem
+            section_title = info.get("title") or title
+            parent_title = info.get("parent", "")
+
+            results.append({
+                "id": result_id,
+                "title": section_title or title,
+                "parent": parent_title,
+                "path": wiki_md_path,
+                "snippet": snippet[:200],
+                "score": match_count * 1000 - first_pos,
+                "matches": match_count,
+            })
+
+        # Sort by score (descending) and limit to top 30
+        results.sort(key=lambda r: -r["score"])
+        results = results[:30]
+
+        self._send_json({"results": results, "total": len(results), "query": raw_query})
 
     def _send_wiki_md_file(self, rel_path: str) -> None:
         normalized = os.path.normpath("/" + rel_path).lstrip("/")
