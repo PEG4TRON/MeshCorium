@@ -15,6 +15,7 @@ const session = useSessionStore()
 const bellIconUrl = '/icons/bell-icon.svg'
 const messagesIconUrl = '/icons/paper-plane.png'
 const advertIconUrl = '/icons/mesh_broadcast_icon.svg'
+const wikiIconUrl = '/icons/wiki-icon.svg?v=2'
 
 async function bootstrap() {
   try {

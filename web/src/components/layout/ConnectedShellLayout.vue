@@ -73,6 +73,7 @@ const mapIconUrl = '/icons/map-icon.svg'
 const settingsIconUrl = '/icons/settings-icon.svg'
 const disconnectIconUrl = '/icons/disconnect-icon.svg?v=19'
 const consoleIconUrl = '/icons/console-icon.svg'
+const wikiIconUrl = '/icons/wiki-icon.svg?v=2'
 const bootstrapped = ref(false)
 const refreshing = ref(false)
 const phonebarTick = ref(Date.now())
@@ -1738,6 +1739,17 @@ onBeforeUnmount(() => {
         >
           <img :src="advertIconUrl" :alt="t('advert.send')" />
         </button>
+        <button
+          v-tooltip="{ content: t('common.wiki'), theme: 'meshcorium-tooltip' }"
+          class="mc-rail-button"
+          :class="{ active: route.name === 'wiki' }"
+          type="button"
+          :ref="(element) => setRailButtonElement('wiki', element)"
+          :aria-label="t('common.wiki')"
+          @click="router.push('/wiki')"
+        >
+          <img :src="wikiIconUrl" :alt="t('common.wiki')" />
+        </button>
         <div class="mc-rail-spacer"></div>
         <div class="mc-rail-divider"></div>
         <button
@@ -1777,6 +1789,7 @@ onBeforeUnmount(() => {
       <MobileDockButton :icon="messagesIconUrl" label="Chats" @click="openMessages()" />
       <MobileDockButton :icon="contactsIconUrl" label="Contacts" @click="openContacts" />
       <MobileDockButton :icon="mapIconUrl" label="Map" :active="isMapsRoute && !activeShellPanel" @click="openMaps" />
+      <MobileDockButton :icon="wikiIconUrl" label="Wiki" :active="route.name === 'wiki' && !activeShellPanel" @click="router.push('/wiki')" />
       <MobileDockButton :icon="settingsIconUrl" label="Settings" :active="route.name === 'settings' && !activeShellPanel" @click="openSettings" />
     </nav>
 

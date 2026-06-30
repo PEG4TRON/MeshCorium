@@ -5159,12 +5159,6 @@ onBeforeUnmount(() => {
               </div>
               <div class="mc-settings-row-control mc-settings-row-control--stack">
                 <div class="mc-settings-inline-controls">
-                  <PluginDropdown
-                    :model-value="pageBackgroundId"
-                    :options="backgroundDropdownOptions"
-                    :min-width="220"
-                    @update:model-value="updatePageBackgroundId"
-                  />
                   <div class="mc-settings-checkbox">
                     <input
                       type="checkbox"
@@ -5173,6 +5167,12 @@ onBeforeUnmount(() => {
                     />
                     <span>{{ t('settings.meshcorium.background.blurToggle') }}</span>
                   </div>
+                  <PluginDropdown
+                    :model-value="pageBackgroundId"
+                    :options="backgroundDropdownOptions"
+                    :min-width="220"
+                    @update:model-value="updatePageBackgroundId"
+                  />
                 </div>
               </div>
             </div>
@@ -6180,25 +6180,31 @@ onBeforeUnmount(() => {
                 <label class="mc-settings-row">
                   <div class="mc-settings-row-label">
                     <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.sf') }}</strong>
-                    <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.cr') }}</span>
+                    <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.sfHint') }}</span>
                   </div>
                   <div class="mc-settings-row-control">
-                    <div class="mc-settings-inline-controls">
-                      <select v-model="meshcoreParamsRadioDraft.sf" class="mc-settings-native-select">
-                        <option v-for="value in [5, 6, 7, 8, 9, 10, 11, 12]" :key="`sf-${value}`" :value="value">{{ value }}</option>
-                      </select>
-                      <select v-model="meshcoreParamsRadioDraft.cr" class="mc-settings-native-select">
-                        <option v-for="value in [5, 6, 7, 8]" :key="`cr-${value}`" :value="value">{{ value }}</option>
-                      </select>
-                    </div>
+                    <select v-model="meshcoreParamsRadioDraft.sf" class="mc-settings-native-select">
+                      <option v-for="value in [5, 6, 7, 8, 9, 10, 11, 12]" :key="`sf-${value}`" :value="value">{{ value }}</option>
+                    </select>
+                  </div>
+                </label>
+                <label class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.cr') }}</strong>
+                    <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.crHint') }}</span>
+                  </div>
+                  <div class="mc-settings-row-control">
+                    <select v-model="meshcoreParamsRadioDraft.cr" class="mc-settings-native-select">
+                      <option v-for="value in [5, 6, 7, 8]" :key="`cr-${value}`" :value="value">{{ value }}</option>
+                    </select>
                   </div>
                 </label>
                 <label class="mc-settings-row">
                   <div class="mc-settings-row-label">
                     <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.txPower') }}</strong>
-                    <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.clientRepeat') }}</span>
+                    <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.txPowerHint') }}</span>
                   </div>
-                  <div class="mc-settings-row-control mc-settings-row-control--stack">
+                  <div class="mc-settings-row-control">
                     <input
                       v-model="meshcoreParamsRadioDraft.tx_power_dbm"
                       class="mc-settings-native-select"
@@ -6207,6 +6213,20 @@ onBeforeUnmount(() => {
                       :max="meshcoreParamsRadioConstraints.tx_power_dbm_max ?? meshcoreParamsRadio.max_tx_power ?? 30"
                       step="1"
                     />
+                  </div>
+                </label>
+                <label class="mc-settings-row">
+                  <div class="mc-settings-row-label">
+                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.clientRepeat') }}</strong>
+                    <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.clientRepeatHint') }}</span>
+                    <span
+                      v-if="meshcoreParamsRadioConstraints.client_repeat_requires_allowed_range && !meshcoreParamsRadio.client_repeat_allowed"
+                      class="mc-settings-inline-hint mc-settings-inline-hint--warning"
+                    >
+                      {{ t('settings.nodeCompanion.meshcoreParams.notes.clientRepeatUnavailable') }}
+                    </span>
+                  </div>
+                  <div class="mc-settings-row-control mc-settings-row-control--stack">
                     <label class="mc-settings-inline-toggle">
                       <input
                         v-model="meshcoreParamsRadioDraft.client_repeat"
@@ -6215,12 +6235,6 @@ onBeforeUnmount(() => {
                       />
                       <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.clientRepeat') }}</span>
                     </label>
-                    <span
-                      v-if="meshcoreParamsRadioConstraints.client_repeat_requires_allowed_range && !meshcoreParamsRadio.client_repeat_allowed"
-                      class="mc-settings-inline-hint"
-                    >
-                      {{ t('settings.nodeCompanion.meshcoreParams.notes.clientRepeatUnavailable') }}
-                    </span>
                   </div>
                 </label>
               </div>
@@ -6277,24 +6291,6 @@ onBeforeUnmount(() => {
                     </div>
                   </div>
                 </label>
-                <div class="mc-settings-row">
-                  <div class="mc-settings-row-label">
-                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.deviceModel') }}</strong>
-                    <span>{{ meshcoreParamsIdentity.manufacturer_model || t('common.na') }}</span>
-                  </div>
-                </div>
-                <div class="mc-settings-row">
-                  <div class="mc-settings-row-label">
-                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.deviceTime') }}</strong>
-                    <span>{{ meshcoreParamsIdentity.device_time_utc || t('common.na') }}</span>
-                  </div>
-                </div>
-                <div class="mc-settings-row">
-                  <div class="mc-settings-row-label">
-                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.firmware') }}</strong>
-                    <span>{{ meshcoreParamsIdentity.semantic_version || t('common.na') }}</span>
-                  </div>
-                </div>
               </div>
               <div class="mc-settings-card-actions">
                 <button class="mc-button mc-button--primary" type="button" :disabled="meshcoreParamsBusyMode === 'identity'" @click="applyMeshcoreIdentityParams">
@@ -6307,22 +6303,6 @@ onBeforeUnmount(() => {
                   @click="syncNodeCompanionTime"
                 >
                   {{ nodeCompanionSyncingTime ? t('settings.nodeCompanion.actions.syncingTime') : t('settings.nodeCompanion.actions.syncTime') }}
-                </button>
-                <button
-                  class="mc-button mc-button--ghost"
-                  type="button"
-                  :disabled="!meshcoreParamsAvailable || nodeCompanionSendingAdvert"
-                  @click="sendNodeCompanionAdvert"
-                >
-                  {{ nodeCompanionSendingAdvert ? t('settings.nodeCompanion.actions.sendingAdvert') : t('advert.actions.direct') }}
-                </button>
-                <button
-                  class="mc-button mc-button--ghost"
-                  type="button"
-                  :disabled="!meshcoreParamsAvailable || nodeCompanionSendingAdvert"
-                  @click="sendNodeCompanionFloodAdvert"
-                >
-                  {{ nodeCompanionSendingAdvert ? t('settings.nodeCompanion.actions.sendingAdvert') : t('advert.actions.flood') }}
                 </button>
               </div>
             </section>
@@ -6339,6 +6319,9 @@ onBeforeUnmount(() => {
                     <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.manualAddOnly') }}</span>
                   </div>
                   <div class="mc-settings-row-control mc-settings-row-control--stack">
+                    <label class="mc-settings-inline-toggle">
+                      <input v-model="meshcoreParamsRoutingDraft.manual_add_only" type="checkbox" />
+                    </label>
                     <input
                       v-model="meshcoreParamsRoutingDraft.multi_acks"
                       class="mc-settings-native-select"
@@ -6347,38 +6330,66 @@ onBeforeUnmount(() => {
                       :max="meshcoreParamsRoutingConstraints.multi_acks_max ?? 2"
                       step="1"
                     />
-                    <label class="mc-settings-inline-toggle">
-                      <input v-model="meshcoreParamsRoutingDraft.manual_add_only" type="checkbox" />
-                      <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.manualAddOnly') }}</span>
-                    </label>
                   </div>
                 </label>
-                <label class="mc-settings-row">
-                  <div class="mc-settings-row-label">
-                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.telemetryBase') }}</strong>
-                    <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.telemetryLocation') }} / {{ t('settings.nodeCompanion.meshcoreParams.fields.telemetryEnvironment') }}</span>
-                  </div>
-                  <div class="mc-settings-row-control">
-                    <div class="mc-settings-inline-controls">
+              </div>
+
+              <!-- Telemetry card -->
+              <section class="mc-settings-panel">
+                <div class="mc-settings-panel-copy">
+                  <h3>{{ t('settings.nodeCompanion.meshcoreParams.fields.telemetryCardTitle') }}</h3>
+                  <p>{{ t('settings.nodeCompanion.meshcoreParams.fields.telemetryCardBody') }}</p>
+                </div>
+                <div class="mc-settings-rows">
+                  <label class="mc-settings-row">
+                    <div class="mc-settings-row-label">
+                      <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.telemetryBase') }}</strong>
+                      <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.telemetryBaseHint') }}</span>
+                    </div>
+                    <div class="mc-settings-row-control">
                       <select v-model="meshcoreParamsRoutingDraft.telemetry_mode_base" class="mc-settings-native-select">
                         <option v-for="option in meshcoreTelemetryModeOptions" :key="`tele-base-${option.value}`" :value="option.value">{{ option.label }}</option>
                       </select>
+                    </div>
+                  </label>
+                  <label class="mc-settings-row">
+                    <div class="mc-settings-row-label">
+                      <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.telemetryLocation') }}</strong>
+                      <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.telemetryLocationHint') }}</span>
+                    </div>
+                    <div class="mc-settings-row-control">
                       <select v-model="meshcoreParamsRoutingDraft.telemetry_mode_loc" class="mc-settings-native-select">
                         <option v-for="option in meshcoreTelemetryModeOptions" :key="`tele-loc-${option.value}`" :value="option.value">{{ option.label }}</option>
                       </select>
+                    </div>
+                  </label>
+                  <label class="mc-settings-row">
+                    <div class="mc-settings-row-label">
+                      <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.telemetryEnvironment') }}</strong>
+                      <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.telemetryEnvironmentHint') }}</span>
+                    </div>
+                    <div class="mc-settings-row-control">
                       <select v-model="meshcoreParamsRoutingDraft.telemetry_mode_env" class="mc-settings-native-select">
                         <option v-for="option in meshcoreTelemetryModeOptions" :key="`tele-env-${option.value}`" :value="option.value">{{ option.label }}</option>
                       </select>
                     </div>
-                  </div>
-                </label>
-                <label class="mc-settings-row">
-                  <div class="mc-settings-row-label">
-                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.rxDelayBase') }}</strong>
-                    <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.airtimeFactor') }}</span>
-                  </div>
-                  <div class="mc-settings-row-control">
-                    <div class="mc-settings-inline-controls">
+                  </label>
+                </div>
+              </section>
+
+              <!-- Airtime card -->
+              <section class="mc-settings-panel">
+                <div class="mc-settings-panel-copy">
+                  <h3>{{ t('settings.nodeCompanion.meshcoreParams.fields.airtimeCardTitle') }}</h3>
+                  <p>{{ t('settings.nodeCompanion.meshcoreParams.fields.airtimeCardBody') }}</p>
+                </div>
+                <div class="mc-settings-rows">
+                  <label class="mc-settings-row">
+                    <div class="mc-settings-row-label">
+                      <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.rxDelayBase') }}</strong>
+                      <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.rxDelayBaseHint') }}</span>
+                    </div>
+                    <div class="mc-settings-row-control">
                       <input
                         v-model="meshcoreParamsRoutingDraft.rx_delay_base"
                         class="mc-settings-native-select"
@@ -6387,6 +6398,14 @@ onBeforeUnmount(() => {
                         :max="meshcoreParamsRoutingConstraints.rx_delay_base_max ?? 20"
                         step="0.001"
                       />
+                    </div>
+                  </label>
+                  <label class="mc-settings-row">
+                    <div class="mc-settings-row-label">
+                      <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.airtimeFactor') }}</strong>
+                      <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.airtimeFactorHint') }}</span>
+                    </div>
+                    <div class="mc-settings-row-control">
                       <input
                         v-model="meshcoreParamsRoutingDraft.airtime_factor"
                         class="mc-settings-native-select"
@@ -6396,18 +6415,34 @@ onBeforeUnmount(() => {
                         step="0.001"
                       />
                     </div>
-                  </div>
-                </label>
-                <label class="mc-settings-row">
-                  <div class="mc-settings-row-label">
-                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.pathHashMode') }}</strong>
-                    <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.autoaddMaxHops') }}</span>
-                  </div>
-                  <div class="mc-settings-row-control">
-                    <div class="mc-settings-inline-controls">
+                  </label>
+                </div>
+              </section>
+
+              <!-- Path hash card -->
+              <section class="mc-settings-panel">
+                <div class="mc-settings-panel-copy">
+                  <h3>{{ t('settings.nodeCompanion.meshcoreParams.fields.pathHashCardTitle') }}</h3>
+                  <p>{{ t('settings.nodeCompanion.meshcoreParams.fields.pathHashCardBody') }}</p>
+                </div>
+                <div class="mc-settings-rows">
+                  <label class="mc-settings-row">
+                    <div class="mc-settings-row-label">
+                      <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.pathHashMode') }}</strong>
+                      <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.pathHashModeHint') }}</span>
+                    </div>
+                    <div class="mc-settings-row-control">
                       <select v-model="meshcoreParamsRoutingDraft.path_hash_mode" class="mc-settings-native-select">
                         <option v-for="option in meshcorePathHashModeOptions" :key="`path-${option.value}`" :value="option.value">{{ option.label }}</option>
                       </select>
+                    </div>
+                  </label>
+                  <label class="mc-settings-row">
+                    <div class="mc-settings-row-label">
+                      <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.autoaddMaxHops') }}</strong>
+                      <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.autoaddMaxHopsHint') }}</span>
+                    </div>
+                    <div class="mc-settings-row-control">
                       <input
                         v-model="meshcoreParamsRoutingDraft.autoadd_max_hops"
                         class="mc-settings-native-select"
@@ -6417,22 +6452,65 @@ onBeforeUnmount(() => {
                         step="1"
                       />
                     </div>
-                  </div>
-                </label>
-                <div class="mc-settings-row">
-                  <div class="mc-settings-row-label">
-                    <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.autoaddFlags') }}</strong>
-                    <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.autoaddBody') }}</span>
-                  </div>
-                  <div class="mc-settings-row-control mc-settings-row-control--stack">
-                    <label class="mc-settings-inline-toggle"><input v-model="meshcoreParamsRoutingDraft.autoadd_overwrite_oldest" type="checkbox" /><span>{{ t('settings.nodeCompanion.meshcoreParams.fields.autoaddOverwriteOldest') }}</span></label>
-                    <label class="mc-settings-inline-toggle"><input v-model="meshcoreParamsRoutingDraft.autoadd_chat" type="checkbox" /><span>{{ t('settings.nodeCompanion.meshcoreParams.fields.autoaddChat') }}</span></label>
-                    <label class="mc-settings-inline-toggle"><input v-model="meshcoreParamsRoutingDraft.autoadd_repeater" type="checkbox" /><span>{{ t('settings.nodeCompanion.meshcoreParams.fields.autoaddRepeater') }}</span></label>
-                    <label class="mc-settings-inline-toggle"><input v-model="meshcoreParamsRoutingDraft.autoadd_room_server" type="checkbox" /><span>{{ t('settings.nodeCompanion.meshcoreParams.fields.autoaddRoomServer') }}</span></label>
-                    <label class="mc-settings-inline-toggle"><input v-model="meshcoreParamsRoutingDraft.autoadd_sensor" type="checkbox" /><span>{{ t('settings.nodeCompanion.meshcoreParams.fields.autoaddSensor') }}</span></label>
-                  </div>
+                  </label>
                 </div>
-              </div>
+              </section>
+
+              <!-- Auto-add card -->
+              <section class="mc-settings-panel">
+                <div class="mc-settings-panel-copy">
+                  <h3>{{ t('settings.nodeCompanion.meshcoreParams.fields.autoaddCardTitle') }}</h3>
+                  <p>{{ t('settings.nodeCompanion.meshcoreParams.fields.autoaddCardBody') }}</p>
+                </div>
+                <div class="mc-settings-rows">
+                  <label class="mc-settings-row">
+                    <div class="mc-settings-row-label">
+                      <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.autoaddOverwriteOldest') }}</strong>
+                      <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.autoaddOverwriteOldestHint') }}</span>
+                    </div>
+                    <div class="mc-settings-row-control">
+                      <input v-model="meshcoreParamsRoutingDraft.autoadd_overwrite_oldest" type="checkbox" class="mc-settings-toggle" />
+                    </div>
+                  </label>
+                  <label class="mc-settings-row">
+                    <div class="mc-settings-row-label">
+                      <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.autoaddChat') }}</strong>
+                      <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.autoaddChatHint') }}</span>
+                    </div>
+                    <div class="mc-settings-row-control">
+                      <input v-model="meshcoreParamsRoutingDraft.autoadd_chat" type="checkbox" class="mc-settings-toggle" />
+                    </div>
+                  </label>
+                  <label class="mc-settings-row">
+                    <div class="mc-settings-row-label">
+                      <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.autoaddRepeater') }}</strong>
+                      <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.autoaddRepeaterHint') }}</span>
+                    </div>
+                    <div class="mc-settings-row-control">
+                      <input v-model="meshcoreParamsRoutingDraft.autoadd_repeater" type="checkbox" class="mc-settings-toggle" />
+                    </div>
+                  </label>
+                  <label class="mc-settings-row">
+                    <div class="mc-settings-row-label">
+                      <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.autoaddRoomServer') }}</strong>
+                      <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.autoaddRoomServerHint') }}</span>
+                    </div>
+                    <div class="mc-settings-row-control">
+                      <input v-model="meshcoreParamsRoutingDraft.autoadd_room_server" type="checkbox" class="mc-settings-toggle" />
+                    </div>
+                  </label>
+                  <label class="mc-settings-row">
+                    <div class="mc-settings-row-label">
+                      <strong>{{ t('settings.nodeCompanion.meshcoreParams.fields.autoaddSensor') }}</strong>
+                      <span>{{ t('settings.nodeCompanion.meshcoreParams.fields.autoaddSensorHint') }}</span>
+                    </div>
+                    <div class="mc-settings-row-control">
+                      <input v-model="meshcoreParamsRoutingDraft.autoadd_sensor" type="checkbox" class="mc-settings-toggle" />
+                    </div>
+                  </label>
+                </div>
+              </section>
+
               <div class="mc-settings-card-actions">
                 <button class="mc-button mc-button--primary" type="button" :disabled="meshcoreParamsBusyMode === 'routing'" @click="applyMeshcoreRoutingParams">
                   {{ meshcoreParamsBusyMode === 'routing' ? t('settings.nodeCompanion.actions.applying') : t('settings.nodeCompanion.actions.apply') }}
@@ -6523,18 +6601,6 @@ onBeforeUnmount(() => {
             </div>
           </section>
 
-          <section class="mc-settings-panel mc-settings-panel--note">
-            <div class="mc-settings-panel-copy">
-              <h3>{{ t('settings.nodeCompanion.meshcoreParams.note.title') }}</h3>
-              <p>{{ t('settings.nodeCompanion.meshcoreParams.note.body') }}</p>
-            </div>
-          </section>
-          <section v-if="meshcoreParamsCompanionCliRescueOnly" class="mc-settings-panel mc-settings-panel--note">
-            <div class="mc-settings-panel-copy">
-              <h3>{{ t('settings.nodeCompanion.meshcoreParams.note.cliLimitTitle') }}</h3>
-              <p>{{ t('settings.nodeCompanion.meshcoreParams.note.cliLimitBody') }}</p>
-            </div>
-          </section>
         </div>
 
         <div

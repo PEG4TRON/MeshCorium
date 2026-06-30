@@ -38,6 +38,10 @@ const SettingsView = createLazyRoute(() => import('../views/SettingsView.vue'), 
   titleKey: 'routes.settings',
   messageKey: 'settings.loading',
 })
+const WikiView = createLazyRoute(() => import('../views/WikiView.vue'), {
+  titleKey: 'routes.wiki',
+  messageKey: 'wiki.loading',
+})
 
 export const router = createRouter({
   history: createWebHistory('/'),
@@ -123,6 +127,14 @@ export const router = createRouter({
           component: SettingsView,
           meta: {
             titleKey: 'routes.settings',
+          },
+        },
+        {
+          path: 'wiki/:section?',
+          name: 'wiki',
+          component: WikiView,
+          meta: {
+            titleKey: 'routes.wiki',
           },
         },
       ],

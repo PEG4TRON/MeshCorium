@@ -2,7 +2,49 @@
 
 ## Dev / Unreleased (2026-06-29)
 
+### Web: Settings Layout Overhaul
+- Maps page summary cards: centered text in mc-map-summary-card
+- Settings rows grid: minmax(220px, auto) for adaptive control column width
+- Native select and inline input: natural width (not forced 100%)
+- mc-settings-inline-controls: no max-width cap, sizes from content
+- mc-settings-row-control--stack: gap 8px between stacked controls
+- Background blur toggle and wallpaper dropdown swapped order
 
+### Web: MeshCore Params Radio Section
+- Removed "Section status" and "Companion firmware limitation" info blocks
+- Split SF and CR into two separate rows with individual descriptions and sfHint/crHint i18n
+- Split TX power and Client repeat into separate rows with txPowerHint/clientRepeatHint
+- Client repeat unavailable hint: yellow (mc-settings-inline-hint--warning), moved to label column
+- Client repeat condition: shown only when constraints require allowed-range check AND current frequency is outside allowed ranges
+
+### Web: MeshCore Params Routing Section
+- Multi-Acks: checkbox moved left of numeric input, duplicate label removed
+- Telemetry broadcast: extracted into separate card with 3 sub-rows (Base/Location/Environment) + card-body descriptions for each mode value
+- TX timing and airtime: extracted into separate card with RX delay base hint (0-20ms) and airtime factor hint (duty_cycle formula)
+- Path hash mode: separate card with hop constraints per mode (1-byte=64, 2-byte=32, 3-byte=21 hops) + autoaddMaxHopsHint
+- Auto-add contacts: extracted into separate card with 5 individual rows, each with title and description
+
+### Web: MeshCore Params Identity Section
+- Latitude/Longitude row: title → "Node coordinates" / "Координаты ноды", description → "Latitude, Longitude" / "Широта, Долгота"
+- Removed read-only rows: Device model, Device time (UTC), Firmware
+- Removed Direct and Flood advert buttons
+
+### Web: Wiki Page (NEW)
+- New /wiki route with lazy-loaded WikiView
+- ShellPageFrame layout matching settings structure: scroller + workspace
+- Phonebar in workspace-top (desktop) + mobile phonebar support
+- Scroller-footer with MessagesConversationSidebar (status as in Messages)
+- Empty scroller-body placeholder for future navigation
+- Workspace-header with dynamic title/subtitle from route params
+- i18n: wiki section in en.js and ru.js with 5 sections (getting-started, hardware, companion, repeater, faq)
+- Rail button with book icon (rotated open book SVG, gradient style matching existing icons)
+- Mobile dock Wiki button with router navigation
+- Wiki icon: /icons/wiki-icon.svg
+
+### Web: Settings Control Width Adaptivity
+- All mc-settings-native-select and mc-settings-inline-input: width auto (fit content)
+- All mc-settings-inline-controls: no min/max width constraint
+- Controls align to flex-end within the column
 ## v0.8.3 — Fixes & Mobile App (2026-06-29)
 
 ### Android WebView Client (NEW)
