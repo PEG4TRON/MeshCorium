@@ -53,7 +53,14 @@ Current release `0.8.2--auto-update-fix` is a critical hotfix: adds missing `--s
 
 ## Release Status
 
-The latest published release is `MeshCorium v0.8.3 -- Fixes & Mobile App`.
+The latest published release is `MeshCorium v0.9.0 -- UI/UX improvements & WIKI page + Android client`.
+
+### v0.9.0 — UI/UX improvements & WIKI page + Android client
+
+- **NEW Wiki page**: file-driven `/wiki` documentation page with English/Russian content, markdown articles, SVG diagrams, navigation, and search-ready public endpoints.
+- **UI/UX improvements**: settings layout, MeshCore parameter sections, control sizing, cards, hints, and mobile/native-shell polish were cleaned up.
+- **Android client**: Android WebView client APK is attached to the GitHub Release as a separate downloadable asset.
+- **Docker**: image now includes `wiki/` and `web/attachments/` runtime content.
 
 ### v0.8.3 — Fixes & Mobile App
 

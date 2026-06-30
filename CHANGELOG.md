@@ -1,6 +1,6 @@
 # Changelog
 
-## Dev / Unreleased (2026-06-29)
+## v0.9.0 — UI/UX improvements & WIKI page + Android client (2026-06-30)
 
 ### Web: Settings Layout Overhaul
 - Maps page summary cards: centered text in mc-map-summary-card
@@ -45,6 +45,46 @@
 - All mc-settings-native-select and mc-settings-inline-input: width auto (fit content)
 - All mc-settings-inline-controls: no min/max width constraint
 - Controls align to flex-end within the column
+
+### Wiki Content and Diagrams
+- Added file-driven wiki content and SVG attachments for English and Russian locales.
+- Docker image now includes `wiki/` and `web/attachments/` runtime content.
+- Fixed SVG text layout in wiki diagrams so Russian labels do not overflow their frames.
+
+### Android Client
+- Android WebView client APK is provided as a separate downloadable GitHub Release asset.
+
+---
+
+## v0.9.0 — UI/UX improvements & WIKI page + Android client (2026-06-30) [RU]
+
+### Web: переработка layout настроек
+- Карточки summary на странице карт: текст центрирован в `mc-map-summary-card`.
+- Сетка строк настроек получила адаптивную колонку управления `minmax(220px, auto)`.
+- Native select и inline input используют естественную ширину, без принудительного `100%`.
+- `mc-settings-inline-controls` больше не ограничивает ширину, размеры идут от содержимого.
+- Для stacked controls добавлен аккуратный gap 8px.
+- Переключатель background blur и dropdown wallpaper поменяны местами.
+
+### Web: MeshCore Params
+- Радио-раздел очищен от лишних информационных блоков, SF/CR и TX power/Client repeat вынесены в отдельные строки с подсказками.
+- Routing-раздел переработан: Multi-Acks, telemetry broadcast, TX timing/airtime, path hash mode и auto-add contacts разложены по отдельным понятным карточкам.
+- Identity-раздел упрощён: координаты ноды переименованы, read-only строки Device model / Device time / Firmware и advert-кнопки удалены.
+
+### Web: Wiki page (НОВОЕ)
+- Добавлен маршрут `/wiki` с lazy-loaded `WikiView`.
+- Wiki использует layout ShellPageFrame: scroller + workspace, как в настройках.
+- Добавлена wiki-кнопка в rail и mobile dock с новой SVG-иконкой книги.
+- Добавлены locale-aware `pages_en.json` / `pages_ru.json`, markdown-контент и SVG-схемы.
+- Реализованы публичные endpoints для wiki pages, markdown, attachments и поиска.
+
+### Wiki content и SVG-схемы
+- Docker image теперь включает runtime-контент `wiki/` и `web/attachments/`.
+- Исправлена раскладка текста в SVG-схемах wiki, чтобы русские подписи не выходили за рамки блоков.
+
+### Android-клиент
+- APK Android WebView-клиента приложен к GitHub Release как отдельный файл для скачивания.
+
 ## v0.8.3 — Fixes & Mobile App (2026-06-29)
 
 ### Android WebView Client (NEW)
