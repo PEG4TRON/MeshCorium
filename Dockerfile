@@ -37,6 +37,8 @@ COPY vendor /opt/meshcorium/vendor
 COPY other /opt/meshcorium/other
 COPY defaults /opt/meshcorium/defaults
 COPY --from=web-build /src/web/dist /opt/meshcorium/web/dist
+COPY web/attachments /opt/meshcorium/web/attachments
+COPY wiki /opt/meshcorium/wiki
 COPY docker/docker-entrypoint.sh /usr/local/bin/meshcorium-entrypoint
 
 RUN chmod +x /usr/local/bin/meshcorium-entrypoint \
