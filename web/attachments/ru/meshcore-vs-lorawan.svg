@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="660" viewBox="0 0 1200 660">
+<style>text{font-family:Arial,sans-serif;fill:#d0d8e0}.t{font-size:30px;font-weight:bold}.h{font-size:24px;font-weight:bold}.n{font-size:20px}.s{font-size:17px}.mc{fill:#1a2d4a;stroke:#2774ae;stroke-width:4}.lw{fill:#1a1030;stroke:#7d3c98;stroke-width:4}.line1{stroke:#2774ae;stroke-width:5}.line2{stroke:#7d3c98;stroke-width:5}</style>
+<text x="40" y="50" class="t">MeshCore и LoRaWAN используют LoRa PHY, но строят сеть по-разному</text>
+<text x="160" y="100" class="h">MeshCore</text><text x="760" y="100" class="h">LoRaWAN</text>
+<line x1="150" y1="220" x2="360" y2="150" class="line1"/><line x1="360" y1="150" x2="510" y2="290" class="line1"/><line x1="150" y1="220" x2="350" y2="390" class="line1"/><line x1="350" y1="390" x2="510" y2="290" class="line1"/>
+<rect x="70" y="175" rx="15" width="160" height="90" class="mc"/><text x="112" y="225" class="n">Узел A</text>
+<rect x="280" y="105" rx="15" width="160" height="90" class="mc"/><text x="307" y="155" class="n">Repeater</text>
+<rect x="270" y="345" rx="15" width="160" height="90" class="mc"/><text x="297" y="395" class="n">Repeater</text>
+<rect x="450" y="245" rx="15" width="160" height="90" class="mc"/><text x="492" y="295" class="n">Узел B</text>
+<text x="80" y="500" class="s">• узлы слышат и ретранслируют пакеты</text><text x="80" y="535" class="s">• flood и direct routing</text><text x="80" y="570" class="s">• центральный network server не обязателен</text>
+<line x1="710" y1="195" x2="880" y2="300" class="line2"/><line x1="710" y1="405" x2="880" y2="300" class="line2"/><line x1="880" y1="300" x2="1050" y2="300" class="line2"/>
+<rect x="635" y="150" rx="15" width="170" height="90" class="lw"/><text x="665" y="202" class="n">End device</text>
+<rect x="635" y="360" rx="15" width="170" height="90" class="lw"/><text x="665" y="412" class="n">End device</text>
+<rect x="820" y="255" rx="15" width="150" height="90" class="lw"/><text x="852" y="307" class="n">Gateway</text>
+<rect x="990" y="255" rx="15" width="180" height="90" class="lw"/><text x="1010" y="292" class="n">Network</text><text x="1025" y="322" class="n">Server</text>
+<text x="650" y="500" class="s">• gateway пересылает кадры на сервер</text><text x="650" y="535" class="s">• star-of-stars</text><text x="650" y="570" class="s">• MAC и управление сетью стандартизованы LoRaWAN</text>
+</svg>

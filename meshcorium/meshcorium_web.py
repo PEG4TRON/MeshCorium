@@ -120,6 +120,8 @@ VENDOR_DIR = PROJECT_ROOT / "vendor"
 WALLPAPPERS_DIR = PROJECT_ROOT / "other" / "wallpappers"
 WEB_DIR = PROJECT_ROOT / "web"
 WEB_DIST_DIR = WEB_DIR / "dist"
+WIKI_DIR = PROJECT_ROOT / "wiki"
+ATTACHMENTS_DIR = WEB_DIR / "attachments"
 DB_LOCK = threading.Lock()
 CLIENT_SETTINGS_LOCK = threading.Lock()
 DELIVERY_DEBUG_LOCK = threading.Lock()
@@ -12260,6 +12262,17 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
         if parsed.path.startswith("/vendor/"):
             self._send_vendor_file(parsed.path.removeprefix("/vendor/"))
             return
+        if parsed.path == "/wiki-pages.json":
+            params = parse_qs(parsed.query)
+            locale = str(params.get("locale", [""])[0] or "").strip().lower()
+            self._send_wiki_pages_json(locale)
+            return
+        if parsed.path.startswith("/wiki-md/"):
+            self._send_wiki_md_file(parsed.path.removeprefix("/wiki-md/"))
+            return
+        if parsed.path.startswith("/attachments/"):
+            self._send_attachment_file(parsed.path.removeprefix("/attachments/"))
+            return
         if parsed.path == "/api/ports":
             self._send_json({"ports": DEFAULT_CONNECTION_ROUTER.discover()})
             return
@@ -14401,19 +14414,21 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
             return True
         if path.startswith("/icons/") or path.startswith("/vendor/") or path.startswith("/sounds/") or path.startswith("/wallpappers/") or path.startswith("/connect-app/"):
             return True
+        if path == "/wiki-pages.json" or path.startswith("/wiki-md/") or path.startswith("/attachments/"):
+            return True
         if path in {"/api/mobile-push/register", "/api/mobile-push/unregister"}:
             return True
         return False
 
     def _is_vue_spa_path(self, path: str) -> bool:
         normalized = str(path or "").rstrip("/") or "/"
-        if normalized in {"/", "/connect", "/contacts", "/contacts/groups", "/messages", "/maps", "/maps/route-checks", "/settings"}:
+        if normalized in {"/", "/connect", "/contacts", "/contacts/groups", "/messages", "/maps", "/maps/route-checks", "/settings", "/wiki"}:
             return True
         if normalized.startswith("/contacts/repeater-login/"):
             return True
         if normalized.startswith("/contacts/repeater/"):
             return True
-        return normalized.startswith("/settings/")
+        return normalized.startswith("/settings/") or normalized.startswith("/wiki/")
 
     def _legacy_redirect_path(self, path: str) -> str | None:
         normalized = str(path or "").rstrip("/") or "/"
@@ -14551,6 +14566,82 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
             content_type = "application/octet-stream"
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self._write_response_body(payload)
+
+    def _send_wiki_pages_json(self, locale: str = "") -> None:
+        # Use locale-specific pages file, fall back to en
+        if locale in ("ru", "ru-RU", "ru_ru"):
+            filename = "pages_ru.json"
+        else:
+            filename = "pages_en.json"
+        pages_path = WIKI_DIR / filename
+        try:
+            resolved = pages_path.resolve(strict=True)
+        except FileNotFoundError:
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        try:
+            resolved.relative_to(WIKI_DIR.resolve())
+        except ValueError:
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        self._send_json(json.loads(resolved.read_text(encoding="utf-8")))
+
+    def _send_wiki_md_file(self, rel_path: str) -> None:
+        normalized = os.path.normpath("/" + rel_path).lstrip("/")
+        full_path = WIKI_DIR / "md" / normalized
+        try:
+            resolved = full_path.resolve(strict=True)
+        except FileNotFoundError:
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        try:
+            resolved.relative_to((WIKI_DIR / "md").resolve())
+        except ValueError:
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        if not resolved.is_file():
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        payload = resolved.read_bytes()
+        guessed_type, guessed_encoding = mimetypes.guess_type(str(resolved))
+        content_type = guessed_type or "text/markdown; charset=utf-8"
+        if content_type.startswith("text/") and "charset=" not in content_type:
+            content_type = f"{content_type}; charset=utf-8"
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self._write_response_body(payload)
+
+    def _send_attachment_file(self, rel_path: str) -> None:
+        normalized = os.path.normpath("/" + rel_path).lstrip("/")
+        full_path = ATTACHMENTS_DIR / normalized
+        try:
+            resolved = full_path.resolve(strict=True)
+        except FileNotFoundError:
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        try:
+            resolved.relative_to(ATTACHMENTS_DIR.resolve())
+        except ValueError:
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        if not resolved.is_file():
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        payload = resolved.read_bytes()
+        guessed_type, guessed_encoding = mimetypes.guess_type(str(resolved))
+        content_type = guessed_type or "application/octet-stream"
+        if content_type.startswith("text/") and "charset=" not in content_type:
+            content_type = f"{content_type}; charset=utf-8"
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_type)
+        for key, value in self._cache_headers_for_static_file(content_type=content_type, long_lived=True).items():
+            self.send_header(key, value)
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self._write_response_body(payload)

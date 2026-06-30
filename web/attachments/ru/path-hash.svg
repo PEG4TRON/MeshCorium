@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1250" height="520" viewBox="0 0 1250 520">
+<style>text{font-family:Arial,sans-serif;fill:#d0d8e0}.t{font-size:29px;font-weight:bold}.h{font-size:21px;font-weight:bold}.s{font-size:18px}.b1{fill:#162840;stroke:#245e8a;stroke-width:3}.b2{fill:#1a1030;stroke:#70479a;stroke-width:3}.b3{fill:#2a1a08;stroke:#a66b00;stroke-width:3}</style>
+<text x="40" y="50" class="t">Размер path hash: компромисс между длиной пути и риском коллизии</text>
+<rect x="70" y="120" width="320" height="260" rx="18" class="b1"/><text x="170" y="165" class="h">1 байт</text><text x="105" y="215" class="s">256 возможных значений</text><text x="105" y="260" class="s">до 64 записей по размеру path</text><text x="105" y="305" class="s">минимальный overhead</text><text x="105" y="350" class="s">выше риск совпадений</text>
+<rect x="465" y="120" width="320" height="260" rx="18" class="b2"/><text x="565" y="165" class="h">2 байта</text><text x="500" y="215" class="s">65 536 значений</text><text x="500" y="260" class="s">до 32 записей по размеру path</text><text x="500" y="305" class="s">умеренный overhead</text><text x="500" y="350" class="s">ниже риск совпадений</text>
+<rect x="860" y="120" width="320" height="260" rx="18" class="b3"/><text x="960" y="165" class="h">3 байта</text><text x="895" y="215" class="s">16 777 216 значений</text><text x="895" y="260" class="s">до 21 записи по размеру path</text><text x="895" y="305" class="s">наибольший overhead</text><text x="895" y="350" class="s">минимальный риск совпадений</text>
+<text x="70" y="445" class="s">Фактический лимит может дополнительно ограничиваться hop count, размером пакета и совместимостью прошивок.</text>
+</svg>

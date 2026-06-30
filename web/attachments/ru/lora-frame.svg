@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360">
+<style>text{font-family:Arial,sans-serif;fill:#d0d8e0}.t{font-size:30px;font-weight:bold}.h{font-size:20px;font-weight:bold}.s{font-size:17px}.a{fill:#162840;stroke:#24608a;stroke-width:3}.b{fill:#1a1030;stroke:#674ea7;stroke-width:3}.c{fill:#2a1a08;stroke:#a66b00;stroke-width:3}.d{fill:#0a1f0d;stroke:#357a38;stroke-width:3}</style>
+<text x="40" y="50" class="t">Упрощённая структура физического LoRa-кадра</text>
+<rect x="55" y="125" width="260" height="100" class="a"/><text x="135" y="170" class="h">Preamble</text><text x="95" y="202" class="s">синхронизация приёмника</text>
+<rect x="315" y="125" width="160" height="100" class="b"/><text x="350" y="170" class="h">Sync Word</text><text x="340" y="202" class="s">идентификатор сети</text>
+<rect x="475" y="125" width="220" height="100" class="c"/><text x="535" y="170" class="h">Header</text><text x="500" y="202" class="s">длина, CR, CRC-флаги</text>
+<rect x="695" y="125" width="370" height="100" class="d"/><text x="825" y="170" class="h">Payload</text><text x="747" y="202" class="s">сериализованный MeshCore-пакет</text>
+<rect x="1065" y="125" width="90" height="100" class="c"/><text x="1087" y="170" class="h">CRC</text><text x="1078" y="202" class="s">опц.</text>
+<text x="55" y="285" class="s">MeshCore определяет содержимое Payload. Preamble, Sync Word и PHY-заголовок обрабатывает LoRa-трансивер.</text>
+</svg>

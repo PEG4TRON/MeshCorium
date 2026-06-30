@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560">
+<style>text{font-family:Arial,sans-serif;fill:#d0d8e0}.t{font-size:30px;font-weight:bold}.h{font-size:23px;font-weight:bold}.s{font-size:18px}.b{fill:#1a2d4a;stroke:#276a9c;stroke-width:4}.g{fill:#0a1f0a;stroke:#2e8b57;stroke-width:4}.y{fill:#2a1a08;stroke:#a66b00;stroke-width:4}</style>
+<text x="40" y="50" class="t">RSSI, noise floor и SNR отвечают на разные вопросы</text>
+<rect x="60" y="110" width="320" height="310" rx="18" class="b"/><text x="170" y="155" class="h">RSSI</text><text x="95" y="205" class="s">полная мощность принятого</text><text x="95" y="240" class="s">сигнала в полосе приёмника</text><text x="95" y="300" class="s">обычно выражается в dBm</text><text x="95" y="355" class="s">не показывает отдельно шум</text>
+<rect x="440" y="110" width="320" height="310" rx="18" class="y"/><text x="515" y="155" class="h">Noise floor</text><text x="475" y="205" class="s">уровень фоновой энергии</text><text x="475" y="240" class="s">и локальных помех</text><text x="475" y="300" class="s">зависит от BW и окружения</text><text x="475" y="355" class="s">может меняться со временем</text>
+<rect x="820" y="110" width="320" height="310" rx="18" class="g"/><text x="940" y="155" class="h">SNR</text><text x="855" y="205" class="s">отношение полезного сигнала</text><text x="855" y="240" class="s">к шуму, выраженное в dB</text><text x="855" y="300" class="s">может быть отрицательным</text><text x="855" y="355" class="s">для LoRa и всё ещё декодироваться</text>
+<text x="70" y="490" class="s">Один последний пакет не описывает всю линию: для вывода нужны серии измерений, PDR, задержка и устойчивость маршрута.</text>
+</svg>

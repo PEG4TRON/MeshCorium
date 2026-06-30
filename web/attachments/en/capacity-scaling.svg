@@ -1,0 +1,8 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1250" height="600" viewBox="0 0 1250 600">
+<style>text{font-family:Arial,sans-serif;fill:#d0d8e0}.t{font-size:30px;font-weight:bold}.h{font-size:21px;font-weight:bold}.s{font-size:18px}.axis{stroke:#333;stroke-width:4}.flood{stroke:#c0392b;stroke-width:6;fill:none}.direct{stroke:#2874a6;stroke-width:6;fill:none}.reg{stroke:#2e8b57;stroke-width:6;fill:none}</style>
+<text x="40" y="50" class="t">Simplified growth of radio load</text>
+<line x1="100" y1="500" x2="1150" y2="500" class="axis" /><line x1="100" y1="500" x2="100" y2="100" class="axis" /><text x="500" y="550" class="h">Number of nodes that hear and retransmit</text><text x="25" y="330" class="h" transform="rotate(-90 25 330)">Transmissions per message</text>
+<path d="M110 470 C300 430 430 350 560 260 C720 150 910 110 1120 90" class="flood" /><path d="M110 455 C300 440 530 425 760 410 C930 400 1030 390 1120 385" class="direct" /><path d="M110 465 C300 445 480 410 650 360 C820 310 980 290 1120 275" class="reg" />
+<text x="900" y="120" class="s" fill="#c0392b">unrestricted flood</text><text x="900" y="370" class="s" fill="#2874a6">direct over a known path</text><text x="900" y="260" class="s" fill="#2e8b57">scope-limited flood</text><text x="120" y="575" class="s">Qualitative chart: the real curve depends on topology, duplicates, delays, and route availability.</text>
+</svg>

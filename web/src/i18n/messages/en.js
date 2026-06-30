@@ -2141,29 +2141,9 @@ export default {
     savedProfilesValue: 'profiles: {count}',
   },
   wiki: {
-    loading: 'Loading wiki…',
+    loading: 'Loading wiki\u2026',
+    selectSection: 'Select a section from the sidebar to view its content.',
     openSite: 'Open meshcore.io',
-    sections: {
-      gettingStarted: {
-        title: 'Getting started',
-        body: 'MeshCore is a multi-platform system for enabling secure text-based communications utilizing LoRa radio hardware.',
-      },
-      hardware: {
-        title: 'Hardware',
-        body: 'Supported devices: Heltec, LilyGo T-Deck, Station G2, T-Beam, and many other ESP32/S3 and nRF52840 boards.',
-      },
-      companion: {
-        title: 'Companion radio',
-        body: 'A companion acts as a radio modem for a smartphone or computer.',
-      },
-      repeater: {
-        title: 'Repeater',
-        body: 'Repeaters extend network coverage by relaying messages between nodes.',
-      },
-      faq: {
-        title: 'FAQ',
-        body: 'Frequently asked questions about MeshCore.',
-      },
-    },
+    /* DEPRECATED: sections titles are now in wiki/pages_en.json */
   },
 }

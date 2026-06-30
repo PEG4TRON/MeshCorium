@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620">
+<style>text{font-family:Arial,sans-serif;fill:#d0d8e0}.t{font-size:30px;font-weight:bold}.n{font-size:22px}.s{font-size:18px}.box{fill:#1a2d4a;stroke:#3169a8;stroke-width:4}.rep{fill:#2a1a08;stroke:#b87800;stroke-width:4}.line{stroke:#52616b;stroke-width:5;fill:none}.dash{stroke-dasharray:10 8}</style>
+<text x="40" y="50" class="t">Радиомодель MeshCore: узлы обмениваются пакетами напрямую</text>
+<path class="line" d="M190 310 L430 170 L690 310 L940 170"/><path class="line dash" d="M190 310 L430 450 L690 310 L940 450"/>
+<rect x="70" y="255" rx="18" width="240" height="110" class="box"/><text x="115" y="305" class="n">Companion A</text><text x="108" y="340" class="s">источник пакета</text>
+<rect x="330" y="110" rx="18" width="200" height="110" class="rep"/><text x="372" y="160" class="n">Repeater 1</text><text x="368" y="195" class="s">ретрансляция</text>
+<rect x="330" y="395" rx="18" width="200" height="110" class="rep"/><text x="372" y="445" class="n">Repeater 2</text><text x="368" y="480" class="s">альтернативный путь</text>
+<rect x="590" y="255" rx="18" width="200" height="110" class="rep"/><text x="632" y="305" class="n">Repeater 3</text><text x="625" y="340" class="s">следующий hop</text>
+<rect x="840" y="110" rx="18" width="250" height="110" class="box"/><text x="895" y="160" class="n">Companion B</text><text x="893" y="195" class="s">получатель</text>
+<rect x="840" y="395" rx="18" width="250" height="110" class="box"/><text x="900" y="445" class="n">Room Server</text><text x="885" y="480" class="s">прикладной сервис</text>
+<text x="55" y="580" class="s">Сплошная линия — один возможный маршрут. Пунктир — альтернативная радиосвязность. Центральный gateway не требуется.</text>
+</svg>

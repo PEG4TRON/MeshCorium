@@ -2141,29 +2141,9 @@ export default {
     savedProfilesValue: 'profiles: {count}',
   },
   wiki: {
-    loading: 'Загрузка Wiki…',
+    loading: 'Загрузка Wiki\u2026',
+    selectSection: 'Выберите раздел в боковой панели для просмотра содержимого.',
     openSite: 'Открыть meshcore.io',
-    sections: {
-      gettingStarted: {
-        title: 'Начало работы',
-        body: 'MeshCore — мультиплатформенная система защищённой текстовой связи через LoRa-радио.',
-      },
-      hardware: {
-        title: 'Оборудование',
-        body: 'Поддерживаемые устройства: Heltec, LilyGo T-Deck, Station G2, T-Beam и многие другие платы на ESP32/S3 и nRF52840.',
-      },
-      companion: {
-        title: 'Companion radio',
-        body: 'Companion действует как радиомодем для смартфона или компьютера.',
-      },
-      repeater: {
-        title: 'Релитер',
-        body: 'Репитеры расширяют покрытие сети, ретранслируя сообщения между узлами.',
-      },
-      faq: {
-        title: 'FAQ',
-        body: 'Часто задаваемые вопросы о MeshCore.',
-      },
-    },
+    /* DEPRECATED: sections titles are now in wiki/pages_ru.json */
   },
 }
