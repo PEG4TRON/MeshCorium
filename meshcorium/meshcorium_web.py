@@ -8115,6 +8115,9 @@ MESHCORIUM_UPDATE_AVAILABLE_FILE = ".meshcorium_update_available"
 MESHCORIUM_UPDATE_STATE_FILE = ".meshcorium_update_state"
 MESHCORIUM_UPDATE_ERROR_FILE = ".meshcorium_update_error"
 MESHCORIUM_PENDING_UPDATE_FILE = ".meshcorium_pending_update"
+MESHCORIUM_RESTART_REQUIRED_FILE = ".meshcorium_restart_required"
+MESHCORIUM_LEGACY_LOCAL_PORTS_FILE = ".meshcorium_legacy_local_ports_allowed"
+_PROCESS_STARTED_AT = time.time()
 _UPDATE_CHECK_CACHE: dict = {}
 _UPDATE_CHECK_CACHE_TS: float = 0.0
 _UPDATE_CHECK_CACHE_TTL: float = 300.0
@@ -8147,6 +8150,21 @@ def _read_flag_text(filename: str) -> str:
         return ""
 
 
+def _flag_file_exists(filename: str) -> bool:
+    return (PROJECT_ROOT / filename).exists()
+
+
+def _write_flag_json(filename: str, payload: dict) -> None:
+    path = PROJECT_ROOT / filename
+    with open(path, "w") as fh:
+        json.dump(payload, fh, ensure_ascii=False, sort_keys=True)
+        fh.write("\n")
+
+
+def _is_update_restart_required() -> bool:
+    return _flag_file_exists(MESHCORIUM_RESTART_REQUIRED_FILE)
+
+
 def _build_update_check_payload() -> dict:
     global _UPDATE_CHECK_CACHE, _UPDATE_CHECK_CACHE_TS
     now = time.monotonic()
@@ -8156,6 +8174,7 @@ def _build_update_check_payload() -> dict:
     available = _read_flag_json(MESHCORIUM_UPDATE_AVAILABLE_FILE)
     update_state = _read_flag_text(MESHCORIUM_UPDATE_STATE_FILE) or "idle"
     last_error = _read_flag_json(MESHCORIUM_UPDATE_ERROR_FILE) or None
+    restart_required = _is_update_restart_required()
     payload = {
         "current_version": current,
         "latest_version": available.get("latest", "") if available else "",
@@ -8164,6 +8183,8 @@ def _build_update_check_payload() -> dict:
         "release_url": available.get("release_url", "") if available else "",
         "update_state": update_state,
         "last_error": last_error,
+        "restart_required": restart_required,
+        "launcher_restart_required": restart_required,
     }
     _UPDATE_CHECK_CACHE.clear()
     _UPDATE_CHECK_CACHE.update(payload)
@@ -8175,6 +8196,81 @@ def _write_pending_update(version: str) -> None:
     path = str(PROJECT_ROOT / MESHCORIUM_PENDING_UPDATE_FILE)
     with open(path, "w") as fh:
         fh.write(version)
+
+
+def _parent_process_looks_like_launcher() -> bool:
+    try:
+        ppid = os.getppid()
+        raw = Path(f"/proc/{ppid}/cmdline").read_bytes()
+        cmdline = raw.replace(b"\x00", b" ").decode("utf-8", "ignore")
+    except OSError:
+        return False
+    return "meshcorium-launcher.sh" in cmdline
+
+
+def _ensure_launcher_restart_state() -> None:
+    if str(os.environ.get("MESHCORIUM_LAUNCHER_HEALTH_READY") or "").strip() == "1":
+        return
+    # During self-update the old already-running launcher starts the new backend
+    # but cannot switch to the new /api/health readiness code until the service is
+    # restarted. Detect that transitional state and keep localhost /api/ports
+    # available only until the new launcher process is picked up by restart.
+    if not _parent_process_looks_like_launcher():
+        return
+    restart_path = PROJECT_ROOT / MESHCORIUM_RESTART_REQUIRED_FILE
+    legacy_ports_path = PROJECT_ROOT / MESHCORIUM_LEGACY_LOCAL_PORTS_FILE
+    try:
+        if not legacy_ports_path.exists():
+            legacy_ports_path.write_text("legacy-local-ports-until-launcher-restart\n")
+        if not restart_path.exists():
+            _write_flag_json(
+                MESHCORIUM_RESTART_REQUIRED_FILE,
+                {
+                    "reason": "launcher-restart-required",
+                    "message": "Restart meshcorium.service to finish applying the updated launcher.",
+                    "created_at": int(time.time()),
+                },
+            )
+    except OSError:
+        logging.exception("failed to write launcher restart state markers")
+
+
+def _build_health_payload() -> dict:
+    update_state = _read_flag_text(MESHCORIUM_UPDATE_STATE_FILE) or "idle"
+    restart_required = _is_update_restart_required()
+    node_payload = {
+        "connected": False,
+        "name": "",
+        "model": "",
+        "firmware": "",
+        "firmware_build_date": "",
+    }
+    with BACKGROUND_SESSIONS_GUARD:
+        sessions = list(BACKGROUND_SESSIONS.values())
+    for session in sessions:
+        with session.snapshot_lock:
+            if not session.active:
+                continue
+            device = dict(session.device or {})
+            self_info = dict(session.self_info or {})
+        node_payload = {
+            "connected": True,
+            "name": str(self_info.get("name") or ""),
+            "model": str(device.get("manufacturer_model") or ""),
+            "firmware": str(device.get("semantic_version") or device.get("firmware_ver") or ""),
+            "firmware_build_date": str(device.get("firmware_build_date") or ""),
+        }
+        break
+    return {
+        "ok": True,
+        "service": "meshcorium",
+        "version": _read_current_version(),
+        "uptime_seconds": max(0, int(time.time() - _PROCESS_STARTED_AT)),
+        "update_state": update_state,
+        "restart_required": restart_required,
+        "launcher_restart_required": restart_required,
+        "node": node_payload,
+    }
 
 
 class _UpdateInstallHandler:
@@ -12276,6 +12372,12 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/wiki/search":
             self._handle_wiki_search(parsed)
             return
+        if parsed.path == "/api/health":
+            if not self._is_local_request():
+                self._send_json({"error": "local request required"}, status=HTTPStatus.FORBIDDEN)
+                return
+            self._send_json(_build_health_payload())
+            return
         if parsed.path == "/api/ports":
             self._send_json({"ports": DEFAULT_CONNECTION_ROUTER.discover()})
             return
@@ -14412,8 +14514,21 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
             return {"Cache-Control": "public, max-age=2592000, stale-while-revalidate=86400"}
         return {"Cache-Control": "public, max-age=3600"}
 
+    def _is_local_request(self) -> bool:
+        host = ""
+        try:
+            host = str((self.client_address or ("",))[0] or "")
+        except Exception:
+            host = ""
+        normalized = host.lower()
+        return normalized in {"127.0.0.1", "::1", "localhost"} or normalized.startswith("::ffff:127.")
+
     def _is_auth_exempt_path(self, path: str) -> bool:
         if path in {"/login", "/api/auth/login", "/api/auth/logout"}:
+            return True
+        if path == "/api/health" and self._is_local_request():
+            return True
+        if path == "/api/ports" and self._is_local_request() and _flag_file_exists(MESHCORIUM_LEGACY_LOCAL_PORTS_FILE):
             return True
         if path.startswith("/icons/") or path.startswith("/vendor/") or path.startswith("/sounds/") or path.startswith("/wallpappers/") or path.startswith("/connect-app/"):
             return True
@@ -14923,6 +15038,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     configure_logging()
+    _ensure_launcher_restart_state()
     _migrate_named_db_files_if_needed()
     init_message_db()
     init_contact_db()

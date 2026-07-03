@@ -7,6 +7,13 @@ export function normalizeUpdateCheckPayload(data) {
   return {
     update_available: Boolean(data?.update_available) && Boolean(nextVersion),
     next_version: nextVersion,
+    current_version: data?.current_version == null ? '' : String(data.current_version),
+    latest_version: data?.latest_version == null ? '' : String(data.latest_version),
+    release_url: data?.release_url == null ? '' : String(data.release_url),
+    update_state: data?.update_state == null ? 'idle' : String(data.update_state),
+    last_error: data?.last_error || null,
+    restart_required: Boolean(data?.restart_required || data?.launcher_restart_required),
+    launcher_restart_required: Boolean(data?.launcher_restart_required || data?.restart_required),
   }
 }
 

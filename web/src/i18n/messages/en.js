@@ -1042,6 +1042,8 @@ export default {
     updatePill: 'Update',
     updateTitle: 'Meshcorium update available',
     updateSubtitle: 'to {version}',
+    updateRestartRequiredTitle: 'Restart Meshcorium service',
+    updateRestartRequiredSubtitle: 'Update is installed, but the old launcher is still running. Restart meshcorium.service to finish applying it.',
     unreadCount: '{count} unread',
     meta: {
       summaryNoMentions: 'Found {chats} chat(s) with {unread} unread messages.',
@@ -2031,6 +2033,7 @@ export default {
       upToDate: 'Up to date',
       updating: 'Updating… Do not close this page.',
       restoring: 'Rolling back update…',
+      restartRequired: 'Update installed. Restart meshcorium.service to finish applying the new launcher.',
       updateFailed: 'Error: {error}',
       retry: 'Retry',
       installFailed: 'Failed to start update',

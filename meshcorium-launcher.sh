@@ -16,11 +16,20 @@ WEB_DEPS_HASH_FILE="${VENV_DIR}/.meshcorium_web_deps_hash"
 WEB_BUILD_HASH_FILE="${VENV_DIR}/.meshcorium_web_build_hash"
 WEB_DIST_INDEX="${WEB_DIR}/dist/index.html"
 WEB_DIST_DIR="${WEB_DIR}/dist"
+LEGACY_LOCAL_PORTS_FILE="${SCRIPT_DIR}/.meshcorium_legacy_local_ports_allowed"
+RESTART_REQUIRED_FILE="${SCRIPT_DIR}/.meshcorium_restart_required"
 NPM_INSTALL_TIMEOUT_SECONDS="${MESHCORIUM_NPM_INSTALL_TIMEOUT_SECONDS:-30}"
 NPM_BUILD_TIMEOUT_SECONDS="${MESHCORIUM_NPM_BUILD_TIMEOUT_SECONDS:-30}"
 FRONTEND_NODE_MAX_OLD_SPACE_MB="${MESHCORIUM_FRONTEND_NODE_MAX_OLD_SPACE_MB:-1024}"
 
 cd "${SCRIPT_DIR}"
+
+# If this launcher is now executing, the updated /api/health readiness path is
+# active. Remove the one-version compatibility marker that allowed old running
+# supervisors to probe /api/ports locally after a self-update.
+if [[ "${MESHCORIUM_KEEP_RESTART_REQUIRED:-0}" != "1" ]]; then
+    rm -f "${LEGACY_LOCAL_PORTS_FILE}" "${RESTART_REQUIRED_FILE}" 2>/dev/null || true
+fi
 
 SYSTEMD_INSTALL_USER="${SUDO_USER:-$(id -un)}"
 SYSTEMD_INSTALL_GROUP="$(id -gn "${SYSTEMD_INSTALL_USER}")"
@@ -381,7 +390,7 @@ supervise_loop() {
         # Start child if not running
         if [[ "${child_pid}" -le 0 ]] || ! kill -0 "${child_pid}" 2>/dev/null; then
             echo "supervisor: starting meshcorium/meshcorium_web.py..."
-            "${VENV_PYTHON}" "${SCRIPT_DIR}/meshcorium/meshcorium_web.py" --host "${WEB_HOST}" --port "${WEB_PORT}" &
+            MESHCORIUM_LAUNCHER_HEALTH_READY=1 "${VENV_PYTHON}" "${SCRIPT_DIR}/meshcorium/meshcorium_web.py" --host "${WEB_HOST}" --port "${WEB_PORT}" &
             child_pid=$!
             echo "supervisor: child pid=${child_pid}"
         fi
@@ -465,7 +474,7 @@ perform_supervised_update() {
             > "${UPDATE_AVAILABLE_FILE}"
         echo "idle" > "${UPDATE_STATE_FILE}"
         echo "supervisor: starting new version..."
-        "${VENV_PYTHON}" "${SCRIPT_DIR}/meshcorium/meshcorium_web.py" --host "${WEB_HOST}" --port "${WEB_PORT}" &
+        MESHCORIUM_LAUNCHER_HEALTH_READY=1 "${VENV_PYTHON}" "${SCRIPT_DIR}/meshcorium/meshcorium_web.py" --host "${WEB_HOST}" --port "${WEB_PORT}" &
         child_pid=$!
 
         # 5. Wait for readiness
@@ -473,7 +482,7 @@ perform_supervised_update() {
         local waited=0
         while [[ ${waited} -lt ${READINESS_TIMEOUT} ]]; do
             if kill -0 "${child_pid}" 2>/dev/null; then
-                if curl -sf "http://127.0.0.1:${WEB_PORT}/api/ports" >/dev/null 2>&1; then
+                if curl -sf "http://127.0.0.1:${WEB_PORT}/api/health" >/dev/null 2>&1; then
                     echo "supervisor: new version ready"
                     echo "idle" > "${UPDATE_STATE_FILE}"
                     prune_old_releases

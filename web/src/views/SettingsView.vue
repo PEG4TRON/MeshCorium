@@ -224,6 +224,8 @@ const updateCheck = ref({
   release_url: '',
   update_state: 'idle',
   last_error: null,
+  restart_required: false,
+  launcher_restart_required: false,
 })
 const updateCheckLoading = ref(false)
 const updateCheckError = ref('')
@@ -243,6 +245,8 @@ async function loadUpdateCheck() {
       release_url: data?.release_url || '',
       update_state: data?.update_state || 'idle',
       last_error: data?.last_error || null,
+      restart_required: Boolean(data?.restart_required || data?.launcher_restart_required),
+      launcher_restart_required: Boolean(data?.launcher_restart_required || data?.restart_required),
     }
     meshcoriumDisplayVersion.value = data?.current_version || '0.9.0'
   } catch (err) {
@@ -321,6 +325,8 @@ function pollUpdateStatus() {
         release_url: data?.release_url || '',
         update_state: data?.update_state || 'idle',
         last_error: data?.last_error || null,
+        restart_required: Boolean(data?.restart_required || data?.launcher_restart_required),
+        launcher_restart_required: Boolean(data?.launcher_restart_required || data?.restart_required),
       }
       if (data?.update_state === 'updating' || data?.update_state === 'restoring') {
         pollUpdateStatus()
@@ -7135,6 +7141,12 @@ onBeforeUnmount(() => {
               <span class="mc-settings-update-spinner"></span>
               <span>{{ updateCheck.update_state === 'restoring' ? t('settings.about.restoring') : t('settings.about.updating') }}</span>
             </div>
+          </div>
+        </section>
+
+        <section v-else-if="updateCheck.launcher_restart_required || updateCheck.restart_required" class="mc-settings-panel mc-settings-update-panel">
+          <div class="mc-settings-update-row">
+            <div class="mc-settings-update-text">{{ t('settings.about.restartRequired') }}</div>
           </div>
         </section>
 

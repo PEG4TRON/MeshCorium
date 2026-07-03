@@ -113,6 +113,18 @@ if [[ -d "${BACKUP_DIR}/other" ]]; then
     cp -af "${BACKUP_DIR}/other"/* "${SCRIPT_DIR}/other/" 2>/dev/null || true
 fi
 
+# 6a. Transitional self-update compatibility flags.
+# Old supervisor processes (<=0.9.0) keep running after files are replaced and
+# still probe /api/ports for readiness. The new backend permits that endpoint
+# without auth only for localhost while this marker exists. The new launcher
+# removes it when the service is restarted and /api/health readiness is active.
+cat > "${SCRIPT_DIR}/.meshcorium_legacy_local_ports_allowed" <<EOF
+legacy-local-ports-until-launcher-restart
+EOF
+cat > "${SCRIPT_DIR}/.meshcorium_restart_required" <<EOF
+{"reason":"launcher-restart-required","message":"Restart meshcorium.service to finish applying the updated launcher.","created_at":$(date +%s)}
+EOF
+
 # 6b. Merge client_settings.json — preserve user values, add missing keys from new release.
 # Best-effort: if the new meshcorium_web.py is importable (venv exists), use its
 # _default_client_settings() to fill in any keys missing from the user's config.

@@ -1042,6 +1042,8 @@ export default {
     updatePill: 'Обновление',
     updateTitle: 'Доступно обновление Meshcorium',
     updateSubtitle: 'до {version}',
+    updateRestartRequiredTitle: 'Перезапустите сервис Meshcorium',
+    updateRestartRequiredSubtitle: 'Обновление установлено, но старый launcher всё ещё запущен. Перезапустите meshcorium.service, чтобы полностью применить обновление.',
     unreadCount: '{count} unread',
     meta: {
       summaryNoMentions: 'Найдено {chats} чат(ов) с {unread} непрочитанными сообщениями.',
@@ -2031,6 +2033,7 @@ export default {
       upToDate: 'Установлена актуальная версия',
       updating: 'Обновление… Не закрывайте страницу.',
       restoring: 'Откат обновления…',
+      restartRequired: 'Обновление установлено. Перезапустите meshcorium.service, чтобы полностью применить новый launcher.',
       updateFailed: 'Ошибка: {error}',
       retry: 'Повторить',
       installFailed: 'Не удалось начать обновление',

@@ -480,7 +480,7 @@ const mobileNotificationBadge = computed(() => {
   if (totalUnreadCount.value > 0) {
     return totalUnreadCount.value > 99 ? '99+' : String(totalUnreadCount.value)
   }
-  return updateAvailable.value ? 'U' : ''
+  return (updateAvailable.value || updateCheck.value.launcher_restart_required || updateCheck.value.restart_required) ? 'U' : ''
 })
 
 const totalMentionCount = computed(() => {
@@ -1096,6 +1096,16 @@ const directNotificationEntries = computed(() => {
 })
 
 const updateNotificationEntry = computed(() => {
+  if (updateCheck.value.launcher_restart_required || updateCheck.value.restart_required) {
+    return {
+      kind: 'update',
+      key: 'meshcorium-update-restart-required',
+      title: t('notifications.updateRestartRequiredTitle'),
+      preview: t('notifications.updateRestartRequiredSubtitle'),
+      avatarSymbol: '↻',
+      nextVersion: updateCheck.value.current_version || updateCheck.value.next_version,
+    }
+  }
   if (!updateAvailable.value) return null
   return {
     kind: 'update',
@@ -1671,7 +1681,7 @@ onBeforeUnmount(() => {
         <button
           v-tooltip="{ content: t('notifications.title'), theme: 'meshcorium-tooltip' }"
           class="mc-rail-button mc-rail-button--icon-only"
-          :class="{ active: notificationsOpen, 'is-pulsing': totalRegularUnreadCount > 0 || totalDirectUnreadCount > 0 || totalMentionCount > 0 || updateAvailable }"
+          :class="{ active: notificationsOpen, 'is-pulsing': totalRegularUnreadCount > 0 || totalDirectUnreadCount > 0 || totalMentionCount > 0 || updateAvailable || updateCheck.launcher_restart_required || updateCheck.restart_required }"
           type="button"
           :ref="(element) => setRailButtonElement('notifications', element)"
           :aria-label="t('notifications.title')"
@@ -1681,7 +1691,7 @@ onBeforeUnmount(() => {
           <span v-if="totalRegularUnreadCount" class="mc-rail-badge">{{ totalRegularUnreadCount > 99 ? '99+' : totalRegularUnreadCount }}</span>
           <span v-if="totalDirectUnreadCount" class="mc-rail-badge mc-rail-badge--direct">{{ totalDirectUnreadCount > 99 ? '99+' : totalDirectUnreadCount }}</span>
           <span v-if="totalMentionCount" class="mc-rail-badge mc-rail-badge--mention">{{ totalMentionCount > 99 ? '99+' : totalMentionCount }}</span>
-          <span v-if="updateAvailable" class="mc-rail-badge mc-rail-badge--update">U</span>
+          <span v-if="updateAvailable || updateCheck.launcher_restart_required || updateCheck.restart_required" class="mc-rail-badge mc-rail-badge--update">U</span>
         </button>
         <button
           v-tooltip="{ content: t('messages.title'), theme: 'meshcorium-tooltip' }"
@@ -1783,7 +1793,7 @@ onBeforeUnmount(() => {
         label="Notif"
         :active="notificationsOpen"
         :badge="mobileNotificationBadge"
-        :badge-class="updateAvailable && !totalUnreadCount && !totalMentionCount ? 'update' : (totalMentionCount ? 'mention' : '')"
+        :badge-class="(updateAvailable || updateCheck.launcher_restart_required || updateCheck.restart_required) && !totalUnreadCount && !totalMentionCount ? 'update' : (totalMentionCount ? 'mention' : '')"
         @click="openShellPanel('notifications')"
       />
       <MobileDockButton :icon="messagesIconUrl" label="Chats" @click="openMessages()" />
