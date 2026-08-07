@@ -104,6 +104,7 @@ ROUTE_TRACE_DEBUG_LOG_PATH = LOG_DIR / "route_trace_debug.log"
 FRONTEND_DIAGNOSTIC_LOG_PATH = LOG_DIR / "frontend_diagnostics.log"
 BACKGROUND_QUEUE_DRAIN_BATCH_LIMIT = 2
 BACKGROUND_MAINTENANCE_IDLE_GRACE_SECS = 1.0
+SORT_TIMESTAMP_REFRESH_INTERVAL_SECS = 3600
 BACKGROUND_QUEUE_DRAIN_INTERACTIVE_IDLE_GRACE_SECS = 1.5
 BACKGROUND_FRAME_POLL_TIMEOUT_SECS = 0.25
 BACKGROUND_SEND_COMMAND_TIMEOUT_SECS = 35.0
@@ -2276,6 +2277,7 @@ def init_message_db() -> None:
                 acked_at INTEGER,
                 sender_timestamp INTEGER,
                 received_at INTEGER NOT NULL,
+                sort_timestamp INTEGER,
                 snr REAL,
                 path_len INTEGER,
                 path_hashes TEXT,
@@ -2292,6 +2294,25 @@ def init_message_db() -> None:
             ON messages(owner_id, message_kind, channel_identity, channel_idx, sender_timestamp, id)
             """
         )
+        if "sort_timestamp" not in _sqlite_table_columns(conn, "messages"):
+            conn.execute("ALTER TABLE messages ADD COLUMN sort_timestamp INTEGER")
+            now_ts = int(time.time())
+            conn.execute(
+                """
+                UPDATE messages
+                SET sort_timestamp = CASE
+                    WHEN abs(sender_timestamp - ?) > 3600 THEN received_at
+                    ELSE sender_timestamp
+                END
+                """,
+                (now_ts,),
+            )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_messages_sort
+            ON messages(owner_id, message_kind, channel_identity, channel_idx, sort_timestamp, id)
+            """
+        )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS contact_messages (
@@ -2304,6 +2325,7 @@ def init_message_db() -> None:
                 acked_at INTEGER,
                 sender_timestamp INTEGER,
                 received_at INTEGER NOT NULL,
+                sort_timestamp INTEGER,
                 snr REAL,
                 path_len INTEGER,
                 path_hashes TEXT,
@@ -2319,6 +2341,25 @@ def init_message_db() -> None:
             """
             CREATE INDEX IF NOT EXISTS idx_contact_messages_prefix
             ON contact_messages(owner_id, pubkey_prefix, sender_timestamp, id)
+            """
+        )
+        if "sort_timestamp" not in _sqlite_table_columns(conn, "contact_messages"):
+            conn.execute("ALTER TABLE contact_messages ADD COLUMN sort_timestamp INTEGER")
+            now_ts = int(time.time())
+            conn.execute(
+                """
+                UPDATE contact_messages
+                SET sort_timestamp = CASE
+                    WHEN abs(sender_timestamp - ?) > 3600 THEN received_at
+                    ELSE sender_timestamp
+                END
+                """,
+                (now_ts,),
+            )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_contact_messages_sort
+            ON contact_messages(owner_id, pubkey_prefix, sort_timestamp, id)
             """
         )
         conn.execute(
@@ -3942,7 +3983,7 @@ def _update_background_contact_message_preview(
             if contact_prefix != normalized_prefix:
                 continue
             contact["last_message_text"] = str(text or "")
-            contact["last_message_at"] = int(sender_timestamp or 0)
+            contact["last_message_at"] = _sanitize_message_timestamp(sender_timestamp)
             contact["last_message_from_self"] = bool(from_self)
             break
 
@@ -4013,6 +4054,7 @@ def _process_background_message_event(
                 "payload_hex": message.payload.hex(),
             }
             payload["id"] = save_contact_message(payload, owner_id=owner_id)
+            payload["sender_timestamp"] = _sanitize_message_timestamp(details.sender_timestamp)
             _update_background_contact_message_preview(
                 session,
                 pubkey_prefix=details.pubkey_prefix,
@@ -4078,6 +4120,7 @@ def _process_background_message_event(
                 "payload_hex": message.payload.hex(),
             }
             payload["id"] = save_channel_message(payload, owner_id=owner_id)
+            payload["sender_timestamp"] = _sanitize_message_timestamp(details.sender_timestamp)
             _update_background_channel_message_preview(
                 session,
                 channel_idx=details.channel_idx,
@@ -4426,7 +4469,7 @@ def _handle_background_frame(
                         "event": "channel-relayed",
                         "id": repeated["id"],
                         "channel_idx": parsed_group["channel_idx"],
-                        "sender_timestamp": parsed_group["sender_timestamp"],
+                        "sender_timestamp": _sanitize_message_timestamp(parsed_group["sender_timestamp"]),
                         "text": parsed_group["text"],
                         "full_text": parsed_group.get("full_text", ""),
                         "path_len": parsed_group["path_len"],
@@ -7110,6 +7153,7 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                 _request_background_queue_drain_after_bootstrap(client, session, port, baudrate)
                 next_radio_stats_poll_at = time.monotonic() + _normalize_signal_metrics_poll_seconds(_get_client_settings().get("signal_metrics_poll_seconds"))
                 next_contact_eviction_sweep_at = time.monotonic() + _get_contact_eviction_sweep_interval_secs()
+                next_sort_timestamp_refresh_at = time.monotonic() + SORT_TIMESTAMP_REFRESH_INTERVAL_SECS
                 while not session.stop_event.is_set():
                     while True:
                         try:
@@ -7699,6 +7743,14 @@ def _run_background_session(session: BackgroundCompanionSession) -> None:
                                 },
                             )
                         next_contact_eviction_sweep_at = now_monotonic + _get_contact_eviction_sweep_interval_secs()
+                    if now_monotonic >= next_sort_timestamp_refresh_at:
+                        try:
+                            refreshed_rows = _refresh_message_sort_timestamps()
+                            if refreshed_rows:
+                                logging.info("sort_timestamp refresh updated %d message rows", refreshed_rows)
+                        except sqlite3.Error as exc:
+                            logging.warning("sort_timestamp refresh failed: %s", exc)
+                        next_sort_timestamp_refresh_at = now_monotonic + SORT_TIMESTAMP_REFRESH_INTERVAL_SECS
                     if (
                         now_monotonic >= next_radio_stats_poll_at
                         and not _background_should_defer_housekeeping(session, client, now_monotonic)
@@ -8582,6 +8634,7 @@ def save_channel_message(message: dict, *, owner_id: str | None = None) -> int:
         return 0
     channel_identity = _resolve_channel_message_identity(message)
     with DB_LOCK, sqlite3.connect(DB_PATH) as conn:
+        received_ts = int(time.time())
         cursor = conn.execute(
             """
             INSERT OR IGNORE INTO messages (
@@ -8595,6 +8648,7 @@ def save_channel_message(message: dict, *, owner_id: str | None = None) -> int:
                 acked_at,
                 sender_timestamp,
                 received_at,
+                sort_timestamp,
                 snr,
                 path_len,
                 path_hashes,
@@ -8603,7 +8657,7 @@ def save_channel_message(message: dict, *, owner_id: str | None = None) -> int:
                 payload_hex,
                 is_read,
                 is_mention_read
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 normalized_owner_id,
@@ -8615,7 +8669,8 @@ def save_channel_message(message: dict, *, owner_id: str | None = None) -> int:
                 None if message.get("expected_ack_hex") is None else str(message["expected_ack_hex"]),
                 None if message.get("acked_at") is None else int(message["acked_at"]),
                 int(message["sender_timestamp"]),
-                int(time.time()),
+                received_ts,
+                _sanitize_message_timestamp(int(message["sender_timestamp"]), received_ts),
                 None if message.get("snr") is None else float(message["snr"]),
                 int(message["path_len"]),
                 None if message.get("path_hashes") is None else str(message["path_hashes"]),
@@ -8771,6 +8826,59 @@ def _count_rows(conn: sqlite3.Connection, table_name: str, where_sql: str, param
     ).fetchone()
     return int(row[0] or 0) if row else 0
 
+def _sanitize_message_timestamp(sender_ts: int | None, fallback_ts: int | None = None) -> int:
+    """Display-safe timestamp guard (read-side only).
+
+    Keeps sender_ts when it is within 1 hour of wall clock; otherwise falls
+    back to fallback_ts (usually received_at) or the current time. Stored
+    sender_timestamp values are never rewritten: UNIQUE dedup and
+    mark_channel_message_repeated() rely on the raw value.
+    """
+    try:
+        sts = int(sender_ts or 0)
+    except (TypeError, ValueError):
+        sts = 0
+    if sts <= 0:
+        return 0
+    now_ts = int(time.time())
+    if abs(sts - now_ts) <= 3600:
+        return sts
+    try:
+        fallback = int(fallback_ts or 0)
+    except (TypeError, ValueError):
+        fallback = 0
+    return fallback if fallback > 0 else now_ts
+
+
+def _refresh_message_sort_timestamps() -> int:
+    """Re-rank messages whose sender clock drifted out of tolerance.
+
+    Only future-dated rows (sender_timestamp > now + 1h) are rewritten to
+    received_at. Rows within the 1h tolerance keep their raw sender_timestamp
+    (bounded error, no churn on the growing table). Returns updated row count.
+    """
+    now_ts = int(time.time())
+    threshold = now_ts + 3600
+    updated = 0
+    with DB_LOCK, sqlite3.connect(DB_PATH) as conn:
+        for table in ("messages", "contact_messages"):
+            cursor = conn.execute(
+                f"""
+                UPDATE {table}
+                SET sort_timestamp = CASE
+                    WHEN abs(sender_timestamp - ?) > 3600 THEN received_at
+                    ELSE sender_timestamp
+                END
+                WHERE sort_timestamp IS NULL
+                   OR (sender_timestamp > ? AND sort_timestamp != received_at)
+                """,
+                (now_ts, threshold),
+            )
+            updated += int(cursor.rowcount or 0)
+        conn.commit()
+    return updated
+
+
 def list_channel_messages(
     channel_idx: int,
     limit: int = 200,
@@ -8848,13 +8956,16 @@ def list_channel_messages(
                 is_read
             FROM messages
             WHERE {base_where}
-            ORDER BY sender_timestamp ASC, id ASC
+            ORDER BY sort_timestamp ASC, id ASC
             LIMIT ?
             OFFSET ?
             """,
             base_params + (safe_limit, offset),
         ).fetchall()
-    return [dict(row) for row in rows]
+    result = [dict(row) for row in rows]
+    for item in result:
+        item["sender_timestamp"] = _sanitize_message_timestamp(item.get("sender_timestamp"), item.get("received_at"))
+    return result
 
 
 def search_messages(
@@ -8921,7 +9032,10 @@ def search_messages(
             where_params + order_params + (safe_limit, safe_offset),
         )
         rows = cursor.fetchall()
-    return [dict(row) for row in rows], total
+    result = [dict(row) for row in rows]
+    for item in result:
+        item["sender_timestamp"] = _sanitize_message_timestamp(item.get("sender_timestamp"), item.get("received_at"))
+    return result, total
 
 
 def get_channel_message_count(channel_idx: int, *, owner_id: str | None = None, access_all: bool | None = None) -> int:
@@ -8970,7 +9084,7 @@ def get_channel_unique_outgoing_texts(
             f"""
             SELECT
                 trim(text) AS text,
-                MAX(sender_timestamp) AS latest_sender_timestamp,
+                MAX(sort_timestamp) AS latest_sender_timestamp,
                 MAX(id) AS latest_id
             FROM messages
             WHERE {where_sql}
@@ -9009,14 +9123,14 @@ def get_channel_message_previews(*, owner_id: str | None = None, access_all: boo
             INNER JOIN (
                 SELECT
                     {preview_key_sql} AS preview_key,
-                    MAX(sender_timestamp) AS max_sender_timestamp,
+                    MAX(sort_timestamp) AS max_sender_timestamp,
                     MAX(id) AS max_id
                 FROM messages
                 WHERE {latest_owner_where} AND message_kind = 'channel'
                 GROUP BY preview_key
             ) latest
               ON latest.preview_key = {preview_key_sql.replace("channel_identity", "m.channel_identity").replace("channel_idx", "m.channel_idx")}
-             AND latest.max_sender_timestamp = m.sender_timestamp
+             AND latest.max_sender_timestamp = m.sort_timestamp
             WHERE {owner_where} AND m.message_kind = 'channel'
             ORDER BY m.id DESC
             """,
@@ -9045,6 +9159,7 @@ def save_contact_message(message: dict, *, owner_id: str | None = None) -> int:
     is_self_prefix = len(message_prefix) == 12 and normalized_owner_id.startswith(message_prefix)
     from_self = bool(message.get("from_self")) or is_self_prefix
     with DB_LOCK, sqlite3.connect(DB_PATH) as conn:
+        received_ts = int(time.time())
         cursor = conn.execute(
             """
             INSERT OR IGNORE INTO contact_messages (
@@ -9056,6 +9171,7 @@ def save_contact_message(message: dict, *, owner_id: str | None = None) -> int:
                 acked_at,
                 sender_timestamp,
                 received_at,
+                sort_timestamp,
                 snr,
                 path_len,
                 path_hashes,
@@ -9065,7 +9181,7 @@ def save_contact_message(message: dict, *, owner_id: str | None = None) -> int:
                 signature_hex,
                 is_read,
                 is_mention_read
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 normalized_owner_id,
@@ -9075,7 +9191,8 @@ def save_contact_message(message: dict, *, owner_id: str | None = None) -> int:
                 None if message.get("expected_ack_hex") is None else str(message["expected_ack_hex"]),
                 None if message.get("acked_at") is None else int(message["acked_at"]),
                 int(message["sender_timestamp"]),
-                int(time.time()),
+                received_ts,
+                _sanitize_message_timestamp(int(message["sender_timestamp"]), received_ts),
                 None if message.get("snr") is None else float(message["snr"]),
                 int(message["path_len"]),
                 None if message.get("path_hashes") is None else str(message["path_hashes"]),
@@ -9186,13 +9303,16 @@ def list_contact_messages(
                 is_read
             FROM contact_messages
             WHERE {base_where}
-            ORDER BY sender_timestamp ASC, id ASC
+            ORDER BY sort_timestamp ASC, id ASC
             LIMIT ?
             OFFSET ?
             """,
             base_params + (safe_limit, offset),
         ).fetchall()
-    return [dict(row) for row in rows]
+    result = [dict(row) for row in rows]
+    for item in result:
+        item["sender_timestamp"] = _sanitize_message_timestamp(item.get("sender_timestamp"), item.get("received_at"))
+    return result
 
 
 def get_contact_message_count(public_key: str, *, owner_id: str | None = None, access_all: bool | None = None) -> int:
@@ -9223,7 +9343,7 @@ def get_contact_unique_outgoing_texts(
             f"""
             SELECT
                 trim(text) AS text,
-                MAX(sender_timestamp) AS latest_sender_timestamp,
+                MAX(sort_timestamp) AS latest_sender_timestamp,
                 MAX(id) AS latest_id
             FROM contact_messages
             WHERE {owner_where} AND pubkey_prefix = ? AND from_self = 1 AND trim(COALESCE(text, '')) != ''
@@ -9692,13 +9812,13 @@ def _list_scoped_channel_unread_mentions(
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             f"""
-            SELECT id, owner_id, channel_idx, channel_identity, sender_timestamp, text
+            SELECT id, owner_id, channel_idx, channel_identity, sender_timestamp, received_at, text
             FROM messages
             WHERE {selector_where}
               AND from_self = 0
               AND lower(text) LIKE ?
               AND COALESCE(is_mention_read, 0) = 0
-            ORDER BY sender_timestamp DESC, id DESC
+            ORDER BY sort_timestamp DESC, id DESC
             LIMIT ?
             """,
             selector_params + (like_pattern, safe_limit),
@@ -9711,7 +9831,7 @@ def _list_scoped_channel_unread_mentions(
             "channel_idx": None if row["channel_idx"] is None else int(row["channel_idx"]),
             "channel_identity": str(row["channel_identity"] or "").strip(),
             "pubkey_prefix": "",
-            "sender_timestamp": int(row["sender_timestamp"] or 0),
+            "sender_timestamp": _sanitize_message_timestamp(row["sender_timestamp"], row["received_at"]),
             "text": str(row["text"] or ""),
         }
         for row in rows
@@ -9740,13 +9860,14 @@ def _list_contact_unread_mentions(
                 owner_id,
                 pubkey_prefix,
                 sender_timestamp,
+                received_at,
                 text
             FROM contact_messages
             WHERE {owner_where}
               AND from_self = 0
               AND lower(text) LIKE ?
               AND COALESCE(is_mention_read, 0) = 0
-            ORDER BY sender_timestamp DESC, id DESC
+            ORDER BY sort_timestamp DESC, id DESC
             LIMIT ?
             """,
             owner_params + (like_pattern, safe_limit),
@@ -9759,7 +9880,7 @@ def _list_contact_unread_mentions(
             "channel_idx": None,
             "channel_identity": "",
             "pubkey_prefix": "" if row["pubkey_prefix"] is None else str(row["pubkey_prefix"]).lower(),
-            "sender_timestamp": int(row["sender_timestamp"] or 0),
+            "sender_timestamp": _sanitize_message_timestamp(row["sender_timestamp"], row["received_at"]),
             "text": str(row["text"] or ""),
         }
         for row in rows
@@ -9775,7 +9896,8 @@ def get_contact_message_stats(*, owner_id: str | None = None, access_all: bool |
             SELECT
                 pubkey_prefix,
                 COUNT(CASE WHEN from_self = 0 AND COALESCE(is_read, 0) = 0 THEN 1 END) AS unread_count,
-                MAX(sender_timestamp) AS last_message_at
+                MAX(sort_timestamp) AS last_message_at,
+                MAX(received_at) AS last_received_at
             FROM contact_messages
             WHERE {owner_where}
             GROUP BY pubkey_prefix
@@ -9784,16 +9906,16 @@ def get_contact_message_stats(*, owner_id: str | None = None, access_all: bool |
         ).fetchall()
         preview_rows = conn.execute(
             f"""
-            SELECT c.pubkey_prefix, c.text, c.from_self, c.sender_timestamp
+            SELECT c.pubkey_prefix, c.text, c.from_self, c.sender_timestamp, c.received_at
             FROM contact_messages c
             INNER JOIN (
-                SELECT pubkey_prefix, MAX(sender_timestamp) AS max_sender_timestamp
+                SELECT pubkey_prefix, MAX(sort_timestamp) AS max_sender_timestamp
                 FROM contact_messages
                 WHERE {owner_where}
                 GROUP BY pubkey_prefix
             ) latest
               ON latest.pubkey_prefix = c.pubkey_prefix
-             AND latest.max_sender_timestamp = c.sender_timestamp
+             AND latest.max_sender_timestamp = c.sort_timestamp
             WHERE {owner_where.replace("owner_id", "c.owner_id")}
             ORDER BY c.id DESC
             """,
@@ -9807,14 +9929,14 @@ def get_contact_message_stats(*, owner_id: str | None = None, access_all: bool |
         previews[prefix] = {
             "last_message_text": str(row["text"] or ""),
             "last_message_from_self": bool(row["from_self"]),
-            "last_message_at": int(row["sender_timestamp"] or 0),
+            "last_message_at": _sanitize_message_timestamp(row["sender_timestamp"], row["received_at"]),
         }
     stats: dict[str, dict[str, object]] = {}
     for row in stats_rows:
         prefix = str(row["pubkey_prefix"] or "").lower()
         stats[prefix] = {
             "unread_count": int(row["unread_count"] or 0),
-            "last_message_at": int(row["last_message_at"] or 0),
+            "last_message_at": _sanitize_message_timestamp(row["last_message_at"], row["last_received_at"]),
         }
     for prefix, preview in previews.items():
         stats.setdefault(prefix, {})
@@ -9910,6 +10032,8 @@ def list_unread_mentions(
                 channel_identity,
                 NULL AS pubkey_prefix,
                 sender_timestamp,
+                received_at,
+                sort_timestamp,
                 text
             FROM messages
             WHERE {channel_owner_where}
@@ -9926,13 +10050,15 @@ def list_unread_mentions(
                 NULL AS channel_identity,
                 pubkey_prefix,
                 sender_timestamp,
+                received_at,
+                sort_timestamp,
                 text
             FROM contact_messages
             WHERE {contact_owner_where}
               AND from_self = 0
               AND lower(text) LIKE ?
               AND COALESCE(is_mention_read, 0) = 0
-            ORDER BY sender_timestamp DESC, id DESC
+            ORDER BY sort_timestamp DESC, id DESC
             LIMIT ?
             """,
             channel_owner_params + (like_pattern,) + contact_owner_params + (like_pattern, safe_limit),
@@ -9945,7 +10071,7 @@ def list_unread_mentions(
             "channel_idx": None if row["channel_idx"] is None else int(row["channel_idx"]),
             "channel_identity": "" if row["channel_identity"] is None else str(row["channel_identity"]).strip(),
             "pubkey_prefix": "" if row["pubkey_prefix"] is None else str(row["pubkey_prefix"]).lower(),
-            "sender_timestamp": int(row["sender_timestamp"] or 0),
+            "sender_timestamp": _sanitize_message_timestamp(row["sender_timestamp"], row["received_at"]),
             "text": str(row["text"] or ""),
         }
         for row in rows
