@@ -308,7 +308,7 @@ class ContactMessageV3Info:
     pubkey_prefix: str
     path_len: int
     path_hashes: str
-    snr: float
+    snr: float | None
     txt_type: int
     sender_timestamp: int
     signature_hex: str | None
@@ -322,7 +322,7 @@ class ChannelMessageV3Info:
     path_hashes: str
     txt_type: int
     sender_timestamp: int
-    snr: float
+    snr: float | None
     text: str
 
 
@@ -1543,6 +1543,64 @@ def parse_channel_message_v3(payload: bytes) -> ChannelMessageV3Info:
         txt_type=txt_type,
         sender_timestamp=sender_timestamp,
         snr=snr,
+        text=text,
+    )
+
+
+def parse_contact_message_v2(payload: bytes) -> ContactMessageV3Info:
+    # Legacy V2 format (RESP_CONTACT_MSG_RECV = 7): no SNR, no reserved bytes,
+    # no embedded path hashes. Layout from companion firmware queueMessage():
+    #   [pubkey_prefix:6][path_len_byte:1][txt_type:1][sender_timestamp:4 LE][signature:4 if signed][text]
+    min_len = 6 + 1 + 1 + 4
+    if len(payload) < min_len:
+        raise MeshCoreError(f"short CONTACT_MSG_RECV payload: {len(payload)} bytes")
+    pubkey_prefix = payload[0:6].hex()
+    plen = payload[6]
+    path_hash_size = 0 if plen == 255 else ((plen >> 6) + 1)
+    path_len = plen if plen == 255 else (plen & 0x3F)
+    txt_type = payload[7]
+    sender_timestamp = struct.unpack_from("<I", payload, 8)[0]
+    offset = 12
+    signature_hex = None
+    if txt_type == 2:
+        if len(payload) < offset + 4:
+            raise MeshCoreError(f"short CONTACT_MSG_RECV signature payload: {len(payload)} bytes")
+        signature_hex = payload[offset:offset + 4].hex()
+        offset += 4
+    text_bytes = payload[offset:].split(b"\x00", 1)[0]
+    return ContactMessageV3Info(
+        pubkey_prefix=pubkey_prefix,
+        path_len=path_len,
+        path_hashes="",
+        snr=None,
+        txt_type=txt_type,
+        sender_timestamp=sender_timestamp,
+        signature_hex=signature_hex,
+        text=text_bytes.decode("utf-8", errors="ignore"),
+    )
+
+
+def parse_channel_message_v2(payload: bytes) -> ChannelMessageV3Info:
+    # Legacy V2 format (RESP_CHANNEL_MSG_RECV = 8): no SNR, no reserved bytes,
+    # no embedded path hashes. Layout from companion firmware onChannelMessageRecv():
+    #   [channel_idx:1][path_len_byte:1][txt_type:1][sender_timestamp:4 LE][text]
+    min_len = 1 + 1 + 1 + 4
+    if len(payload) < min_len:
+        raise MeshCoreError(f"short CHANNEL_MSG_RECV payload: {len(payload)} bytes")
+    channel_idx = payload[0]
+    plen = payload[1]
+    path_hash_size = 0 if plen == 255 else ((plen >> 6) + 1)
+    path_len = plen if plen == 255 else (plen & 0x3F)
+    txt_type = payload[2]
+    sender_timestamp = struct.unpack_from("<I", payload, 3)[0]
+    text = payload[7:].split(b"\x00", 1)[0].decode("utf-8", errors="ignore")
+    return ChannelMessageV3Info(
+        channel_idx=channel_idx,
+        path_len=path_len,
+        path_hashes="",
+        txt_type=txt_type,
+        sender_timestamp=sender_timestamp,
+        snr=None,
         text=text,
     )
 

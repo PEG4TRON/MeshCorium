@@ -59,7 +59,9 @@ from meshcorium_client import (
     MeshCoreError,
     MeshCoreSerialClient,
     PUSH_SEND_CONFIRMED,
+    RESP_CHANNEL_MSG_RECV,
     RESP_CHANNEL_MSG_RECV_V3,
+    RESP_CONTACT_MSG_RECV,
     RESP_CONTACT_MSG_RECV_V3,
     TRANSPORT_CLIENT_CLOSED_ERROR,
     TRANSPORT_READ_TIMEOUT_ERROR,
@@ -69,7 +71,9 @@ from meshcorium_client import (
     ack_codes_match,
     is_meshcore_public_channel_name,
     normalize_meshcore_channel_name,
+    parse_channel_message_v2,
     parse_channel_message_v3,
+    parse_contact_message_v2,
     parse_contact_message_v3,
     parse_send_confirmed_push,
     parse_message,
@@ -4026,11 +4030,16 @@ def _process_background_message_event(
         payload_hex=message.payload.hex(),
         payload_len=len(message.payload),
     )
-    if message.code == RESP_CONTACT_MSG_RECV_V3:
+    if message.code in (RESP_CONTACT_MSG_RECV, RESP_CONTACT_MSG_RECV_V3):
         try:
-            details = parse_contact_message_v3(message.payload)
+            if message.code == RESP_CONTACT_MSG_RECV_V3:
+                details = parse_contact_message_v3(message.payload)
+                debug_event = "bg_contact_msg_v3"
+            else:
+                details = parse_contact_message_v2(message.payload)
+                debug_event = "bg_contact_msg_v2"
             _log_delivery_debug(
-                "bg_contact_msg_v3",
+                debug_event,
                 port=port,
                 pubkey_prefix=details.pubkey_prefix,
                 path_len=details.path_len,
@@ -4089,12 +4098,17 @@ def _process_background_message_event(
             return
         except MeshCoreError:
             pass
-    if message.code == RESP_CHANNEL_MSG_RECV_V3:
+    if message.code in (RESP_CHANNEL_MSG_RECV, RESP_CHANNEL_MSG_RECV_V3):
         try:
-            details = parse_channel_message_v3(message.payload)
+            if message.code == RESP_CHANNEL_MSG_RECV_V3:
+                details = parse_channel_message_v3(message.payload)
+                debug_event = "bg_channel_msg_v3"
+            else:
+                details = parse_channel_message_v2(message.payload)
+                debug_event = "bg_channel_msg_v2"
             channel_info = _resolve_channel_runtime_dict(session, owner_id=owner_id, channel_idx=details.channel_idx) or {}
             _log_delivery_debug(
-                "bg_channel_msg_v3",
+                debug_event,
                 port=port,
                 channel_idx=details.channel_idx,
                 path_len=details.path_len,
