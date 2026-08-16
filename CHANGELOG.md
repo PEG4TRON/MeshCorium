@@ -1,5 +1,15 @@
 # Changelog
 
+## Dev / Unreleased (2026-08-16)
+
+### Fixes
+- Legacy V2 message format fallback: background session now accepts RESP_CONTACT_MSG_RECV (7) and RESP_CHANNEL_MSG_RECV (8) alongside V3 codes. Device reboot resets app_target_ver to 0 and firmware then emits V2 frames (no SNR, no path hashes) until protocol version is renegotiated; previously such messages were silently dropped. New parsers parse_contact_message_v2 / parse_channel_message_v2, snr=None for V2 payloads, 7 unit tests.
+
+---
+
+### Исправления
+- Fallback на устаревший формат сообщений V2: фоновая сессия теперь принимает RESP_CONTACT_MSG_RECV (7) и RESP_CHANNEL_MSG_RECV (8) наравне с кодами V3. Перезагрузка устройства сбрасывает app_target_ver в 0, и прошивка отдаёт фреймы V2 (без SNR и path hashes), пока версия протокола не пересогласована; ранее такие сообщения молча терялись. Новые парсеры parse_contact_message_v2 / parse_channel_message_v2, snr=None для V2, 7 unit-тестов.
+
 ## v0.9.0 — UI/UX improvements & WIKI page + Android client (2026-06-30)
 
 ### Web: Settings Layout Overhaul
