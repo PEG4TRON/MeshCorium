@@ -30,7 +30,7 @@ export function createOsmRasterStyle() {
 export const OSM_RASTER_STYLE = createOsmRasterStyle()
 export const MAP_STYLE_BOOT_TIMEOUT_MS = 6000
 
-const TILE_PROXY_ORIGINS = ['tiles.openfreemap.org', 'tile.openstreetmap.org']
+const TILE_PROXY_ORIGINS = ['tiles.openfreemap.org']
 
 export function tileTransformRequest(url) {
   if (url.startsWith('/api/tiles/proxy') || url.includes('/api/tiles/proxy?')) {
