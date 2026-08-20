@@ -26,7 +26,7 @@ MeshCorium - Self-hosted MeshCore клиент с гибридной систе�
 - `BLE`
 - `Wi-Fi / LAN`
 
-Статус релиза `MeshCorium v0.9.1 -- Maps, messaging & timestamp fixes`:
+Статус релиза `MeshCorium v0.9.1 -- message fixes & maps`:
 
 - `USB serial` — постоянный и валидированный путь подключения, не удаляется из проекта
 - `BLE` — дополнительный путь подключения к companion-ноде через Linux / BlueZ, рядом с USB serial

@@ -26,7 +26,7 @@ Current transports:
 - `BLE`
 - `Wi-Fi / LAN`
 
-`MeshCorium v0.9.1 -- Maps, messaging & timestamp fixes` release status:
+`MeshCorium v0.9.1 -- message fixes & maps` release status:
 
 - `USB serial` — permanent and validated connection path, not being removed from the project
 - `BLE` — additional companion-node connection path through Linux / BlueZ, available alongside USB serial

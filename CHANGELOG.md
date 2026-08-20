@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.9.1 — Maps, messaging & timestamp fixes (2026-08-21)
+## v0.9.1 — message fixes & maps (2026-08-21)
 
 ### Fixes
 - OSM tiles now load directly from the browser instead of through `/api/tiles/proxy`. The backend proxy sent `curl/x.y` as User-Agent with no Referer, so OpenStreetMap returned "Access blocked" placeholder PNGs (masked as HTTP 200 with 24h cache). Direct browser requests carry a proper UA + Referer and satisfy the OSM tile usage policy. The tile proxy remains for OpenFreeMap only.
