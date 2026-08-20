@@ -53,11 +53,13 @@ Current release `0.8.2--auto-update-fix` is a critical hotfix: adds missing `--s
 
 ## Release Status
 
-The latest published release is `MeshCorium v0.9.1 -- OSM tiles fix`.
+The latest published release is `MeshCorium v0.9.1 -- Maps, messaging & timestamp fixes`.
 
-### v0.9.1 — OSM tiles fix
+### v0.9.1 — Maps, messaging & timestamp fixes
 
 - **Maps**: OSM tiles now load directly from the browser (proper User-Agent + Referer per OSM tile usage policy). The backend tile proxy is used only for OpenFreeMap; previously OSM returned "Access blocked" placeholder tiles through the `curl`-based proxy.
+- **Messaging**: legacy V2 message format fallback — background session now accepts RESP_CONTACT_MSG_RECV (7) / RESP_CHANNEL_MSG_RECV (8) alongside V3 codes, so messages are no longer silently dropped after a device reboot resets the protocol version.
+- **Timestamps**: corrupt sender timestamps are sanitized on the read side (`sort_timestamp` ranking, hourly sweep), fixing wrong message dates in lists, search, and mentions.
 
 ### v0.9.0 — UI/UX improvements & WIKI page + Android client
 

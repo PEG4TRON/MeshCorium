@@ -1,14 +1,16 @@
 # Changelog
 
-## v0.9.1 — OSM tiles fix (2026-08-21)
+## v0.9.1 — Maps, messaging & timestamp fixes (2026-08-21)
 
 ### Fixes
 - OSM tiles now load directly from the browser instead of through `/api/tiles/proxy`. The backend proxy sent `curl/x.y` as User-Agent with no Referer, so OpenStreetMap returned "Access blocked" placeholder PNGs (masked as HTTP 200 with 24h cache). Direct browser requests carry a proper UA + Referer and satisfy the OSM tile usage policy. The tile proxy remains for OpenFreeMap only.
+- Corrupt sender timestamps sanitized on the read side: `_sanitize_message_timestamp` (1h tolerance, fallback to received_at/now) applied at 12 display points (channel/contact message lists, search, mention lists, contact stats, in-memory preview, SSE inbound payloads, channel-relayed event). New `sort_timestamp` column + `idx_messages_sort`/`idx_contact_messages_sort` for reliable dialog ranking; raw `sender_timestamp` preserved for UNIQUE dedup and relayed lookup. Hourly sweep refreshes only future-dated rows.
 
 ---
 
 ### Исправления
 - Тайлы OSM теперь загружаются напрямую из браузера, а не через `/api/tiles/proxy`. Backend-proxy отправлял `curl/x.y` как User-Agent без Referer, из-за чего OpenStreetMap отдавал заглушки "Access blocked" (маскировались как HTTP 200 с кэшем на сутки). Прямые браузерные запросы несут корректный UA + Referer и соответствуют политике использования тайлов OSM. Прокси остался только для OpenFreeMap.
+- Санитизация кривых sender_timestamp на стороне чтения: `_sanitize_message_timestamp` (допуск 1 час, fallback на received_at/now) применена в 12 точках отдачи (списки сообщений каналов/контактов, поиск, списки mention, статистика контактов, in-memory preview, SSE inbound, channel-relayed event). Новая колонка `sort_timestamp` + индексы `idx_messages_sort`/`idx_contact_messages_sort` для корректной сортировки диалогов; raw `sender_timestamp` сохранён для UNIQUE-дедупликации и relayed-поиска. Почасовой sweep обновляет только future-строки.
 
 ---
 

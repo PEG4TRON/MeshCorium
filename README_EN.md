@@ -26,7 +26,7 @@ Current transports:
 - `BLE`
 - `Wi-Fi / LAN`
 
-`MeshCorium v0.9.1 -- OSM tiles fix` release status:
+`MeshCorium v0.9.1 -- Maps, messaging & timestamp fixes` release status:
 
 - `USB serial` — permanent and validated connection path, not being removed from the project
 - `BLE` — additional companion-node connection path through Linux / BlueZ, available alongside USB serial
@@ -36,6 +36,14 @@ Current transports:
 - `Docker Compose` — deployment variant kept alongside the ordinary launcher/systemd flow; Docker metadata and runtime version reporting are aligned to `0.9.1`
 
 BLE is implemented through a dedicated transport adapter and is available in the connection UI. It is still a new connection path whose behavior depends on the Linux host, BlueZ, and the specific BLE adapter.
+
+## Main Difference Between `v0.9.1` And `v0.9.0`
+
+`v0.9.1` is a focused fixes release on top of the stable `v0.9.0`:
+
+- OSM tiles now load directly from the browser (proper User-Agent + Referer per OSM tile usage policy); the backend tile proxy is used only for OpenFreeMap. Previously OSM returned "Access blocked" placeholder tiles through the `curl`-based proxy.
+- Legacy V2 message format fallback: the background session accepts RESP_CONTACT_MSG_RECV (7) / RESP_CHANNEL_MSG_RECV (8) alongside V3 codes, so messages are no longer silently dropped after a device reboot resets the protocol version.
+- Corrupt sender timestamps are sanitized on the read side (`sort_timestamp` ranking, hourly sweep) — fixes wrong message dates in lists, search, and mentions.
 
 ## Key Features
 
