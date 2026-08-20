@@ -215,7 +215,7 @@ const meshcoreRadioPresetCatalog = [
   { id: 'off-grid-918', label: 'Off-Grid 918', freqMhz: 918, bwKhz: 250, sf: 11, cr: 5, txPowerDbm: 20 },
 ]
 const meshcoriumBrandLogoUrl = '/icons/Meshcorium3.png'
-const meshcoriumDisplayVersion = ref('0.9.0')
+const meshcoriumDisplayVersion = ref('0.9.1')
 const updateCheck = ref({
   current_version: '',
   latest_version: '',
@@ -248,10 +248,10 @@ async function loadUpdateCheck() {
       restart_required: Boolean(data?.restart_required || data?.launcher_restart_required),
       launcher_restart_required: Boolean(data?.launcher_restart_required || data?.restart_required),
     }
-    meshcoriumDisplayVersion.value = data?.current_version || '0.9.0'
+    meshcoriumDisplayVersion.value = data?.current_version || '0.9.1'
   } catch (err) {
     updateCheckError.value = err?.message || String(err || '')
-    meshcoriumDisplayVersion.value = '0.9.0'
+    meshcoriumDisplayVersion.value = '0.9.1'
   } finally {
     updateCheckLoading.value = false
   }

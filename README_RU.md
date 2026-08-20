@@ -26,14 +26,14 @@ MeshCorium - Self-hosted MeshCore клиент с гибридной систе�
 - `BLE`
 - `Wi-Fi / LAN`
 
-Статус релиза `MeshCorium v0.9.0 -- UI/UX improvements & WIKI page + Android client`:
+Статус релиза `MeshCorium v0.9.1 -- OSM tiles fix`:
 
 - `USB serial` — постоянный и валидированный путь подключения, не удаляется из проекта
 - `BLE` — дополнительный путь подключения к companion-ноде через Linux / BlueZ, рядом с USB serial
 - `Wi-Fi / LAN` — ручной TCP `host:port` путь подключения, доступный рядом с USB serial и BLE
 - `Wiki` — file-driven страница документации с markdown-контентом и SVG-схемами на русском и английском
 - `Android client` — WebView APK приложен к GitHub Release как отдельный файл для скачивания
-- `Docker Compose` — вариант эксплуатации остаётся рядом с обычным launcher/systemd сценарием; Docker metadata и runtime-версия выровнены на `0.9.0`
+- `Docker Compose` — вариант эксплуатации остаётся рядом с обычным launcher/systemd сценарием; Docker metadata и runtime-версия выровнены на `0.9.1`
 
 BLE вынесен в отдельный transport-адаптер и доступен в интерфейсе подключения. Это новый путь подключения, поэтому его поведение зависит от Linux-хоста, BlueZ и конкретного BLE-адаптера.
 

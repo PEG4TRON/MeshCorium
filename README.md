@@ -53,7 +53,11 @@ Current release `0.8.2--auto-update-fix` is a critical hotfix: adds missing `--s
 
 ## Release Status
 
-The latest published release is `MeshCorium v0.9.0 -- UI/UX improvements & WIKI page + Android client`.
+The latest published release is `MeshCorium v0.9.1 -- OSM tiles fix`.
+
+### v0.9.1 — OSM tiles fix
+
+- **Maps**: OSM tiles now load directly from the browser (proper User-Agent + Referer per OSM tile usage policy). The backend tile proxy is used only for OpenFreeMap; previously OSM returned "Access blocked" placeholder tiles through the `curl`-based proxy.
 
 ### v0.9.0 — UI/UX improvements & WIKI page + Android client
 
