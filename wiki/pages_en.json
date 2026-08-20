@@ -1,0 +1,221 @@
+{
+  "sections": [
+    {
+      "id": "radio-theory",
+      "title": "Radio Theory — MeshCore",
+      "md": "en/radio-theory/index.md",
+      "icon": "radio",
+      "children": [
+        {
+          "id": "radio-01",
+          "title": "Foundations",
+          "md": "en/01-foundations/index.md",
+          "icon": "radio",
+          "children": [
+            {
+              "id": "meshcore-radio-model",
+              "title": "The MeshCore Radio Model",
+              "md": "en/01-foundations/meshcore-radio-model.md"
+            },
+            {
+              "id": "node-roles",
+              "title": "Node Roles",
+              "md": "en/01-foundations/node-roles.md"
+            },
+            {
+              "id": "meshcore-lora-lorawan",
+              "title": "MeshCore, LoRa, and LoRaWAN",
+              "md": "en/01-foundations/meshcore-lora-lorawan.md"
+            }
+          ]
+        },
+        {
+          "id": "radio-02",
+          "title": "Radio Theory",
+          "md": "en/02-radio-theory/index.md",
+          "icon": "radio",
+          "children": [
+            {
+              "id": "frequency-power-and-link-budget",
+              "title": "Frequency, Power, and Link Budget",
+              "md": "en/02-radio-theory/frequency-power-and-link-budget.md"
+            },
+            {
+              "id": "propagation-and-coverage",
+              "title": "Signal Propagation and Coverage",
+              "md": "en/02-radio-theory/propagation-and-coverage.md"
+            },
+            {
+              "id": "antennas-and-rf-chain",
+              "title": "Antennas and the RF Chain",
+              "md": "en/02-radio-theory/antennas-and-rf-chain.md"
+            }
+          ]
+        },
+        {
+          "id": "radio-03",
+          "title": "LoRa PHY",
+          "md": "en/03-lora-phy/index.md",
+          "icon": "radio",
+          "children": [
+            {
+              "id": "lora-modulation-and-parameters",
+              "title": "LoRa Modulation and Parameters",
+              "md": "en/03-lora-phy/lora-modulation-and-parameters.md"
+            },
+            {
+              "id": "lora-frame-and-radio-cycle",
+              "title": "The LoRa Frame and Radio Operating Cycle",
+              "md": "en/03-lora-phy/lora-frame-and-radio-cycle.md"
+            },
+            {
+              "id": "airtime-duty-cycle-and-capacity",
+              "title": "Airtime, Duty Cycle, and Capacity",
+              "md": "en/03-lora-phy/airtime-duty-cycle-and-capacity.md"
+            },
+            {
+              "id": "radio-profile-and-hardware",
+              "title": "MeshCore Radio Profiles and Hardware",
+              "md": "en/03-lora-phy/radio-profile-and-hardware.md"
+            }
+          ]
+        },
+        {
+          "id": "radio-04",
+          "title": "MeshCore Packets",
+          "md": "en/04-meshcore-packets/index.md",
+          "icon": "radio",
+          "children": [
+            {
+              "id": "packet-format",
+              "title": "Packet Format",
+              "md": "en/04-meshcore-packets/packet-format.md"
+            },
+            {
+              "id": "addressing-identity-and-encryption",
+              "title": "Addressing, Identity, and Encryption",
+              "md": "en/04-meshcore-packets/addressing-identity-and-encryption.md"
+            },
+            {
+              "id": "user-payloads",
+              "title": "User Payloads",
+              "md": "en/04-meshcore-packets/user-payloads.md"
+            },
+            {
+              "id": "service-payloads",
+              "title": "Service Payloads",
+              "md": "en/04-meshcore-packets/service-payloads.md"
+            }
+          ]
+        },
+        {
+          "id": "radio-05",
+          "title": "Routing",
+          "md": "en/05-routing/index.md",
+          "icon": "radio",
+          "children": [
+            {
+              "id": "flood-routing",
+              "title": "Flood Routing",
+              "md": "en/05-routing/flood-routing.md"
+            },
+            {
+              "id": "direct-routing-and-path-discovery",
+              "title": "Direct Routing and Path Discovery",
+              "md": "en/05-routing/direct-routing-and-path-discovery.md"
+            },
+            {
+              "id": "path-hashes-duplicates-and-loops",
+              "title": "Path Hashes, Duplicates, and Loops",
+              "md": "en/05-routing/path-hashes-duplicates-and-loops.md"
+            },
+            {
+              "id": "regions-and-transport-codes",
+              "title": "Regions and Transport Codes",
+              "md": "en/05-routing/regions-and-transport-codes.md"
+            },
+            {
+              "id": "channel-access-queues-and-delays",
+              "title": "Channel Access, Queues, and Delays",
+              "md": "en/05-routing/channel-access-queues-and-delays.md"
+            }
+          ]
+        },
+        {
+          "id": "radio-06",
+          "title": "Service Mechanisms",
+          "md": "en/06-service-mechanisms/index.md",
+          "icon": "radio",
+          "children": [
+            {
+              "id": "adverts-discovery-and-neighbors",
+              "title": "Adverts, Discovery, and Neighbors",
+              "md": "en/06-service-mechanisms/adverts-discovery-and-neighbors.md"
+            },
+            {
+              "id": "acknowledgements-retries-and-multipart",
+              "title": "ACKs, Retries, and Multipart Packets",
+              "md": "en/06-service-mechanisms/acknowledgements-retries-and-multipart.md"
+            },
+            {
+              "id": "trace-and-route-diagnostics",
+              "title": "Trace and Route Diagnostics",
+              "md": "en/06-service-mechanisms/trace-and-route-diagnostics.md"
+            }
+          ]
+        },
+        {
+          "id": "radio-07",
+          "title": "Monitoring",
+          "md": "en/07-monitoring/index.md",
+          "icon": "radio",
+          "children": [
+            {
+              "id": "rssi-snr-and-link-quality",
+              "title": "RSSI, SNR, and Link Quality",
+              "md": "en/07-monitoring/rssi-snr-and-link-quality.md"
+            },
+            {
+              "id": "interference-and-radio-problems",
+              "title": "Interference and Radio Reception Problems",
+              "md": "en/07-monitoring/interference-and-radio-problems.md"
+            },
+            {
+              "id": "statistics-and-logging",
+              "title": "Statistics and Logging",
+              "md": "en/07-monitoring/statistics-and-logging.md"
+            }
+          ]
+        },
+        {
+          "id": "radio-08",
+          "title": "Network Engineering",
+          "md": "en/08-network-engineering/index.md",
+          "icon": "radio",
+          "children": [
+            {
+              "id": "network-design-and-repeater-placement",
+              "title": "Network Design and Repeater Placement",
+              "md": "en/08-network-engineering/network-design-and-repeater-placement.md"
+            },
+            {
+              "id": "capacity-and-scaling",
+              "title": "Capacity and Scaling",
+              "md": "en/08-network-engineering/capacity-and-scaling.md"
+            },
+            {
+              "id": "security-threats",
+              "title": "Radio-Layer Threats",
+              "md": "en/08-network-engineering/security-threats.md"
+            },
+            {
+              "id": "compatibility-and-migration",
+              "title": "Compatibility and Migration",
+              "md": "en/08-network-engineering/compatibility-and-migration.md"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

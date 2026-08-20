@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560">
+<style>text{font-family:Arial,sans-serif;fill:#d0d8e0}.t{font-size:30px;font-weight:bold}.h{font-size:23px;font-weight:bold}.s{font-size:18px}.b{fill:#1a2d4a;stroke:#276a9c;stroke-width:4}.g{fill:#0a1f0a;stroke:#2e8b57;stroke-width:4}.y{fill:#2a1a08;stroke:#a66b00;stroke-width:4}</style>
+<text x="40" y="50" class="t">RSSI, noise floor, and SNR answer different questions</text>
+<rect x="60" y="110" width="320" height="310" rx="18" class="b" /><text x="170" y="155" class="h">RSSI</text><text x="95" y="205" class="s">total power of the received</text><text x="95" y="240" class="s">signal in the receiver bandwidth</text><text x="95" y="300" class="s">usually expressed in dBm</text><text x="95" y="355" class="s">does not isolate noise</text>
+<rect x="440" y="110" width="320" height="310" rx="18" class="y" /><text x="515" y="155" class="h">Noise floor</text><text x="475" y="205" class="s">background energy level</text><text x="475" y="240" class="s">and local interference</text><text x="475" y="300" class="s">depends on BW and environment</text><text x="475" y="355" class="s">may change over time</text>
+<rect x="820" y="110" width="320" height="310" rx="18" class="g" /><text x="940" y="155" class="h">SNR</text><text x="855" y="205" class="s">ratio of useful signal</text><text x="855" y="240" class="s">to noise, expressed in dB</text><text x="855" y="300" class="s">may be negative</text><text x="855" y="355" class="s">and still be decodable by LoRa</text>
+<text x="70" y="490" class="s">One latest packet does not describe the link: use repeated measurements, PDR, latency, and route stability.</text>
+</svg>

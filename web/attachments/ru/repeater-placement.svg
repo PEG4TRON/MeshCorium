@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1300" height="620" viewBox="0 0 1300 620">
+<style>text{font-family:Arial,sans-serif;fill:#d0d8e0}.t{font-size:30px;font-weight:bold}.h{font-size:21px;font-weight:bold}.s{font-size:18px}.ground{fill:#0d1a08}.line{stroke:#2b6f9e;stroke-width:5}.fres{fill:#162840;opacity:.55;stroke:#2b6f9e;stroke-width:3}.tower{stroke:#555;stroke-width:6}.bad{stroke:#b03a2e;stroke-width:6;stroke-dasharray:10 8}</style>
+<text x="40" y="50" class="t">Высота и чистая зона Френеля обычно важнее лишних децибел мощности</text>
+<path d="M0 470 Q220 400 390 455 Q620 525 820 420 Q1050 330 1300 445 L1300 620 L0 620 Z" class="ground"/>
+<line x1="120" y1="410" x2="120" y2="230" class="tower"/><line x1="1120" y1="370" x2="1120" y2="150" class="tower"/><circle cx="120" cy="230" r="10" fill="#2b6f9e"/><circle cx="1120" cy="150" r="10" fill="#2b6f9e"/>
+<line x1="120" y1="230" x2="1120" y2="150" class="line"/><ellipse cx="620" cy="190" rx="500" ry="95" class="fres" transform="rotate(-4.6 620 190)"/>
+<line x1="200" y1="430" x2="900" y2="390" class="bad"/><text x="260" y="370" class="s">низкая установка: рельеф перекрывает путь</text><text x="470" y="115" class="s">первая зона Френеля должна быть по возможности свободна</text><text x="70" y="550" class="s">Repeater следует ставить там, где он создаёт новые независимые связи, а не просто слышит те же узлы, что и соседний repeater.</text>
+</svg>

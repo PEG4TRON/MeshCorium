@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1250" height="520" viewBox="0 0 1250 520">
+<style>text{font-family:Arial,sans-serif;fill:#d0d8e0}.t{font-size:29px;font-weight:bold}.h{font-size:21px;font-weight:bold}.s{font-size:18px}.b1{fill:#162840;stroke:#245e8a;stroke-width:3}.b2{fill:#1a1030;stroke:#70479a;stroke-width:3}.b3{fill:#2a1a08;stroke:#a66b00;stroke-width:3}</style>
+<text x="40" y="50" class="t">Path-hash size: route length versus collision risk</text>
+<rect x="70" y="120" width="320" height="260" rx="18" class="b1" /><text x="170" y="165" class="h">1 byte</text><text x="105" y="215" class="s">256 possible values</text><text x="105" y="260" class="s">up to 64 entries within path size</text><text x="105" y="305" class="s">minimum overhead</text><text x="105" y="350" class="s">higher collision risk</text>
+<rect x="465" y="120" width="320" height="260" rx="18" class="b2" /><text x="565" y="165" class="h">2 bytes</text><text x="500" y="215" class="s">65,536 values</text><text x="500" y="260" class="s">up to 32 entries within path size</text><text x="500" y="305" class="s">moderate overhead</text><text x="500" y="350" class="s">lower collision risk</text>
+<rect x="860" y="120" width="320" height="260" rx="18" class="b3" /><text x="960" y="165" class="h">3 bytes</text><text x="895" y="215" class="s">16,777,216 values</text><text x="895" y="260" class="s">up to 21 entries within path size</text><text x="895" y="305" class="s">highest overhead</text><text x="895" y="350" class="s">lowest collision risk</text>
+<text x="70" y="445" class="s">The effective limit may also be constrained by hop count, packet size, and firmware compatibility.</text>
+</svg>

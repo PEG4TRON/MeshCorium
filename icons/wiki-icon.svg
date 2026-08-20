@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#12B8F4"/><stop offset="100%" stop-color="#5A74C9"/></linearGradient></defs>
+  <g transform="rotate(-15 256 256)">
+    <!-- Left page -->
+    <path d="M96 120C96 98 114 80 136 80H240V400H136C114 400 96 382 96 360V120Z" stroke="url(#g)" stroke-width="14" stroke-linejoin="round"/>
+    <!-- Right page -->
+    <path d="M416 120C416 98 398 80 376 80H272V400H376C398 400 416 382 416 360V120Z" stroke="url(#g)" stroke-width="14" stroke-linejoin="round"/>
+    <!-- Spine top -->
+    <path d="M240 80L272 80" stroke="url(#g)" stroke-width="14" stroke-linecap="round"/>
+    <!-- Spine bottom -->
+    <path d="M240 400L272 400" stroke="url(#g)" stroke-width="14" stroke-linecap="round"/>
+    <!-- Text lines left page -->
+    <path d="M120 160Q150 154 220 160" stroke="url(#g)" stroke-width="10" stroke-linecap="round" fill="none"/>
+    <path d="M120 210Q155 204 215 210" stroke="url(#g)" stroke-width="10" stroke-linecap="round" fill="none"/>
+    <path d="M120 260Q150 254 220 260" stroke="url(#g)" stroke-width="10" stroke-linecap="round" fill="none"/>
+    <path d="M120 310Q145 304 195 310" stroke="url(#g)" stroke-width="10" stroke-linecap="round" fill="none"/>
+    <!-- Text lines right page -->
+    <path d="M392 160Q362 154 292 160" stroke="url(#g)" stroke-width="10" stroke-linecap="round" fill="none"/>
+    <path d="M392 210Q357 204 297 210" stroke="url(#g)" stroke-width="10" stroke-linecap="round" fill="none"/>
+    <path d="M392 260Q362 254 292 260" stroke="url(#g)" stroke-width="10" stroke-linecap="round" fill="none"/>
+    <path d="M392 310Q367 304 317 310" stroke="url(#g)" stroke-width="10" stroke-linecap="round" fill="none"/>
+  </g>
+</svg>
