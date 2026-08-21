@@ -22,6 +22,12 @@ screenshot/
 reference.d/
 .claude/
 
+# Local Hermes agent data (plans, memory) — NOT project code
+.hermes/
+
+# Nested .release copies — the canonical worktree is this repo root; nested copies are build/runtime junk
+.release/
+
 # Tests (local only)
 web/e2e/
 
