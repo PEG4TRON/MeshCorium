@@ -39,6 +39,10 @@ import { resolveDisplayedBatteryPercent } from '../lib/batteryProfile'
 import { resolveNodePreviewUrl } from '../lib/nodePreview'
 import { resolveCachedWallpaperAsset } from '../lib/wallpaperCache'
 import {
+  composerBreakdown,
+  composerDisplayParts,
+} from '../lib/composerBudget'
+import {
   appendQueueStateStatus,
   buildConnectedSessionStatus,
   describeQueueDrainStatus,
@@ -1869,8 +1873,27 @@ const consolePlainText = computed(() => {
   return filteredConsoleEntries.value.map((entry) => entry.text).join('\n')
 })
 
+// Byte accounting for the composer counter. Everything the device counts on the wire is
+// included, not only the typed text: command header, recipient reference, the "<sender>: "
+// name prefix the device prepends to channel messages, the null terminator, the attempt
+// reserve (contacts, from attempt 4) and the typed text — the reply marker "@[target] " is
+// typed text, so it is already inside. Rules and numbers come from web/src/lib/composerBudget.js
+// (mirrors the firmware: MAX_TEXT_LEN 160, MAX_NAME_SIZE 32, MAX_FRAME_SIZE 176).
+const composerAttempt = 0 // send paths call the client with attempt 0
+
+function composerPartsFor(text) {
+  return composerDisplayParts({
+    kind: selectedConversationKind.value,
+    senderName: session.selfName || session.self?.name,
+    text,
+    attempt: composerAttempt,
+  })
+}
+
+const composerPacketParts = computed(() => composerPartsFor(String(draftText.value || '')))
+
 const draftBytesUsed = computed(() => {
-  return new TextEncoder().encode(String(draftText.value || '')).length
+  return composerPacketParts.value.usedBytes
 })
 
 const draftStructured = computed(() => {
@@ -1900,8 +1923,10 @@ const activeComposerHistoryDraft = computed(() => {
   return String(outgoingDraftHistory.value[index] || '')
 })
 
+const composerLimitBytes = computed(() => composerPacketParts.value.displayLimit)
+
 const draftBytesLeft = computed(() => {
-  return MAX_MESSAGE_BODY_BYTES - draftBytesUsed.value
+  return composerLimitBytes.value - draftBytesUsed.value
 })
 
 const draftIsOverflow = computed(() => {
@@ -1911,8 +1936,26 @@ const draftIsOverflow = computed(() => {
 const composerByteCounterText = computed(() => {
   return t('messages.composer.bytesUsed', {
     used: draftBytesUsed.value,
-    limit: MAX_MESSAGE_BODY_BYTES,
+    limit: composerLimitBytes.value,
   })
+})
+
+const composerPartsEntries = computed(() => {
+  return composerBreakdown({
+    kind: selectedConversationKind.value,
+    senderName: session.selfName || session.self?.name,
+    text: String(draftText.value || ''),
+    attempt: composerAttempt,
+  }).filter((entry) => entry.bytes > 0)
+})
+
+// Two-line breakdown as requested: part labels, then the byte sum with the total.
+const composerPartsLabelsText = computed(() => {
+  return composerPartsEntries.value.map((entry) => t(`messages.composer.parts.${entry.key}`)).join(' + ')
+})
+
+const composerPartsSumText = computed(() => {
+  return `${composerPartsEntries.value.map((entry) => entry.bytes).join(' + ')} = ${composerPacketParts.value.usedBytes}`
 })
 
 const canSendCurrentDraft = computed(() => {
@@ -1933,6 +1976,8 @@ const composerModel = computed(() => {
     draftGifId: draftGifId.value,
     draftIsOverflow: draftIsOverflow.value,
     composerByteCounterText: composerByteCounterText.value,
+    composerPartsLabelsText: composerPartsLabelsText.value,
+    composerPartsSumText: composerPartsSumText.value,
     canSendCurrentDraft: canSendCurrentDraft.value,
     sendLabel: sending.value ? t('messages.actions.sending') : t('messages.actions.send'),
     gifButtonLabel: t('messages.actions.gif'),
@@ -4231,9 +4276,9 @@ async function sendMessageText(text, options = {}) {
   if (!normalizedText) {
     return false
   }
-  const payloadBytes = new TextEncoder().encode(normalizedText).length
-  if (payloadBytes > MAX_MESSAGE_BODY_BYTES) {
-    session.setStatus(t('messages.composer.limitExceeded', { limit: MAX_MESSAGE_BODY_BYTES }), true)
+  const parts = composerPartsFor(normalizedText)
+  if (parts.exceedsTextBudget || parts.exceedsFrameLimit) {
+    session.setStatus(t('messages.composer.limitExceeded', { limit: parts.displayLimit }), true)
     return false
   }
   sending.value = true

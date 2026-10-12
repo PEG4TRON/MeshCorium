@@ -151,6 +151,8 @@ function handleTextareaKeydown(event) {
       ></textarea>
       <div class="mc-composer-send-stack">
         <span class="mc-composer-bytes" :class="{ 'is-over': model.draftIsOverflow }">{{ model.composerByteCounterText }}</span>
+        <p v-if="model.composerPartsLabelsText" class="mc-composer-parts-labels">{{ model.composerPartsLabelsText }}</p>
+        <p v-if="model.composerPartsSumText" class="mc-composer-parts-sum">{{ model.composerPartsSumText }}</p>
         <button class="mc-button mc-button--primary" type="button" :disabled="!model.canSendCurrentDraft" @click="emit('send-message')">
           <img v-if="isMobile" :src="'/icons/paper-plane.png'" alt="Send" />
           <template v-else>{{ model.sendLabel }}</template>
