@@ -63,6 +63,7 @@ from meshcorium_client import (
     RESP_CHANNEL_MSG_RECV_V3,
     RESP_CONTACT_MSG_RECV,
     RESP_CONTACT_MSG_RECV_V3,
+    RESP_CHANNEL_DATA_RECV,
     TRANSPORT_CLIENT_CLOSED_ERROR,
     TRANSPORT_READ_TIMEOUT_ERROR,
     derive_meshcore_channel_secret,
@@ -76,6 +77,7 @@ from meshcorium_client import (
     parse_contact_message_v2,
     parse_contact_message_v3,
     parse_send_confirmed_push,
+    parse_channel_data_recv,
     parse_message,
     utc_now_epoch,
 )
@@ -4152,6 +4154,40 @@ def _process_background_message_event(
             )
             payload["recent_repeaters_count"] = _get_recent_repeater_count(session)
             _broadcast_event(port, payload)
+            return
+        except MeshCoreError:
+            pass
+    if message.code == RESP_CHANNEL_DATA_RECV:
+        # Group datagram (image/binary message) from the offline queue. Unlike text
+        # messages it has no text body, so it is not stored in the message history:
+        # log the delivery metadata and pass the event through. The queue-sync state
+        # is already advanced because code 27 is an expected reply to
+        # CMD_SYNC_NEXT_MESSAGE (see tests/test_channel_data_recv_parity.py).
+        try:
+            details = parse_channel_data_recv(message.payload)
+            channel_info = _resolve_channel_runtime_dict(session, owner_id=owner_id, channel_idx=details.channel_idx) or {}
+            _log_delivery_debug(
+                "bg_channel_data_recv",
+                port=port,
+                channel_idx=details.channel_idx,
+                path_len=details.path_len,
+                snr=details.snr,
+                data_type=details.data_type,
+                data_len=details.data_len,
+            )
+            _broadcast_event(port, {
+                "event": "message",
+                "message_type": "channel_data",
+                "code": message.code,
+                "channel_idx": details.channel_idx,
+                "channel_identity": str(channel_info.get("channel_identity") or ""),
+                "channel_name": _normalize_channel_name(channel_info.get("name")),
+                "path_len": details.path_len,
+                "data_type": details.data_type,
+                "data_len": details.data_len,
+                "snr": details.snr,
+                "payload_hex": message.payload.hex(),
+            })
             return
         except MeshCoreError:
             pass

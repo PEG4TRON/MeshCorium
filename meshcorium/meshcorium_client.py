@@ -152,6 +152,11 @@ RESP_TUNING_PARAMS = 23
 RESP_STATS = 24
 RESP_AUTOADD_CONFIG = 25
 RESP_ALLOWED_REPEAT_FREQ = 26
+# Group datagram delivery (image/binary messages). The device queues it as a reply
+# to CMD_SYNC_NEXT_MESSAGE (MyMesh.cpp:600-616, code list :98); the official client
+# must advance the queue-sync state machine for it (meshcore_connector.dart:6002-6013),
+# and MyMesh.h:214-217 counts it as a channel message.
+RESP_CHANNEL_DATA_RECV = 27
 CONTACT_SEQUENCE_IGNORED_CODES = (
     RESP_CHANNEL_INFO,
     RESP_OK,
@@ -339,6 +344,16 @@ class AutoAddConfig:
 class RepeatFrequencyRange:
     lower_freq_khz: int
     upper_freq_khz: int
+
+
+@dataclasses.dataclass(slots=True)
+class ChannelDataRecvInfo:
+    snr: float | None
+    channel_idx: int
+    path_len: int
+    data_type: int
+    data_len: int
+    payload: bytes
 
 
 @dataclasses.dataclass(slots=True)
@@ -1264,6 +1279,37 @@ def parse_contact(payload: bytes) -> Contact:
         adv_lon=struct.unpack_from("<i", payload, 140)[0],
         lastmod=struct.unpack_from("<I", payload, 144)[0],
         raw_payload_hex=format_hex(payload),
+    )
+
+
+def parse_channel_data_recv(payload: bytes) -> ChannelDataRecvInfo:
+    """Payload of RESP_CHANNEL_DATA_RECV (27), without the code byte.
+
+    Layout from MyMesh.cpp:601-616: [snr:1][reserved1:1][reserved2:1][channel_idx:1]
+    [path_len_byte:1][data_type:2 LE][data_len:1][payload:data_len]. On receive the
+    path field is metadata only - no path bytes follow (docs/packet_format.md).
+    """
+    min_len = 1 + 1 + 1 + 1 + 1 + 2 + 1
+    if len(payload) < min_len:
+        raise MeshCoreError(f"short CHANNEL_DATA_RECV payload: {len(payload)} bytes")
+    snr_byte = payload[0]
+    snr = (snr_byte if snr_byte < 128 else snr_byte - 256) / 4.0
+    channel_idx = payload[3]
+    path_len = payload[4] & 0x3F
+    data_type = int.from_bytes(payload[5:7], byteorder="little", signed=False)
+    data_len = payload[7]
+    body = payload[8:]
+    if data_len > len(body):
+        raise MeshCoreError(
+            f"CHANNEL_DATA_RECV declared data_len {data_len} exceeds frame ({len(body)} bytes)"
+        )
+    return ChannelDataRecvInfo(
+        snr=snr,
+        channel_idx=channel_idx,
+        path_len=path_len,
+        data_type=data_type,
+        data_len=data_len,
+        payload=bytes(body[:data_len]),
     )
 
 
@@ -2643,7 +2689,7 @@ class MeshCoreClient:
     def sync_next_message(self) -> MessageEvent | None:
         frame = self.request_expect_frame(
             bytes([CMD_SYNC_NEXT_MESSAGE]),
-            expected_codes=(RESP_NO_MORE_MESSAGES, RESP_CONTACT_MSG_RECV, RESP_CHANNEL_MSG_RECV, RESP_CONTACT_MSG_RECV_V3, RESP_CHANNEL_MSG_RECV_V3),
+            expected_codes=(RESP_NO_MORE_MESSAGES, RESP_CONTACT_MSG_RECV, RESP_CHANNEL_MSG_RECV, RESP_CONTACT_MSG_RECV_V3, RESP_CHANNEL_MSG_RECV_V3, RESP_CHANNEL_DATA_RECV),
             empty_error="empty response to SYNC_NEXT_MESSAGE",
             err_error="device returned ERR for SYNC_NEXT_MESSAGE",
             unexpected_error=lambda next_frame: f"unexpected response code for SYNC_NEXT_MESSAGE: {next_frame[0]}",
