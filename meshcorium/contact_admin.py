@@ -14,6 +14,30 @@ def _connection_access_context(session_kwargs: dict, *, connection_access=None, 
     return serial_port_access(session_kwargs["port"])
 
 
+def _build_remove_summary(
+    *,
+    contacts_dict: list[dict],
+    to_remove: list[dict],
+    next_cursor: int,
+    hard_device_limit: int,
+    mark_cached_contacts_removed_from_node,
+    prepare_contacts_snapshot,
+) -> tuple[list[dict], dict]:
+    mark_cached_contacts_removed_from_node(
+        [str(contact.get("public_key") or "").strip().lower() for contact in to_remove]
+    )
+    remaining_contacts_dict = prepare_contacts_snapshot(contacts_dict)
+    return remaining_contacts_dict, {
+        "removed": len(to_remove),
+        "remaining": len(remaining_contacts_dict),
+        "cursor": next_cursor,
+        "max_contacts": effective_node_contact_limit(
+            remaining_contacts_dict,
+            hard_device_limit=hard_device_limit,
+        ),
+    }
+
+
 def remove_contacts_and_reload(
     session_kwargs: dict,
     *,
@@ -51,27 +75,6 @@ def remove_contacts_and_reload(
                 continue
             items.append(contact)
         return items
-
-    def _build_remove_summary(
-        *,
-        contacts_dict: list[dict],
-        to_remove: list[dict],
-        next_cursor: int,
-        hard_device_limit: int,
-    ) -> tuple[list[dict], dict]:
-        mark_cached_contacts_removed_from_node(
-            [str(contact.get("public_key") or "").strip().lower() for contact in to_remove]
-        )
-        remaining_contacts_dict = prepare_contacts_snapshot(contacts_dict)
-        return remaining_contacts_dict, {
-            "removed": len(to_remove),
-            "remaining": len(remaining_contacts_dict),
-            "cursor": next_cursor,
-            "max_contacts": effective_node_contact_limit(
-                remaining_contacts_dict,
-                hard_device_limit=hard_device_limit,
-            ),
-        }
 
     def _reload_contacts_after_bulk_remove() -> tuple[int, list]:
         # After a long remove-contact burst some radios briefly stop answering
@@ -119,6 +122,8 @@ def remove_contacts_and_reload(
         to_remove=to_remove,
         next_cursor=next_cursor,
         hard_device_limit=int(device.max_contacts_div_2 * 2),
+        mark_cached_contacts_removed_from_node=mark_cached_contacts_removed_from_node,
+        prepare_contacts_snapshot=prepare_contacts_snapshot,
     )
 
 
