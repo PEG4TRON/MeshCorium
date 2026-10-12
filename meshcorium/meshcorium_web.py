@@ -10478,7 +10478,11 @@ def _build_messages_conversation_directory(
 
 def _enrich_contacts_with_local_state(contacts: list[dict]) -> list[dict]:
     stats = get_contact_message_stats()
-    groups = get_contact_groups()
+    groups = contact_groups.list_contact_groups(
+        DB_LOCK,
+        str(DB_PATH),
+        reserved_group_name=SYSTEM_FAVORITES_GROUP,
+    )
     contact_groups_map: dict[str, list[str]] = {}
     for group_name, members in groups.items():
         for public_key in members:
