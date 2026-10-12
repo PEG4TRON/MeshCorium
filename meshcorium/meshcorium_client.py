@@ -26,6 +26,44 @@ MESHCORE_PUBLIC_CHANNEL_PSK = bytes.fromhex(MESHCORE_PUBLIC_CHANNEL_PSK_HEX)
 BLE_RADIO_COMMAND_SETTLE_SECS = 0.3
 BLE_RADIO_POST_APPLY_SETTLE_SECS = 0.45
 
+# Text payload limits, from the reference firmware:
+#   MeshCore/src/helpers/BaseChatMesh.h:8 — `#define MAX_TEXT_LEN (10*CIPHER_BLOCK_SIZE)` = 160
+#   BaseChatMesh.cpp:422-423 / :463 — send path refuses text_len > MAX_TEXT_LEN, and
+#   > MAX_TEXT_LEN - 2 from attempt 4 on (from attempt 4 the firmware appends [0][attempt]
+#   to the DM payload). Group text is stored as "<sender>: <text>" and truncated to
+#   MAX_TEXT_LEN at the device (BaseChatMesh.cpp:492-497).
+# Guarding client-side gives the caller an explicit error instead of the device's
+# ambiguous ERR (ERR_CODE_TABLE_FULL) — the same behavior as the official client
+# (meshcore-open/lib/connector/meshcore_protocol.dart:373-394).
+MAX_NAME_SIZE = 32  # meshcore_protocol.dart:362; usable name bytes = MAX_NAME_SIZE - 1
+MAX_TEXT_PAYLOAD_BYTES = 160
+MAX_TEXT_PAYLOAD_BYTES_AFTER_FULL_LENGTH_ATTEMPTS = MAX_TEXT_PAYLOAD_BYTES - 2
+
+TXT_TYPE_PLAIN = 0
+TXT_TYPE_CLI_DATA = 1
+TXT_TYPE_SIGNED_PLAIN = 2
+
+
+def contact_text_limit(attempt: int = 0) -> int:
+    if int(attempt) > 3:
+        return MAX_TEXT_PAYLOAD_BYTES_AFTER_FULL_LENGTH_ATTEMPTS
+    return MAX_TEXT_PAYLOAD_BYTES
+
+
+def channel_text_limit(sender_name: str | None = None) -> int:
+    """Text budget for SEND_CHANNEL_MSG: the device prepends "<sender>: " to the body."""
+    if not sender_name:
+        return MAX_TEXT_PAYLOAD_BYTES
+    name_bytes = min(len(str(sender_name).encode("utf-8")), MAX_NAME_SIZE - 1)
+    return MAX_TEXT_PAYLOAD_BYTES - name_bytes - 2
+
+
+def _check_text_len(text: str, *, limit: int, label: str) -> bytes:
+    text_bytes = str(text).encode("utf-8")
+    if len(text_bytes) > limit:
+        raise MeshCoreError(f"text too long for {label}: {len(text_bytes)} > {limit} bytes")
+    return text_bytes
+
 
 CMD_APP_START = 1
 CMD_SEND_TXT_MSG = 2
@@ -1638,6 +1676,9 @@ class MeshCoreClient:
         self.clear_transport_input_buffer()
         self.clear_transport_output_buffer()
         self._repeater_authenticated: bool = False
+        # Node name from APP_START's SELF_INFO; the device prepends "<name>: " to
+        # group text, so it is part of the channel text budget (see channel_text_limit).
+        self._self_name: str = ""
 
     def close(self) -> None:
         self._frame_hub.close()
@@ -1817,7 +1858,9 @@ class MeshCoreClient:
                 f"expected SELF_INFO, got code {next_frame[:1].hex() if next_frame else 'empty'}"
             ),
         )
-        return parse_self_info(frame)
+        info = parse_self_info(frame)
+        self._self_name = str(info.name or "")
+        return info
 
     def get_device_time(self) -> int:
         frame = self.request_expect_frame(
@@ -1947,11 +1990,16 @@ class MeshCoreClient:
         if len(destination_public_key) not in (6, 32):
             raise MeshCoreError("destination_public_key must be 6 or 32 bytes")
         destination_prefix = destination_public_key[:6]
+        text_bytes = _check_text_len(
+            text,
+            limit=contact_text_limit(attempt),
+            label="SEND_TXT_MSG",
+        )
         payload = (
             bytes([CMD_SEND_TXT_MSG, txt_type & 0xFF, attempt & 0xFF])
             + struct.pack("<I", timestamp if timestamp is not None else utc_now_epoch())
             + destination_prefix
-            + text.encode("utf-8")
+            + text_bytes
         )
         frame = self.request_expect_frame(
             payload,
@@ -1970,10 +2018,18 @@ class MeshCoreClient:
         timestamp: int | None = None,
         txt_type: int = 0,
     ) -> SentMessageInfo:
+        # Plain channel text becomes "<sender>: <text>" at the device, so the sender
+        # name is part of the budget; guarding here prevents silent truncation.
+        limit = (
+            channel_text_limit(getattr(self, "_self_name", ""))
+            if txt_type == TXT_TYPE_PLAIN
+            else MAX_TEXT_PAYLOAD_BYTES
+        )
+        text_bytes = _check_text_len(text, limit=limit, label="SEND_CHANNEL_MSG")
         payload = (
             bytes([CMD_SEND_CHANNEL_MSG, txt_type & 0xFF, channel_idx & 0xFF])
             + struct.pack("<I", timestamp if timestamp is not None else utc_now_epoch())
-            + text.encode("utf-8")
+            + text_bytes
         )
         frame = self.request_expect_frame(
             payload,
