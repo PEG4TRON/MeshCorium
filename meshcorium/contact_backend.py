@@ -28,7 +28,7 @@ import contact_store
 import contact_admin
 import contact_groups
 from contact_store import ADVERT_TYPE_REPEATER
-from meshcorium_client import Contact, format_hex, format_latlon
+from meshcorium_client import Contact, MeshCoreError, format_hex, format_latlon
 
 CONTACT_MODEL_MIRRORED_FIELDS = (
     "public_key",
