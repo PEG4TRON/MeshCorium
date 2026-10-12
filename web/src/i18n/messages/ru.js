@@ -801,14 +801,6 @@ export default {
       placeholder: 'Напиши сообщение…',
       replyingTo: 'Ответ',
       clearReply: 'Снять ответ',
-      parts: {
-        header: 'заголовок',
-        recipient: 'получатель',
-        namePrefix: 'префикс имени',
-        nullTerminator: 'конец текста',
-        attemptReserve: 'attempt',
-        text: 'текст',
-      },
     },
     contextMenu: {
       title: 'Сообщение',

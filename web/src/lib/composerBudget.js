@@ -85,18 +85,6 @@ export function composerTextBudget({ kind, senderName, attempt = 0 }) {
   return composerPacketParts({ kind, senderName, attempt, text: '' }).textBudget
 }
 
-export function composerBreakdown({ kind, senderName = '', text = '', attempt = 0 }) {
-  const parts = composerPacketParts({ kind, senderName, text, attempt })
-  return [
-    { key: 'header', bytes: parts.headerBytes },
-    { key: 'recipient', bytes: parts.recipientBytes },
-    { key: 'namePrefix', bytes: parts.namePrefixBytes },
-    { key: 'nullTerminator', bytes: parts.nullTerminatorBytes },
-    { key: 'attemptReserve', bytes: parts.attemptReserveBytes },
-    { key: 'text', bytes: parts.textBytes },
-  ]
-}
-
 // What the composer counter shows: the whole packet the device receives — command header,
 // recipient reference, the "<sender>: " prefix, the null terminator, the attempt reserve and
 // the typed text (the reply marker "@[target] " is typed text, so it is already inside).

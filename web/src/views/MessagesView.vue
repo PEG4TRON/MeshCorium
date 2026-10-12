@@ -38,10 +38,7 @@ import {
 import { resolveDisplayedBatteryPercent } from '../lib/batteryProfile'
 import { resolveNodePreviewUrl } from '../lib/nodePreview'
 import { resolveCachedWallpaperAsset } from '../lib/wallpaperCache'
-import {
-  composerBreakdown,
-  composerDisplayParts,
-} from '../lib/composerBudget'
+import { composerDisplayParts } from '../lib/composerBudget'
 import {
   appendQueueStateStatus,
   buildConnectedSessionStatus,
@@ -1940,24 +1937,6 @@ const composerByteCounterText = computed(() => {
   })
 })
 
-const composerPartsEntries = computed(() => {
-  return composerBreakdown({
-    kind: selectedConversationKind.value,
-    senderName: session.selfName || session.self?.name,
-    text: String(draftText.value || ''),
-    attempt: composerAttempt,
-  }).filter((entry) => entry.bytes > 0)
-})
-
-// Two-line breakdown as requested: part labels, then the byte sum with the total.
-const composerPartsLabelsText = computed(() => {
-  return composerPartsEntries.value.map((entry) => t(`messages.composer.parts.${entry.key}`)).join(' + ')
-})
-
-const composerPartsSumText = computed(() => {
-  return `${composerPartsEntries.value.map((entry) => entry.bytes).join(' + ')} = ${composerPacketParts.value.usedBytes}`
-})
-
 const canSendCurrentDraft = computed(() => {
   if (selectedConversationKind.value === 'channel' && selectedChannel.value?.is_on_node === false) {
     return false
@@ -1976,8 +1955,6 @@ const composerModel = computed(() => {
     draftGifId: draftGifId.value,
     draftIsOverflow: draftIsOverflow.value,
     composerByteCounterText: composerByteCounterText.value,
-    composerPartsLabelsText: composerPartsLabelsText.value,
-    composerPartsSumText: composerPartsSumText.value,
     canSendCurrentDraft: canSendCurrentDraft.value,
     sendLabel: sending.value ? t('messages.actions.sending') : t('messages.actions.send'),
     gifButtonLabel: t('messages.actions.gif'),

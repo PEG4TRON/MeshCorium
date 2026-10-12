@@ -6,7 +6,6 @@ import {
   MAX_TEXT_PAYLOAD_BYTES,
   SAFETY_MARGIN_BYTES,
   channelTextBudget,
-  composerBreakdown,
   composerDisplayParts,
   composerPacketParts,
   contactTextBudget,
@@ -68,24 +67,6 @@ describe('composer packet budget (whole packet, not only typed text)', () => {
     expect(senderNameBytes('a'.repeat(40))).toBe(MAX_NAME_BYTES)
     expect(channelTextBudget('a'.repeat(40))).toBe(MAX_TEXT_PAYLOAD_BYTES - MAX_NAME_BYTES - 2)
     expect(contactTextBudget(0)).toBe(MAX_TEXT_PAYLOAD_BYTES)
-  })
-
-  it('breaks the packet into named parts for display', () => {
-    const name = 'PEG11 \u{1F427} T114'
-    const entries = composerBreakdown({ kind: 'channel', senderName: name, text: 'hello' })
-    const byKey = Object.fromEntries(entries.map((e) => [e.key, e.bytes]))
-    expect(byKey.header).toBe(7)
-    expect(byKey.recipient).toBe(0) // channel index is inside the header
-    expect(byKey.namePrefix).toBe(17)
-    expect(byKey.nullTerminator).toBe(1)
-    expect(byKey.attemptReserve).toBe(0)
-    expect(byKey.text).toBe(5)
-
-    const contact = composerBreakdown({ kind: 'contact', text: 'hello', attempt: 4 })
-    const contactByKey = Object.fromEntries(contact.map((e) => [e.key, e.bytes]))
-    expect(contactByKey.recipient).toBe(6)
-    expect(contactByKey.attemptReserve).toBe(2)
-    expect(contactByKey.namePrefix).toBe(0)
   })
 
   it('keeps the reference safety margin visible in the breakdown', () => {

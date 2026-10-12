@@ -801,14 +801,6 @@ export default {
       placeholder: 'Write a message…',
       replyingTo: 'Replying to',
       clearReply: 'Clear reply',
-      parts: {
-        header: 'header',
-        recipient: 'recipient',
-        namePrefix: 'name prefix',
-        nullTerminator: 'end-of-text',
-        attemptReserve: 'attempt',
-        text: 'text',
-      },
     },
     contextMenu: {
       title: 'Message',

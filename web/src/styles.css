@@ -1921,17 +1921,6 @@ button {
   color: #f07178;
 }
 
-.mc-composer-parts-labels,
-.mc-composer-parts-sum {
-  margin: 0;
-  text-align: center;
-  font-size: 11px;
-  color: var(--muted);
-}
-
-.mc-composer-parts-sum {
-  font-variant-numeric: tabular-nums;
-}
 
 .mc-scroll-to-bottom {
   position: absolute;
