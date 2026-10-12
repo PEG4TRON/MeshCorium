@@ -5,6 +5,7 @@ import threading
 import struct
 
 from meshcorium_serial_transport import (
+    MAX_FRAME_PAYLOAD_BYTES,
     TRANSPORT_FRAME_TIMEOUT_ERROR,
     USB_INBOUND_PREFIX,
     USB_OUTBOUND_PREFIX,
@@ -14,7 +15,11 @@ from meshcorium_serial_transport import (
 
 WIFI_TRANSPORT_TYPE = "wifi"
 WIFI_DEFAULT_PORT = 5000
-WIFI_MAX_FRAME_PAYLOAD = 172
+# MAX_FRAME_SIZE is transport-wide in the reference (BaseSerialInterface.h:5) and the
+# same guard is used by every interface, including the wifi one
+# (SerialWifiInterface.cpp:22). 172 was the pre-region-scoping value; frames carrying
+# region transport codes are 173..176 bytes.
+WIFI_MAX_FRAME_PAYLOAD = MAX_FRAME_PAYLOAD_BYTES
 
 
 class WifiTransportError(RuntimeError):
