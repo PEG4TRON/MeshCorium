@@ -12025,6 +12025,207 @@ def _delete_channel_and_reload(session_kwargs: dict, channel_idx: int) -> list[d
             )
 
 
+
+
+
+def _sync_meshcorium_channels_to_node_runtime(
+    client: MeshCoreSerialClient,
+    *,
+    owner_id: str,
+    max_channels: int,
+    existing_channels: list[dict],
+    mark_access_all_messages: bool = False,
+    progress_callback=None,
+) -> tuple[list[dict], dict]:
+    if max_channels <= 1:
+        raise ValueError("node does not expose free channel slots")
+    db_candidates, duplicate_sources = _list_meshcorium_channel_library()
+    used_idx = {
+        _channel_runtime_idx(channel)
+        for channel in list(existing_channels or [])
+        if _channel_runtime_idx(channel) >= 0 and _channel_runtime_name(channel)
+    }
+    existing_by_identity = {
+        _channel_runtime_identity(channel): channel
+        for channel in list(existing_channels or [])
+        if _channel_runtime_name(channel) and _channel_runtime_identity(channel)
+    }
+    added = 0
+    already_present = 0
+    remapped = 0
+    no_free_slots = 0
+    failed = 0
+    retry_count = 0
+    verified_after_empty_response = 0
+    warnings: list[str] = []
+    applied_entries: list[dict] = []
+    already_present_entries: list[dict] = []
+    failed_entries: list[dict] = []
+    processed = 0
+    total_candidates = len(db_candidates)
+    if progress_callback is not None:
+        progress_callback({
+            "operation": "enable",
+            "status": "started",
+            "phase": "prepare",
+            "current": 0,
+            "total": total_candidates,
+        })
+    for candidate in db_candidates:
+        identity = str(candidate.get("channel_identity") or "").strip()
+        if not identity:
+            continue
+        channel_name = _normalize_meshcore_channel_name(candidate.get("channel_name"))
+        if not channel_name:
+            continue
+        processed += 1
+        desired_idx = 0 if _is_meshcore_public_channel_name(channel_name) else int(candidate.get("channel_idx") or -1)
+        existing_channel = existing_by_identity.get(identity)
+        if existing_channel is not None:
+            already_present += 1
+            current_idx = _channel_runtime_idx(existing_channel)
+            already_present_entries.append({
+                "idx": current_idx,
+                "desired_idx": desired_idx,
+                "name": _channel_runtime_name(existing_channel) or channel_name,
+                "channel_identity": identity,
+                "source_owner_id": _normalize_owner_id(candidate.get("owner_id")),
+                "remapped": bool(desired_idx != current_idx),
+            })
+            if progress_callback is not None:
+                progress_callback({
+                    "operation": "enable",
+                    "status": "already-present",
+                    "phase": "skip",
+                    "current": processed,
+                    "total": total_candidates,
+                    "channel_idx": current_idx,
+                    "channel_name": _channel_runtime_name(existing_channel) or channel_name,
+                })
+            continue
+        if _is_meshcore_public_channel_name(channel_name) and max_channels > 0:
+            assigned_idx = 0
+        else:
+            assigned_idx = (
+                desired_idx
+                if 1 <= desired_idx < max_channels and desired_idx not in used_idx
+                else None
+            )
+        if assigned_idx is None:
+            free_idx = None
+            for idx in range(1, max_channels):
+                if idx not in used_idx:
+                    free_idx = idx
+                    break
+            if free_idx is None:
+                no_free_slots += 1
+                warnings.append(
+                    f"{candidate.get('channel_name') or identity}: no free channel slots left on the node."
+                )
+                if progress_callback is not None:
+                    progress_callback({
+                        "operation": "enable",
+                        "status": "no-free-slot",
+                        "phase": "skip",
+                        "current": processed,
+                        "total": total_candidates,
+                        "channel_idx": desired_idx,
+                        "channel_name": channel_name,
+                    })
+                continue
+            assigned_idx = free_idx
+        channel_secret_hex = _resolve_channel_secret_hex_for_save(channel_name, candidate.get("channel_secret_hex"))
+        try:
+            written_channel, write_meta = _set_channel_with_retry(
+                client,
+                assigned_idx,
+                channel_name,
+                channel_secret_hex,
+                progress_callback=progress_callback,
+                progress_base={
+                    "operation": "enable",
+                    "current": processed,
+                    "total": total_candidates,
+                },
+            )
+        except (MeshCoreError, SerialException, ValueError) as exc:
+            failed += 1
+            message = str(exc)
+            failed_entries.append({
+                "idx": assigned_idx,
+                "desired_idx": desired_idx,
+                "name": channel_name,
+                "channel_identity": identity,
+                "error": message,
+            })
+            warnings.append(f"{channel_name or identity}: {message}")
+            logging.warning(
+                "channel sync failed idx=%s name=%s identity=%s error=%s",
+                assigned_idx,
+                channel_name,
+                identity,
+                message,
+            )
+            if progress_callback is not None:
+                progress_callback({
+                    "operation": "enable",
+                    "status": "failed",
+                    "phase": "set-channel",
+                    "current": processed,
+                    "total": total_candidates,
+                    "channel_idx": assigned_idx,
+                    "channel_name": channel_name,
+                    "message": message,
+                })
+            continue
+        used_idx.add(assigned_idx)
+        existing_by_identity[identity] = written_channel
+        added += 1
+        if desired_idx != assigned_idx:
+            remapped += 1
+        attempts = int(write_meta.get("attempts") or 1)
+        retry_count += max(0, attempts - 1)
+        if bool(write_meta.get("verified_after_empty_response")):
+            verified_after_empty_response += 1
+        applied_entries.append({
+            "idx": assigned_idx,
+            "desired_idx": desired_idx,
+            "name": channel_name,
+            "channel_identity": identity,
+            "source_owner_id": _normalize_owner_id(candidate.get("owner_id")),
+            "remapped": bool(desired_idx != assigned_idx),
+        })
+    channels_dict = _load_channels_in_session(client, max_channels, owner_id=owner_id) if max_channels > 0 else []
+    marked_entries = already_present_entries + applied_entries
+    if mark_access_all_messages:
+        _mark_access_all_message_channel_slots(owner_id, marked_entries)
+    if progress_callback is not None:
+        progress_callback({
+            "operation": "enable",
+            "status": "completed",
+            "phase": "completed",
+            "current": total_candidates,
+            "total": total_candidates,
+            "message": f"added={added} already_present={already_present} failed={failed}",
+        })
+    return channels_dict, {
+        "db_candidates": len(db_candidates),
+        "db_duplicate_sources": int(duplicate_sources),
+        "already_present": int(already_present),
+        "added": int(added),
+        "remapped": int(remapped),
+        "no_free_slots": int(no_free_slots),
+        "failed": int(failed),
+        "retry_count": int(retry_count),
+        "verified_after_empty_response": int(verified_after_empty_response),
+        "marked": len(marked_entries) if mark_access_all_messages else 0,
+        "applied": applied_entries,
+        "already_present_entries": already_present_entries,
+        "failed_entries": failed_entries,
+        "warnings": warnings[:50],
+    }
+
+
 def _sync_meshcorium_channels_to_node_with_standalone_client(
     client: MeshCoreSerialClient,
     *,
