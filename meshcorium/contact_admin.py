@@ -180,6 +180,8 @@ def remove_contacts_with_client(
                 to_remove=to_remove,
                 next_cursor=next_cursor,
                 hard_device_limit=hard_device_limit,
+                mark_cached_contacts_removed_from_node=mark_cached_contacts_removed_from_node,
+                prepare_contacts_snapshot=prepare_contacts_snapshot,
             )
         except Exception as exc:
             last_error = exc
