@@ -14855,7 +14855,7 @@ class MeshcoriumWebHandler(BaseHTTPRequestHandler):
             return {"Cache-Control": "public, max-age=31536000, immutable"}
         if long_lived:
             return {"Cache-Control": "public, max-age=2592000, stale-while-revalidate=86400"}
-        if MeshCoreHandler._is_cacheable_image_content_type(content_type):
+        if MeshcoriumWebHandler._is_cacheable_image_content_type(content_type):
             return {"Cache-Control": "public, max-age=2592000, stale-while-revalidate=86400"}
         return {"Cache-Control": "public, max-age=3600"}
 
