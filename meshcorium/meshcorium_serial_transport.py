@@ -11,6 +11,16 @@ USB_INBOUND_PREFIX = b"<"
 USB_OUTBOUND_PREFIX = b">"
 TRANSPORT_FRAME_TIMEOUT_ERROR = "transport timeout while reading frame"
 
+# Companion framing hard limit, from the reference firmware:
+# MeshCore/src/helpers/BaseSerialInterface.h:5 — `#define MAX_FRAME_SIZE 176
+#   // +4 for transport codes (region scoping)`.
+# The device rejects a payload larger than this on send
+# (ArduinoSerialInterface.cpp:25-28 `if (len > MAX_FRAME_SIZE) return 0;`) and
+# truncates a bogus header length on receive (checkRecvFrame, cpp:59-64).
+# Rejecting here keeps us parity-identical to the device and stops a corrupt
+# length from desynchronizing the stream.
+MAX_FRAME_PAYLOAD_BYTES = 176
+
 
 class SerialFrameError(RuntimeError):
     pass
@@ -117,9 +127,17 @@ class UsbSerialFrameTransport:
     def read_frame(self) -> bytes:
         self.read_prefixed_byte(USB_OUTBOUND_PREFIX)
         length = struct.unpack("<H", self.read_exact(2))[0]
+        if length > MAX_FRAME_PAYLOAD_BYTES:
+            raise self._error(
+                f"transport frame too large: {length} > {MAX_FRAME_PAYLOAD_BYTES}"
+            )
         return self.read_exact(length)
 
     def write_frame(self, payload: bytes) -> None:
+        if len(payload) > MAX_FRAME_PAYLOAD_BYTES:
+            raise self._error(
+                f"transport payload too large: {len(payload)} > {MAX_FRAME_PAYLOAD_BYTES}"
+            )
         header = USB_INBOUND_PREFIX + struct.pack("<H", len(payload))
         self.byte_transport.write(header + payload)
         self.byte_transport.flush()
