@@ -9,6 +9,7 @@ import { useMessagesConversationList } from '../composables/useMessagesConversat
 import { useMessagesReadTracking } from '../composables/useMessagesReadTracking'
 import { useMessagesVirtualChat } from '../composables/useMessagesVirtualChat'
 import { useUpdateCheck } from '../composables/useUpdateCheck'
+import { attachComposerKeyboardReveal, getKeyboardViewportState } from '../lib/keyboardViewport'
 import MessagesChatHistoryPane from '../components/messages/MessagesChatHistoryPane.vue'
 import MessagesSearchPanel from '../components/MessagesSearchPanel.vue'
 import MessagesComposerBar from '../components/messages/MessagesComposerBar.vue'
@@ -137,6 +138,7 @@ const mobileChatOpen = computed(() => {
   )
 })
 const composerTextarea = ref(null)
+let keyboardRevealUnsubscribe = null
 const emojiPickerOpen = ref(false)
 const animatedMessageKeys = ref([])
 const unreadRefreshTimer = ref(null)
@@ -5619,6 +5621,7 @@ onMounted(() => {
   resumePhonebarTick()
   window.addEventListener('pointerdown', handleGlobalPointerDown)
   window.addEventListener('keydown', handleGlobalKeydown)
+  keyboardRevealUnsubscribe = attachComposerKeyboardReveal({ elementGetter: () => composerTextarea.value, state: getKeyboardViewportState() })
   nextTick(() => {
     updateConversationListMetrics()
     ensureConversationRowResizeObserver()
@@ -5635,6 +5638,7 @@ onBeforeUnmount(() => {
   clearNotificationMessageHighlight()
   window.removeEventListener('pointerdown', handleGlobalPointerDown)
   window.removeEventListener('keydown', handleGlobalKeydown)
+  keyboardRevealUnsubscribe?.()
   finishMessagesHydration()
   detachMessageTopPaginationIntentListeners()
   detachMessageBottomPaginationIntentListeners()

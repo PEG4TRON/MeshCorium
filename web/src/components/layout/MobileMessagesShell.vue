@@ -32,7 +32,7 @@ defineProps({
   display: flex;
   flex-direction: column;
   height: 100vh;
-  height: 100dvh;
+  height: calc(100dvh - var(--mc-keyboard-height, 0px));
   width: 100%;
   overflow: hidden;
   background: var(--mc-shell-unified-surface, #16212d);

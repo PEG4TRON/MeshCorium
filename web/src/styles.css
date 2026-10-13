@@ -1,5 +1,7 @@
 :root {
   color-scheme: dark;
+  /* Set by lib/keyboardViewport.js from window.visualViewport shrinkage. */
+  --mc-keyboard-height: 0px;
   --page-bg: #0f1c28;
   --mc-page-backdrop-image:
     radial-gradient(circle at 12% 10%, rgba(50, 138, 221, 0.14), transparent 28%),
@@ -7934,7 +7936,7 @@ button {
 /* Mobile chat fullscreen overlay */
 .mc-mobile-chat-overlay {
   position: fixed;
-  inset: 0;
+  inset: 0 0 var(--mc-keyboard-height, 0px) 0;
   z-index: 200;
   display: flex;
   flex-direction: column;
