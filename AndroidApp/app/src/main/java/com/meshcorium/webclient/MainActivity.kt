@@ -214,21 +214,16 @@ class MainActivity : AppCompatActivity() {
                 WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout(),
             )
             val ime = windowInsets.getInsets(WindowInsetsCompat.Type.ime())
-            val bottom = maxOf(systemBars.bottom, ime.bottom)
-            view.updatePadding(
-                left = systemBars.left,
-                top = systemBars.top,
-                right = systemBars.right,
-                bottom = bottom,  // keyboard pushes the whole page above it
-            )
-            // Bar plus keyboard leaves no room for the chat on a phone, so the native dock is
-            // hidden while typing; the root padding already lifts everything above the keyboard.
             val keyboardOpen = ime.bottom > 0
+
+            // Bar plus keyboard leaves no room for the chat on a phone, so the native dock is
+            // hidden while typing. The root takes the keyboard inset; the dock keeps its own
+            // nav-bar padding, so the inset is never applied twice.
             view.updatePadding(
                 left = systemBars.left,
                 top = systemBars.top,
                 right = systemBars.right,
-                bottom = if (keyboardOpen) ime.bottom else 0,  // the dock owns the nav-bar inset
+                bottom = if (keyboardOpen) ime.bottom else 0,
             )
             binding.nativeBottomNavigation.visibility = if (keyboardOpen) android.view.View.GONE else android.view.View.VISIBLE
             binding.dockBorder.visibility = if (keyboardOpen) android.view.View.GONE else android.view.View.VISIBLE
