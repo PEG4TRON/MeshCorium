@@ -40,6 +40,9 @@ export function createKeyboardViewportState({
   }
 
   function setKeyboardHeight(value) {
+    // Only the Android app can call this, so being called proves the native shell: the page is
+    // already resized by Android, and the value drives only the composer reveal.
+    nativeShell = true
     nativeHeight = Number.isFinite(value) && value > 0 ? value : 0
     publish()
   }
