@@ -90,21 +90,17 @@ describe('keyboardViewport', () => {
     expect(getKeyboardViewportState({ target, viewport: undefined, layoutHeight: 800 })).toBe(state)
   })
 
-  it('in the browser the variable follows the measured shrinkage, not the native report', () => {
+  it('in a plain browser the variable follows the measured shrinkage (no native bridge exists there)', () => {
     const target = fakeTarget()
     const viewport = fakeViewport(450)
     const state = createKeyboardViewportState({ target, viewport, layoutHeight: 800 })
     expect(state.height()).toBe(350)
     expect(target.props['--mc-keyboard-height']).toBe('350px')
 
-    state.setKeyboardHeight(250)
-    expect(state.height()).toBe(250)
-    expect(target.props['--mc-keyboard-height']).toBe('250px')
-
-    state.setKeyboardHeight(0)
+    viewport.height = 800
     viewport.fire('resize')
-    expect(state.height()).toBe(350)
-    expect(target.props['--mc-keyboard-height']).toBe('350px')
+    expect(state.height()).toBe(0)
+    expect(target.props['--mc-keyboard-height']).toBe('0px')
   })
 
   it('in the native shell the variable stays zero so the keyboard is never deducted twice', () => {
@@ -119,14 +115,26 @@ describe('keyboardViewport', () => {
     expect(target.props['--mc-keyboard-height']).toBe('0px')
   })
 
+  it('a native report also proves native shell, so the height is never deducted twice even when detection failed', () => {
+    // Plain browsers never call the bridge, so being called is itself proof of the APK.
+    const target = fakeTarget()
+    const state = createKeyboardViewportState({ target, layoutHeight: 800 })
+    state.setKeyboardHeight(300)
+    expect(target.props['--mc-keyboard-height']).toBe('0px')
+    expect(state.height()).toBe(300)
+  })
+
   it('installs the global the Android app calls, under the name the Kotlin side uses', () => {
     const target = fakeTarget()
     const state = createKeyboardViewportState({ target, layoutHeight: 800 })
     const win = { [NATIVE_KEYBOARD_GLOBAL]: null }
     const cleanup = installNativeKeyboardHeightBridge({ state, targetWindow: win })
     expect(typeof win[NATIVE_KEYBOARD_GLOBAL]).toBe('function')
+    // Only the Android app can call it, so the call itself marks the environment as native:
+    // CSS stays 0 (Android already resized the WebView) and the value drives only the reveal.
     win[NATIVE_KEYBOARD_GLOBAL](300)
-    expect(target.props['--mc-keyboard-height']).toBe('300px')
+    expect(target.props['--mc-keyboard-height']).toBe('0px')
+    expect(state.height()).toBe(300)
     cleanup()
     expect(win[NATIVE_KEYBOARD_GLOBAL]).toBeUndefined()
   })
@@ -140,6 +148,13 @@ describe('keyboardViewport', () => {
     expect(main).toContain('evaluateJavascript')
     expect(main).toContain(NATIVE_KEYBOARD_GLOBAL)
     expect(manifest).toContain('android:windowSoftInputMode="adjustResize"')
+  })
+
+  it('keeps the default interactive-widget so the page is not resized twice by browser and Android', async () => {
+    const fs = await import('node:fs')
+    const html = fs.readFileSync('/opt/meshcorium/.release/dev/web/index.html', 'utf8')
+    // resizes-content would make 100dvh shrink on its own, so subtracting again would deduct twice.
+    expect(html).not.toContain('interactive-widget=resizes-content')
   })
 
   it('drives the mobile shell height from the keyboard variable', async () => {
