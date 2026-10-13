@@ -33,6 +33,7 @@ class MainActivity : AppCompatActivity() {
     private var suppressDockSelectionCallback = false
     private var clientSettingsOpening = false
     private var webPageReady = false
+    private var lastReportedKeyboardHeight = 0
 
     companion object {
         private const val STATE_WEBVIEW = "webview_state"
@@ -212,18 +213,35 @@ class MainActivity : AppCompatActivity() {
             val systemBars = windowInsets.getInsets(
                 WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout(),
             )
+            val ime = windowInsets.getInsets(WindowInsetsCompat.Type.ime())
+            val bottom = maxOf(systemBars.bottom, ime.bottom)
             view.updatePadding(
                 left = systemBars.left,
                 top = systemBars.top,
                 right = systemBars.right,
-                bottom = 0,  // not to root — to dock instead
+                bottom = bottom,  // keyboard pushes the whole page above it
             )
             binding.nativeBottomNavigation.updatePadding(
                 bottom = systemBars.bottom,
             )
+            reportKeyboardHeightToWeb(ime.bottom)
             WindowInsetsCompat.CONSUMED
         }
         ViewCompat.requestApplyInsets(binding.mainRoot)
+    }
+
+    // The page itself is resized here, so the web layer must not subtract the keyboard again;
+    // the value is reported only so the composer can be pulled back into view when focused.
+    // Same global name as web/src/lib/keyboardViewport.js (NATIVE_KEYBOARD_GLOBAL).
+    private fun reportKeyboardHeightToWeb(heightPx: Int) {
+        if (!::binding.isInitialized || !webPageReady) {
+            return
+        }
+        if (lastReportedKeyboardHeight == heightPx) {
+            return
+        }
+        lastReportedKeyboardHeight = heightPx
+        binding.webView.evaluateJavascript("window.__mcKeyboardHeight?.(${heightPx});", null)
     }
 
     private fun openServerEntry(forceEdit: Boolean = false) {
