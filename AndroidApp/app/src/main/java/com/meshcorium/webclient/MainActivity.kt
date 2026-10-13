@@ -221,8 +221,10 @@ class MainActivity : AppCompatActivity() {
                 right = systemBars.right,
                 bottom = bottom,  // keyboard pushes the whole page above it
             )
+            // The dock must not receive the inset twice: when the keyboard is open the root
+            // padding already lifts everything above it, so the dock keeps only its own nav-bar padding.
             binding.nativeBottomNavigation.updatePadding(
-                bottom = systemBars.bottom,
+                bottom = if (ime.bottom > 0) 0 else systemBars.bottom,
             )
             reportKeyboardHeightToWeb(ime.bottom)
             WindowInsetsCompat.CONSUMED
