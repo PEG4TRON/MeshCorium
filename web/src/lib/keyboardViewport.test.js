@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  KEYBOARD_OPEN_CLASS,
   KEYBOARD_OPEN_THRESHOLD_PX,
   NATIVE_KEYBOARD_GLOBAL,
   attachComposerKeyboardReveal,
+  attachKeyboardOpenFlag,
   createKeyboardViewportState,
   getKeyboardViewportState,
   installKeyboardViewportVariable,
@@ -124,6 +126,33 @@ describe('keyboardViewport', () => {
     expect(state.height()).toBe(300)
   })
 
+  it('flags the open keyboard on the document root so the bottom bar can be hidden while typing', () => {
+    const target = fakeTarget()
+    const root = {
+      classList: { list: [], add(name) { this.list.push(name) }, remove(name) { this.list = this.list.filter((n) => n !== name) } },
+    }
+    const state = createKeyboardViewportState({ target, layoutHeight: 800, nativeShell: true })
+    const cleanup = attachKeyboardOpenFlag({ state, rootGetter: () => root })
+    expect(root.classList.list).toEqual([])
+
+    state.setKeyboardHeight(300)
+    expect(root.classList.list).toEqual(['mc-keyboard-open'])
+
+    state.setKeyboardHeight(0)
+    expect(root.classList.list).toEqual([])
+
+    cleanup()
+  })
+
+  it('hides the bottom bar while the keyboard is open', async () => {
+    const fs = await import('node:fs')
+    const css = fs.readFileSync('/opt/meshcorium/.release/dev/web/src/styles.css', 'utf8')
+    expect(css).toContain('.mc-keyboard-open .mc-mobile-dock')
+    expect(css).toContain('display: none')
+    const shell = fs.readFileSync('/opt/meshcorium/.release/dev/web/src/main.js', 'utf8')
+    expect(shell).toContain('attachKeyboardOpenFlag({ state: getKeyboardViewportState() })')
+  })
+
   it('installs the global the Android app calls, under the name the Kotlin side uses', () => {
     const target = fakeTarget()
     const state = createKeyboardViewportState({ target, layoutHeight: 800 })
@@ -148,6 +177,21 @@ describe('keyboardViewport', () => {
     expect(main).toContain('evaluateJavascript')
     expect(main).toContain(NATIVE_KEYBOARD_GLOBAL)
     expect(manifest).toContain('android:windowSoftInputMode="adjustResize"')
+    // the native dock must disappear while typing, otherwise there is no room for the chat
+    expect(main).toContain('View.GONE')
+    expect(main).toContain('nativeBottomNavigation')
+    // the hairline above the dock must disappear with it
+    expect(main).toContain('dockBorder')
+    // the dock owns the nav-bar inset (as before); the root gets only the keyboard inset,
+    // otherwise the nav-bar padding is applied twice
+    expect(main).toContain('bottom = if (keyboardOpen) ime.bottom else 0')
+    expect(main).toContain('bottom = systemBars.bottom')
+    // deterministic hide: a vertical LinearLayout removes a GONE view from the chain, so the
+    // WebView gets the whole remaining space (in ConstraintLayout the point position is ambiguous)
+    const layout = fs.readFileSync('/opt/meshcorium/.release/dev/AndroidApp/app/src/main/res/layout/activity_main.xml', 'utf8')
+    expect(layout).toContain('<LinearLayout')
+    expect(layout).toContain('android:orientation="vertical"')
+    expect(layout).toContain('android:layout_weight="1"')
   })
 
   it('keeps the default interactive-widget so the page is not resized twice by browser and Android', async () => {
@@ -169,8 +213,9 @@ describe('keyboardViewport', () => {
     const fs = await import('node:fs')
     const main = fs.readFileSync('/opt/meshcorium/.release/dev/web/src/main.js', 'utf8')
     const view = fs.readFileSync('/opt/meshcorium/.release/dev/web/src/views/MessagesView.vue', 'utf8')
-    expect(main).toContain('import { getKeyboardViewportState, installNativeKeyboardHeightBridge } from \'./lib/keyboardViewport\'')
+    expect(main).toContain('import { getKeyboardViewportState, installNativeKeyboardHeightBridge, attachKeyboardOpenFlag } from \'./lib/keyboardViewport\'')
     expect(main).toContain('getKeyboardViewportState()')
+    expect(main).toContain('attachKeyboardOpenFlag({ state: getKeyboardViewportState() })')
     expect(main).toContain('installNativeKeyboardHeightBridge({ state: getKeyboardViewportState() })')
     expect(view).toContain('attachComposerKeyboardReveal({ elementGetter: () => composerTextarea.value, state: getKeyboardViewportState() })')
     expect(view).toContain('keyboardRevealUnsubscribe?.()')

@@ -6,7 +6,7 @@ import AppRoot from './AppRoot.vue'
 import { router } from './app/router'
 import { i18n } from './i18n'
 import { logFrontendDiagnostic } from './lib/frontendDiagnostics'
-import { getKeyboardViewportState, installNativeKeyboardHeightBridge } from './lib/keyboardViewport'
+import { getKeyboardViewportState, installNativeKeyboardHeightBridge, attachKeyboardOpenFlag } from './lib/keyboardViewport'
 import { floatingVueOptions } from './plugins/floatingVue'
 import 'floating-vue/dist/style.css'
 import './styles.css'
@@ -88,6 +88,7 @@ installNativeActionBridge(router)
 // when the on-screen keyboard appears. The Android app reports the IME inset through the
 // same state because its WebView is edge-to-edge and the viewport never shrinks there.
 installNativeKeyboardHeightBridge({ state: getKeyboardViewportState() })
+attachKeyboardOpenFlag({ state: getKeyboardViewportState() })
 
 import { sendNativeDockState } from './lib/nativeShell'
 

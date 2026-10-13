@@ -14,6 +14,10 @@ export const KEYBOARD_OPEN_THRESHOLD_PX = 150
 // Global name the Android app calls; renaming it requires the same change in MainActivity.kt.
 export const NATIVE_KEYBOARD_GLOBAL = '__mcKeyboardHeight'
 
+// Class put on the document root while the keyboard is open, so the bottom bar can be hidden —
+// otherwise there is no room left for the chat on a phone screen.
+export const KEYBOARD_OPEN_CLASS = 'mc-keyboard-open'
+
 export function keyboardHeightPx(viewport, layoutHeight) {
   if (!viewport) return 0
   const shrink = layoutHeight - viewport.height
@@ -110,6 +114,27 @@ export function getKeyboardViewportState({
     })
   }
   return state
+}
+
+// Marks the document root while the keyboard is open so the bottom bar can be hidden.
+export function attachKeyboardOpenFlag({
+  state,
+  rootGetter = () => (typeof document !== 'undefined' ? document.documentElement : null),
+}) {
+  const apply = (height) => {
+    const root = rootGetter()
+    if (!root?.classList) return
+    if (height) root.classList.add(KEYBOARD_OPEN_CLASS)
+    else root.classList.remove(KEYBOARD_OPEN_CLASS)
+  }
+
+  const unsubscribe = state.subscribe(apply)
+  apply(state.height())
+
+  return () => {
+    unsubscribe()
+    rootGetter()?.classList?.remove(KEYBOARD_OPEN_CLASS)
+  }
 }
 
 export function revealElementInView(element, keyboardHeight) {

@@ -8004,6 +8004,12 @@ button {
   border-top: 1px solid rgba(255,255,255,0.06);
 }
 
+/* Bottom bar is hidden while the on-screen keyboard is open — bar plus keyboard leaves no room
+   for the chat on a phone. The flag is set by lib/keyboardViewport.js on the document root. */
+html.mc-keyboard-open .mc-mobile-dock {
+  display: none !important;
+}
+
 /* Mobile contacts fullscreen page */
 .mc-mobile-contacts-page {
   flex: 1;
